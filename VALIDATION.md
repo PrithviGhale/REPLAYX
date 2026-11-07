@@ -22,6 +22,14 @@ Same laptop as below (Iris Xe drives the 2560×1600 @ 240 Hz panel; RTX 4070 Lap
 
 Rust: 79 tests (library ids/traversal/delete/in-use/index, game classification and attribution, concat list, audio timeline, geometry, encoders). Frontend: 8 tests (save events, library filters, delete/selection, category moves). Clippy `-D warnings`, rustfmt and TypeScript clean.
 
+## Build artifacts
+
+Built November 7, 18:13 local from commit `4a9d54e`:
+- `src-tauri/target/release/replayx.exe`, 14,612,480 bytes, SHA-256 `4D36039722C4D35072556D644E20BC64CCDB70940401A9D1879CEDCDFEDAD228`
+- `src-tauri/target/release/bundle/nsis/REPLAYX_0.2.1-alpha.1_x64-setup.exe`, 59,627,334 bytes, SHA-256 `5A16E45E41EC806C62B65298DA36AC5A90E2C391D75B784C7AB6CA1D93179363`
+
+Both report FileVersion/ProductVersion 0.2.1-alpha.1. The installer was produced in the same build from this executable with media staged by `prepare-bundle.ps1`; its compressed payload was not extracted for independent inspection (no extractor installed). It has **not** been installed.
+
 ## Not verified
 
 Real gameplay detection (Fortnite/Roblox/Valorant in the foreground), 15-minute soak (not authorized this session), in-game FPS impact, audio with real devices after these changes (only synthetic tones; the audio timeline code was not modified and its tests pass), a 60 s real-desktop recording, installer install/upgrade, stretched Valorant.
