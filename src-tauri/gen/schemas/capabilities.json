@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Local recorder window; no generic filesystem or shell access","local":true,"windows":["main"],"permissions":["core:default"]}}

@@ -1,0 +1,121 @@
+# Audio repair validation — 0.1.3-alpha.1 (November 7, 2026)
+
+**Reported defect:** recorded audio sounded crackly/distorted. Clips open in the default Windows player (there is no in-app player), so "preview" and "independent playback" use the same file; the defect was measured in the file and in the raw producer PCM before FFmpeg.
+
+**Root cause (measured, not assumed):** `audio.rs` re-placed every 10ms WASAPI packet by its QPC timestamp (truncated to whole frames) on a wall-clock timeline. Timestamp jitter of a few frames made it insert zero frames or drop samples at almost every packet boundary. Format handling was correct (48kHz stereo f32 via AUTOCONVERTPCM; bytes decoded as f32, not integers); no clipping, channel, AAC, concat or player cause was found for the crackle.
+
+Evidence (analysis scripts: `scripts/audio-tone.py`, `scripts/audio-clicks.py`; a single inserted/dropped frame shifts tone phase by 7.5°/11.25°):
+
+| Measurement | Before fix | After fix |
+| --- | --- | --- |
+| Earlier raw producer WAV (`audio-test-system-20261106-235750-24267021`, real content) | 165 isolated zero-frame insertions in 10s; 163 exactly 1 frame long, all at the same phase of the 480-frame packet grid; ~12 click events/s | — |
+| User's own GUI buffer segment (real content, AAC) | ~15.6 click events per active second | — |
+| Real FxSound/system loopback, known L=1kHz/R=1.5kHz tone at −20dBFS, clean 0–6s window (`audio-test-system-20261107-122248-df9cebc9` vs `…-123903-7a97c35e`) | **570/572** phase discontinuities, THD+N −7.5dB, crosstalk −25dB, amplitude 0.0929 | **0/0** discontinuities, 1 click event (stream onset), crosstalk −57/−52dB, amplitude 0.09998. Residual (other PC audio playing) is broadband; tone harmonics −75 to −95dB |
+| Isolated per-process loopback, same tone (`audio-test-application-20261107-124053-5fecbe13`, exact f32 producer output) | — | 0 discontinuities, 0 clicks, THD+N −75.9/−77.3dB (source WAV: −75.8/−77.3dB, its 16-bit floor), crosstalk −127dB |
+| End-to-end NVENC + AAC + segments + two concurrent saves, app tone (`capture-test-20261107-124121` debug; `capture-test-20261107-130017` release, 1920x1080 stretch) | — | Both tracks of both clips: 0 discontinuities, 0 clicks, THD+N about −62dB (AAC 192k), amplitude 0.09995 |
+| Same, system loopback, release (`capture-test-20261107-130309`) | — | 0 reported discontinuities, 0 zero insertions. Two click-detector events coincide with other PC audio; residual there matches arbitrary instants (no local anomaly) |
+
+**Second defect found and fixed:** clips containing a session's first segment had a 21ms audio *and* video timestamp hole at the 2s seam (segment 0 starts at 0.021s after AAC priming; the concat demuxer re-bases by it, but the declared duration did not). After the fix, release clips containing segment 0 show no packet gap >1.5ms (previously one 21ms gap). Decoded PCM was contiguous either way; players that honour timestamps could show a dropout/held frame.
+
+**Regression tests:** 12 new (11 audio timeline/resampler, 1 concat). A mutation check restoring per-packet re-placement makes `jittered_timestamps_do_not_insert_or_drop_samples` fail. Simulations cover ±20-frame timestamp jitter, ±300ppm clock drift over 120s, channel isolation, idle-loopback gaps, a 150ms capture stall, an 80ms backward timestamp jump, 120ms device delivery latency and missing/implausible timestamps.
+
+**Full check:** `scripts/check.ps1` exit 0 — 45 passed, 0 failed/ignored; rustfmt; Clippy `-D warnings`; TypeScript/Vite; npm audit 0 vulnerabilities.
+
+**Endpoint formats on this PC** (`replayx-cli device-formats`, no stream opened): FxSound Speakers (user's selected source), Voicemod Dummy Output, Realtek Speakers and Voicemod Microphone are 48kHz 2ch float, mask 0x3. Realtek Microphone Array is **4ch float, channel mask 0x0**; its stereo conversion is untested. The BlackShark headset from November 6 was not connected.
+
+**Not verified:** a human listening test (see procedure in KNOWN_LIMITATIONS.md); microphone speech; Discord/game app isolation in real use; long sessions with real clock drift (measured device drift here was about +5 to +9ppm over 10–20s); editor import. A direct FFmpeg AAC 192k encode of the synthetic tone WAV (without REPLAYX) showed 16 phase steps and −39.6dB THD+N on one channel; REPLAYX clips did not show this, but the native AAC encoder's behaviour on real content has not been characterised.
+
+**Artifacts (built November 7, 13:16 local, from the source above):** `src-tauri/target/release/replayx.exe` 13,978,624 bytes, SHA-256 `B471E25D41917D953C3B71DBC921604637775341AEED5C83006E4DFA4D5DC265`; installer `src-tauri/target/release/bundle/nsis/REPLAYX_0.1.3-alpha.1_x64-setup.exe` 59,333,476 bytes, SHA-256 `9FE2538058D05F27639C643B25331DD8E77D2CD7EC11B3822F31985B4B11DAC2`. Both embed FileVersion/ProductVersion 0.1.3-alpha.1. Bundle resources were staged by `prepare-bundle.ps1` from the checksum-pinned runtime. The installer has **not** been installed, launched or used to record; no REPLAYX installation was present. The older `REPLAYX_0.1.2-alpha.1_x64-setup.exe` (59,363,198 bytes, November 7 09:54) and 0.1.0 installers remain on disk and contain the crackle defect.
+
+Video note from these runs: release CLI at 2560x1600 → 1920x1080 with the CPU scaling fallback dropped 40/826 and 25/814 frames at 30fps; GPU scaling probe still fails. Not an audio issue; not a gameplay benchmark.
+
+---
+
+# Current repair validation — 0.1.2-alpha.1 (November 7, 2026)
+
+- Replaced the Defender-quarantined master snapshot (Trojan:Win32/Wacatac.C!ml) with BtbN LGPL stable-branch build `n9.0.2-47-gb204e94e90-20261106`. Archive SHA-256: `858225c38c2a86d2407ac9239d5af85f5b7ca721f0886084fb6ee111539c8208`. Official FFmpeg download page lists BtbN: https://ffmpeg.org/download.html .
+- Windows Defender custom scan of the extracted replacement reported **no threats**, signature 1.463.169.0, real-time protection enabled. No exclusions, protection changes or quarantine restore. Scan log: `tools/ffmpeg-stable-defender-scan.log`. Both replacement executables launched successfully.
+- Corrected a real DPI bug: DXGI initially reported 2048 x 1280 for a 2560 x 1600 mode. Querying in a scoped per-monitor-aware thread now reports full physical dimensions. Microsoft documents DPI virtualization in https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgioutput-getdesc .
+- Real desktop test after correction: `test-output/capture-test-20261107-093814/report.json`. Full 2560 x 1600 source, 1920 x 1080 H.264/NVENC output, CPU scaling fallback, 10.047s saved clips, two audio tracks, 1,396 WASAPI packets, zero queue gaps, zero reported frame drops, 29.72 reported FPS. Two overlapping saves passed full decode verification. Decoded audio RMS 0.05415; monotonic video/audio timestamps; decoded frame visually inspected. This is desktop capture, **not fullscreen Valorant validation**; source content can itself contain letterboxing.
+- The first successful real run (`capture-test-20261107-093404`) preceded the DPI correction and reported 11 drops; it is not evidence of correct full-source geometry. Initial restricted execution denied Desktop Duplication; the explicitly scoped test outside the sandbox succeeded.
+- Synthetic media test `self-test-20261107-093454`: 3 tracks, 100.997/89.317 dB track separation, 9 pulse/flash events within 10ms, monotonic timestamps. Physical microphone/app isolation and editor compatibility remain unverified.
+- Defaults now use Ctrl+Shift+F10/F9/M/F8. The complete legacy default set migrates; custom shortcuts remain. One unavailable shortcut no longer unregisters the others.
+- Automated regression suite: **33 passed**, zero failed/ignored; includes DPI-context restoration, legacy shortcut migration and distinct shortcut parsing. Frontend production build, rustfmt and Clippy with warnings as errors passed. The complete check ran outside the sandbox after npm failed internally in the restricted cache. The retired development runtime cache/archive was removed. Installer and final native UI observations are recorded below once completed. Public release, gameplay/stretch-driver qualification, long-session sync and installer upgrade/uninstall qualification remain outside these repair results.
+
+---
+
+# Historical validation — 0.1.1-alpha.1
+November 6–7, 2026. This is an alpha hardening build, not a verified Windows beta or production release. Nothing was pushed or publicly released.
+
+## Current source checks
+
+- Final `scripts/check.ps1` run on 0.1.1-alpha.1: **30 passed**, zero failures; rustfmt, TypeScript/Vite and Clippy all passed. npm ci reported zero known audit vulnerabilities at that time.
+- TypeScript/Vite production build: passed.
+- Clippy, all targets and desktop features with warnings as errors: passed after fixing lint findings.
+- Coverage includes source bounds/overflow, stretched canvases, negative monitor origins, mode versus identity changes, rotated-display rejection, settings migration, storage/progress policies, missing-runtime error state, shortcut-warning persistence, snapshot concurrency/rollback, instance locking and Windows job child termination.
+- The retention test rotates 1,800 filesystem segments with one hour of nominal timestamps and overlapping snapshots. It is **not** a real-time capture soak.
+- The updated native UI and capture paths have not been visually/runtime verified. Compilation does not establish hardware behavior.
+
+## Current blocker
+
+Launching the bundled FFmpeg returned: “Operation did not complete successfully because the file contains a virus or potentially unwanted software.” No protection was disabled and no alternate copy was executed to evade the block. Fresh video/NVENC capture, encoded multitrack media self-tests, FFmpeg decode verification and installed recording tests remain blocked pending resolution of the runtime's security/provenance issue. A Defender history query did not provide the detection classification. WMI hardware queries returned Access denied.
+
+## Earlier alpha evidence — not current-version retests
+
+| Test | Observed result | Limit |
+| --- | --- | --- |
+| Real desktop + NVENC + audible WASAPI output | `capture-test-20261106-144915`: 8.136s MKV, 768 x 480 H.264, 2 tracks, 992 packets, nonzero peak, overlapping saves verified | Short desktop session with CPU scaling; no gameplay |
+| Microphone attempt | `capture-test-20261106-145242`: 819 packets, 2 tracks, peak zero | Intelligible speech **not verified** |
+| Synthetic multitrack | `self-test-20261106-145146/media-verification.json`: 3 tracks, 90.29/96.68 dB isolation, 9 pulse/flash events within 10ms | Does not verify real-device synchronization or editor playback |
+| Native alpha UI | Launched and enabled replay before user stopped UI testing | Current changes not retested |
+| GPU scaling | D3D11 texture error `80070057`; CPU scaling/NVENC fallback worked | GPU scaling success unverified |
+| User's recording report | User says a recorded video works | Resolution, tracks and stretched behavior unspecified |
+
+## Required physical matrix
+
+The user confirmed **Valorant fullscreen**; NVIDIA scaling location remains unknown. Inspect decoded saved files with recognizable game/HUD edges and audio/visual cues.
+
+| Scenario | Acceptance evidence | Status |
+| --- | --- | --- |
+| Fullscreen 1280 x 960 and 1440 x 1080 via Windows Display Settings | 1920 x 1080, square pixels, full stretched game, no adjacent desktop, correct edges | Pending |
+| Both modes via NVIDIA Full-screen scaling on GPU | Same visible appearance; record actual GPU/CPU scaling path | Pending |
+| Both modes via NVIDIA Full-screen scaling on display | Same checks; record driver-reported source dimensions | Pending |
+| Native → 4:3 → native while recording/replaying | Recovering state, same-display bounded restart, fresh replay and separate verified recording parts | Pending |
+| Alt-Tab, minimize, monitor reconnect, sleep/resume | No false healthy state or unintended display; preserved usable footage | Pending |
+| Audible system output + spoken microphone | Audible mix and isolated sources; start/middle/end sync | Pending |
+| Independent game + Discord + microphone | Separate tracks without system duplication; process restart handled visibly | Pending |
+| Default-device change, selected device unplug/replug, permission denial | Explicit error/stop where needed; successful refresh/reselection/restart | Pending |
+| MKV in installed video editor | Record editor/version; all tracks selectable, isolated and synchronized; MP4 remux separately checked | Pending |
+| 30-minute replay with overlapping saves | Stable memory/disk budget and valid saves; continuous progress | Pending |
+| Bounded test-volume exhaustion, encoder termination, app crash | Timely error, no hidden encoder, retained segments recover/decode | Pending |
+| Clean-profile installed app, upgrade and uninstall | Correct resources/paths, launch and real replay/audio save | Pending |
+
+Use a disposable bounded volume for full-disk tests, not the system drive. Unit policy tests do not prove physical filesystem failure handling.
+
+## Installer evidence
+
+Verified present: `src-tauri\target\release\bundle\nsis\REPLAYX_0.1.0_x64-setup.exe`, **63,247,309 bytes**, written November 6 at 14:55 local time.
+
+SHA-256: `792a1e469dcce7b520462dd210e8285aeeb07e765683083da16d2c07cfe87e49`.
+
+This is the **previous 0.1.0 installer**, not the current changes. Installation, installed launch/recording and uninstall/upgrade are unverified. No new installer was generated while the media runtime was blocked. Bundle preparation now checks both media executables before copying and includes privacy/license/validation documents. Corresponding-source/license review and signing remain distribution gates; see THIRD_PARTY_NOTICES.md.
+
+## Hardware enumeration (current code)
+
+Native DXGI enumeration succeeded without launching FFmpeg: DISPLAY1 reported an active and desktop mode of **1440 x 1080 at 250 Hz**, origin 0,0, unrotated. WASAPI enumeration found BlackShark V3 X, Voicemod and Realtek outputs, plus Voicemod and BlackShark V3 X microphones. These confirm enumeration/geometry reads, not successful capture. JSON evidence is in `test-output/validation-0.1.1-alpha.1/displays.json` and `devices.json`.
+
+## Final source-check result
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` completed successfully after the final cleanup regression: 30 tests passed in 1.50s, zero failed/ignored, rustfmt passed, TypeScript/Vite passed, Clippy with warnings as errors passed. npm ci audited 74 installed packages and reported zero known vulnerabilities. A prior concurrent npm reinstall hit a loaded Tauri CLI file lock; after the release build exited, the complete reinstall/check succeeded. No elevated install or security bypass was used.
+
+## Current real WASAPI audio checks
+
+The existing WASAPI producer was exercised directly, without launching FFmpeg, using the new `audio-test` CLI diagnostic and independently checked PCM16 WAV headers/duration.
+
+- BlackShark V3 X system output: **10 seconds**, 1,003 real packets, zero queue overruns, peak 0.98675 and RMS 0.19033. Strong nonzero real output captured. Evidence: `test-output/audio-test-system-20261106-235750-24267021/report.json` and `capture.wav`.
+- BlackShark V3 X microphone: **10 seconds**, 1,004 real packets, zero queue overruns, peak 0.000915 and RMS 0.0000442. Device capture succeeded, but this is near-silent and does not establish intelligible speech. Evidence: `test-output/audio-test-microphone-20261106-235822-6d3cd6bd/report.json` and `capture.wav`. The initial sandboxed microphone call returned Access denied; the scoped diagnostic outside the sandbox succeeded. Windows security protections were unchanged.
+- These were separately captured WAVs, not a multitrack MKV. Physical A/V sync, game/Discord isolation, editor playback and device unplug/recovery remain unverified.
+
+## Updated application executable
+
+The optimized 0.1.1-alpha.1 application built successfully with `npm run tauri -- build --no-bundle`. Path: `src-tauri/target/release/replayx.exe`; size: 13972992 bytes; SHA-256: `2287394decb5ec33d39300016150a9467fd3a664a61ff9e9295a7d80c726e144`. Native launch and video recording of this new build are unverified. The NSIS installer remains the older artifact described above. No recording process was started by the release build.

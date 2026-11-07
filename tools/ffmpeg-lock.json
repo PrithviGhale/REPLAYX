@@ -1,0 +1,8 @@
+{
+  "name": "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip",
+  "browser_download_url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip",
+  "digest": "sha256:858225c38c2a86d2407ac9239d5af85f5b7ca721f0886084fb6ee111539c8208",
+  "size": 76624610,
+  "runtime_dir": "ffmpeg-stable/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin",
+  "archive": "ffmpeg-stable.zip"
+}

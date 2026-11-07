@@ -1,0 +1,23 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+tools/ffmpeg/
+tools/ffmpeg-stable/
+tools/ffmpeg-release-current.json
+tools/ffmpeg-stable-candidate.json
+src-tauri/media/
+tools/*.zip
+tools/ffmpeg-release.json
+test-output/
+*.key
+*.key.pub
+*.log
+.env*
+!.env.example
+__pycache__/
+*.pdb
+.vscode/*
+!.vscode/extensions.json
+# Keep the reviewed Defender scan record of the pinned runtime.
+!tools/ffmpeg-stable-defender-scan.log

@@ -1,0 +1,13 @@
+# Performance evidence and pending benchmark
+
+0.1.3-alpha.1 observations (release CLI, desktop not gameplay, 2560x1600 @ 240Hz source, NVENC, CPU scaling fallback because the GPU scaling probe fails, 1920x1080 stretch at 30fps): 40 of 826 and 25 of 814 frames dropped in two 20-second runs (about 3-5%). The new audio resampler costs about 3 million multiply-adds per second per source (32 taps x 2 channels x 48kHz). That figure is arithmetic, not a measurement; CPU, GPU and game-FPS impact remain unmeasured.
+
+Current-version gameplay performance is unmeasured because Windows blocked the media runtime. Earlier CLI CPU/memory values of zero were uninstrumented fields, not zero overhead.
+
+The earlier real desktop report `test-output/capture-test-20261106-144915/report.json` measured NVENC with CPU scaling at 768 x 480: 29.65 reported FPS, 287 encoded frames, 9 output-synchronization drops, no WASAPI queue gaps. A concurrent saved replay was 8.136 seconds and 1,572,193 bytes. Retained buffer size at stop was 2,669,639 bytes over 10.821 seconds. This is not a 1080p gameplay benchmark.
+
+The GUI now totals all recorder descendants, including nested WebView processes. CPU is normalized to logical-machine capacity; summed working memory may count shared pages multiple times. Frame/segment age measures liveness, not encoding latency. FFmpeg's drop counter does not cover every missed game-presented frame. The buffer write metric is retained bytes divided by retained seconds, not a disk I/O counter. GPU utilization and per-frame encode latency are unavailable.
+
+For qualification, run identical fullscreen game scenes with recording off/on, at 1080p30/60 and both 1280 x 960 and 1440 x 1080 source modes. Record GPU/driver, Windows build, game version, refresh rate, NVIDIA scaling mode and actual scaler/encoder. Over 30 minutes collect CPU, memory, GPU encode/3D utilization, disk bytes, game frame-time traces, encoded FPS and drop counters. Save overlapping replays at minutes 1, 10 and 25; compare game average/1% low FPS and memory growth after warmup. Check physical audio/visual synchronization at start, middle and end.
+
+At 12 Mbps, video alone is approximately 90 MB/minute, before AAC/container overhead. Hard-link snapshots pin bytes beyond the active ring budget until saves finish; filesystems without hard links copy them. Every segment is probed before concat and the output is fully decoded. That verification can compete with recording, especially for long/concurrent saves. Profile this workload before optimizing away checks. No current real soak or measured performance improvement is claimed.
