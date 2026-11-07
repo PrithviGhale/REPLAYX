@@ -1,8 +1,13 @@
 {
-  "name": "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip",
-  "browser_download_url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip",
-  "digest": "sha256:858225c38c2a86d2407ac9239d5af85f5b7ca721f0886084fb6ee111539c8208",
-  "size": 76624610,
-  "runtime_dir": "ffmpeg-stable/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin",
-  "archive": "ffmpeg-stable.zip"
+  "name": "ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0.zip",
+  "browser_download_url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-06-12-50/ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0.zip",
+  "release_tag": "autobuild-2026-11-06-12-50",
+  "ffmpeg_version": "n9.0.2-47-gb204e94e90",
+  "license": "LGPL-3.0-or-later (built with --enable-version3; no --enable-gpl or --enable-nonfree; confirmed by ffmpeg -L)",
+  "source": "https://github.com/FFmpeg/FFmpeg/tree/b204e94e90 ; build scripts https://github.com/FFmpeg-Builds/FFmpeg-Builds",
+  "digest": "sha256:8e83cbb02c058677319058cdbd05dfb1871bf263af4f9e8fb104199378fe78ee",
+  "size": 76633178,
+  "archive": "ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0.zip",
+  "runtime_dir": "ffmpeg-stable/ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0/bin",
+  "reviewed": "2026-11-07: digest matches GitHub release metadata; all 224 files byte-identical to the previously validated runtime (former floating 'latest' asset sha256:858225c3...); Microsoft Defender custom scan found no threats (signatures 1.463.176.0, real-time protection on)."
 }
