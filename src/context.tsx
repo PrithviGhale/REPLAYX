@@ -1,0 +1,88 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { api, errorText, native, previewSettings, type Caps, type Clip, type Settings } from './api';
+import { refreshNow } from './store';
+
+type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string };
+type Ctx = {
+  saved: Settings; draft: Settings; dirty: boolean; loaded: boolean;
+  patch: (p: Partial<Settings>) => void; save: () => Promise<boolean>; discard: () => void;
+  /** Volume/mute apply immediately (even while capturing) and persist in the engine. */
+  setMix: (index: number, volume: number, muted: boolean) => Promise<void>;
+  caps: Caps | null; refreshCaps: () => Promise<void>;
+  clips: Clip[]; refreshClips: () => Promise<void>;
+  busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string) => Promise<T | undefined>;
+  toast: (kind: Toast['kind'], text: string) => void; toasts: Toast[]; dismiss: (id: number) => void;
+};
+const AppContext = createContext<Ctx | null>(null);
+
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [saved, setSaved] = useState<Settings>(previewSettings);
+  const [draft, setDraft] = useState<Settings>(previewSettings);
+  const [loaded, setLoaded] = useState(!native);
+  const [caps, setCaps] = useState<Caps | null>(null);
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextId = useRef(1);
+
+  const dismiss = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), []);
+  const toast = useCallback((kind: Toast['kind'], text: string) => {
+    const id = nextId.current++;
+    setToasts(t => [...t.slice(-3), { id, kind, text }]);
+    if (kind !== 'error') window.setTimeout(() => dismiss(id), 5000);
+  }, [dismiss]);
+
+  const refreshCaps = useCallback(async () => { if (native) setCaps(await api.capabilities()); }, []);
+  const refreshClips = useCallback(async () => { if (native) setClips(await api.clips()); }, []);
+
+  useEffect(() => {
+    if (!native) return;
+    api.settings().then(s => { setSaved(s); setDraft(s); setLoaded(true); }).catch(e => toast('error', errorText(e)));
+    refreshCaps().catch(e => toast('error', errorText(e)));
+    refreshClips().catch(e => toast('error', errorText(e)));
+  }, [refreshCaps, refreshClips, toast]);
+
+  const run = useCallback(async <T,>(label: string, work: () => Promise<T>, success?: string) => {
+    setBusy(label);
+    try {
+      const result = await work();
+      if (success) toast('success', success);
+      return result;
+    } catch (e) {
+      toast('error', errorText(e));
+      return undefined;
+    } finally {
+      setBusy(null);
+      refreshNow();
+    }
+  }, [toast]);
+
+  const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(draft), [saved, draft]);
+  const patch = useCallback((p: Partial<Settings>) => setDraft(d => ({ ...d, ...p })), []);
+  const discard = useCallback(() => setDraft(saved), [saved]);
+  const save = useCallback(async () => {
+    const ok = await run('Saving settings', async () => { await api.saveSettings(draft); return true; }, 'Settings saved.');
+    if (ok) {
+      // Re-read so the UI reflects exactly what the engine stored.
+      const fresh = await api.settings().catch(() => draft);
+      setSaved(fresh); setDraft(fresh);
+      await refreshClips().catch(() => undefined);
+    }
+    return !!ok;
+  }, [draft, run, refreshClips]);
+
+  const setMix = useCallback(async (index: number, volume: number, muted: boolean) => {
+    const apply = (s: Settings) => ({ ...s, audio: s.audio.map((a, i) => (i === index ? { ...a, volume, muted } : a)) });
+    setSaved(apply); setDraft(apply);
+    if (native) await api.setMix(index, volume, muted).catch(e => toast('error', errorText(e)));
+  }, [toast]);
+
+  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, busy, run, toast, toasts, dismiss };
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp() {
+  const c = useContext(AppContext);
+  if (!c) throw new Error('AppProvider missing');
+  return c;
+}

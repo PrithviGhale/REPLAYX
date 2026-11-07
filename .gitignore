@@ -21,3 +21,5 @@ __pycache__/
 !.vscode/extensions.json
 # Keep the reviewed Defender scan record of the pinned runtime.
 !tools/ffmpeg-stable-defender-scan.log
+dist-preview/
+dev/screens/

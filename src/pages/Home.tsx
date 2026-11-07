@@ -1,0 +1,148 @@
+import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, RotateCcw, Save, Square } from 'lucide-react';
+import { native } from '../api';
+import { useApp } from '../context';
+import { useCapture } from '../capture';
+import { activeOf, useStatus } from '../store';
+import { bytes, canvasWidth, duration, encoderName, plan, sourceRect } from '../format';
+import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
+import { SourceIcon, Section, Thumb, clipKind, feedIndex } from './shared';
+import type { Page } from '../App';
+
+function ReplayRing({ value, total, live }: { value: number; total: number; live: boolean }) {
+  const r = 70, c = 2 * Math.PI * r, f = total > 0 ? Math.min(1, value / total) : 0;
+  return (
+    <div className={`ring ${live ? 'live' : ''}`}>
+      <svg viewBox="0 0 160 160" aria-hidden="true">
+        <circle cx="80" cy="80" r={r} className="ring-track" />
+        <circle cx="80" cy="80" r={r} className="ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - f)} />
+      </svg>
+      <div className="ring-center">
+        <strong>{duration(value)}</strong>
+        <span>of {duration(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function Health() {
+  const s = useStatus(x => ({
+    active: x.replay || x.recording, state: x.state, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, dropped: x.dropped_frames,
+    frames: x.frames, disc: x.audio_discontinuities.reduce((a, b) => a + b, 0), audio: x.audio_written_bytes.length, free: x.free_bytes,
+  }));
+  if (!s.active) return <p className="muted small">Health checks run while capture is on.</p>;
+  const dropPct = s.frames > 0 ? (100 * s.dropped) / (s.frames + s.dropped) : 0;
+  const rows: [string, string, 'ok' | 'warn' | 'bad'][] = [
+    ['Video frames', s.frameAge < 1500 ? 'Arriving' : `None for ${(s.frameAge / 1000).toFixed(1)} s`, s.frameAge < 1500 ? 'ok' : s.frameAge < 4000 ? 'warn' : 'bad'],
+    ['Footage written', s.state === 'Starting' ? 'Waiting for first segment' : `${(s.segAge / 1000).toFixed(1)} s ago`, s.segAge < 3500 ? 'ok' : s.segAge < 6000 ? 'warn' : 'bad'],
+    ['Dropped frames', `${s.dropped} (${dropPct.toFixed(2)}%)`, dropPct < 0.5 ? 'ok' : dropPct < 3 ? 'warn' : 'bad'],
+    ['Audio continuity', s.audio ? (s.disc ? `${s.disc} discontinuities` : 'Continuous') : 'No audio sources', s.disc ? 'warn' : 'ok'],
+    ['Disk space', bytes(s.free), s.free > 10 * 1024 ** 3 ? 'ok' : s.free > 1024 ** 3 ? 'warn' : 'bad'],
+  ];
+  return (
+    <ul className="health">
+      {rows.map(([k, v, t]) => <li key={k} className={t}><i />{k}<span>{v}</span></li>)}
+    </ul>
+  );
+}
+
+export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
+  const { draft, caps, clips } = useApp();
+  const { go, busy, saved } = useCapture();
+  const { toast } = useApp();
+  const s = useStatus(x => ({
+    replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
+    elapsed: x.elapsed, fps: x.fps, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
+    free: x.free_bytes, error: x.error, notice: x.notice, hotkey: x.hotkey_error, recovery: x.recovery_sessions,
+  }));
+  const peaks = useStatus(x => x.audio_peaks);
+  const active = useStatus(activeOf);
+  const display = caps?.displays.find(d => d.index === draft.display);
+  const p = plan(sourceRect(display, draft.source_rect), draft.height, draft.canvas_mode);
+  const out = active && s.ow ? `${s.ow} × ${s.oh}` : canvasWidth(draft.height) ? `${p.width} × ${p.height}` : `${draft.height}p`;
+  const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
+  const headline = s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Starting' ? 'Starting capture…' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
+  const sub = s.recording ? `${duration(s.elapsed)} recorded. Replay keeps buffering alongside.`
+    : s.replay ? `The last ${duration(draft.replay_seconds)} is kept on disk. Save it the moment something happens.`
+    : 'Turn on Instant Replay before you play. It works on the desktop too — no game required.';
+
+  const alerts = [s.error && { tone: 'bad', text: s.error }, s.hotkey && { tone: 'warn', text: s.hotkey },
+    caps?.media_error && { tone: 'bad', text: caps.media_error }, s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
+
+  return (
+    <Section>
+      {alerts.map((a, i) => <div key={i} className={`banner ${a.tone}`} role={a.tone === 'bad' ? 'alert' : undefined}><AlertTriangle size={15} />{a.text}</div>)}
+      {s.recovery > 0 && !active && (
+        <button className="banner info link" onClick={() => navigate('replay')}>
+          {s.recovery} interrupted capture session{s.recovery > 1 ? 's' : ''} can be recovered <ChevronRight size={14} />
+        </button>
+      )}
+      <div className="home-grid">
+        <Card className="hero">
+          <div className="hero-body">
+            <div className="hero-text">
+              <Badge tone={s.recording ? 'rec' : s.replay ? 'ok' : s.state === 'Error' ? 'bad' : 'neutral'} dot>{s.recording ? 'REC' : s.replay ? 'BUFFERING' : s.state.toUpperCase()}</Badge>
+              <h2>{headline}</h2>
+              <p>{sub}</p>
+              <div className="hero-actions">
+                {!s.replay
+                  ? <Button size="lg" variant="primary" icon={RotateCcw} disabled={!!busy || !native} onClick={() => go('start_replay')}>Enable replay</Button>
+                  : <Button size="lg" variant="primary" icon={Save} disabled={!!busy || s.buffer <= 0} onClick={async () => { const m = saved(await go('save_replay')); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>}
+                <Button size="lg" variant="record" icon={s.recording ? Square : Circle} disabled={!!busy || !native}
+                  onClick={async () => { const m = saved(await go(s.recording ? 'stop_recording' : 'start_recording')); if (m) toast('success', `Recording saved — ${m}`); }}>
+                  {s.recording ? 'Stop & save' : 'Record'}
+                </Button>
+                {s.replay && <Button size="lg" variant="ghost" disabled={!!busy} onClick={() => go('stop_replay')}>Turn off</Button>}
+              </div>
+              <div className="hotkeys-inline">
+                <span>Save replay <Kbd combo={draft.replay_hotkey} /></span>
+                <span>Record <Kbd combo={draft.recording_hotkey} /></span>
+              </div>
+            </div>
+            <ReplayRing value={s.buffer} total={draft.replay_seconds} live={s.replay} />
+          </div>
+        </Card>
+
+        <Card title="Capture" actions={<button className="link-btn" onClick={() => navigate('capture')}>Video settings <ChevronRight size={13} /></button>}>
+          <dl className="facts">
+            <div><dt><MonitorPlay size={14} />Display</dt><dd>{display ? `${display.device.replace('\\\\.\\', '')} · ${display.active_width}×${display.active_height} @ ${display.refresh_hz} Hz` : draft.capture === 'desktop-duplication' ? `Display ${draft.display + 1}` : 'GDI capture'}</dd></div>
+            <div><dt>Output</dt><dd>{out} · {active && s.fps ? `${s.fps.toFixed(0)} / ${draft.fps}` : draft.fps} fps</dd></div>
+            <div><dt><Cpu size={14} />Encoder</dt><dd>{active && s.encoder ? encoderName(s.encoder) : `${encoderName(draft.encoder)} · chosen at start`}</dd></div>
+            <div><dt>Scaling</dt><dd>{active && s.scaling ? s.scaling : draft.gpu_scaling ? 'Fastest working GPU path' : 'CPU (GPU scaling off)'}</dd></div>
+            <div><dt><HardDrive size={14} />Free space</dt><dd>{native ? bytes(s.free) : '—'}</dd></div>
+            <div><dt>Buffer on disk</dt><dd>{bytes(s.bufferBytes)}</dd></div>
+          </dl>
+        </Card>
+
+        <Card title="Health"><Health /></Card>
+
+        <Card title="Audio" actions={<button className="link-btn" onClick={() => navigate('audio')}>Mixer <ChevronRight size={13} /></button>}>
+          {enabled.length === 0 ? <p className="muted small">No audio sources enabled — clips will be silent.</p> : (
+            <ul className="mini-mixer">
+              {enabled.map(({ a, i }) => (
+                <li key={i}>
+                  <SourceIcon source={a} />
+                  <span className="name">{a.name}</span>
+                  <Meter peak={a.muted ? 0 : peaks[feedIndex(draft.audio, i)] ?? 0} active={active && !a.muted} />
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="muted small">{draft.separate_tracks ? 'Mix + one editable track per source' : 'Single mixed track'} · {draft.audio_bitrate_kbps} kbps</p>
+        </Card>
+
+        <Card title="Recent clips" className="span-2" actions={<button className="link-btn" onClick={() => navigate('clips')}>Library <ChevronRight size={13} /></button>}>
+          {clips.length === 0 ? <Empty icon={Save} title="No clips yet">Saved replays and recordings appear here.</Empty> : (
+            <div className="recent">
+              {clips.slice(0, 4).map(c => (
+                <button key={c.name} className="recent-item" onClick={() => navigate('clips')} title={c.name}>
+                  <Thumb clip={c} />
+                  <div><strong>{clipKind(c.name)}</strong><span>{new Date(c.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.probe && ` · ${duration(c.probe.duration)}`}</span></div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </Section>
+  );
+}
