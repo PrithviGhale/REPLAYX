@@ -20,7 +20,7 @@ export type Settings = {
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string;
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
-  audio_bitrate_kbps: number; launch_at_startup: boolean;
+  audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
 };
 export type Status = {
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
@@ -31,13 +31,15 @@ export type Status = {
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
   scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
-  duplicated_frames: number; last_save_timings: { stage: string; elapsed_ms: number }[];
+  duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
-  start_time: number; audio_titles: string[]; fps: number;
+  start_time: number; audio_titles: string[]; fps: number; game?: string | null; kind?: string | null;
 };
-export type Clip = { name: string; modified: number; probe: Probe | null };
+/** `id` is the path relative to the clips folder: `Fortnite/Fortnite_….mkv` or a bare legacy name. */
+export type Clip = { id: string; name: string; category: string; kind: string; modified: number; bytes: number; probe: Probe | null };
+export type GameMapping = { exe: string; name: string };
 export type Encoder = { name: string; available: boolean; reason: string };
 export type Device = { id: string; name: string; kind: 'system' | 'microphone' };
 export type Caps = {
@@ -67,9 +69,10 @@ export const api = {
   sessions: () => call<Session[]>('audio_sessions'),
   icon: (path: string) => call<string | null>('app_icon', { path }),
   clips: () => call<Clip[]>('clips'),
-  thumbnail: (name: string) => call<string>('clip_thumbnail', { name }),
-  clipAction: (name: string, operation: 'delete' | 'rename' | 'folder' | 'play' | 'mp4', newName?: string) =>
-    call<string>('clip_action', { name, operation, newName: newName ?? null }),
+  thumbnail: (id: string) => call<string>('clip_thumbnail', { id }),
+  /** Returns the clip's id after the operation (new id for rename/move/mp4). */
+  clipAction: (id: string, operation: 'delete' | 'rename' | 'move' | 'folder' | 'play' | 'mp4', value?: string) =>
+    call<string>('clip_action', { id, operation, value: value ?? null }),
   audioTest: (source: AudioSource, seconds: number) => call<TestCapture>('audio_test', { source, seconds }),
   playAudioTest: () => call<void>('play_audio_test'),
   openFolder: () => call<void>('open_folder'),
@@ -85,7 +88,7 @@ export const emptyStatus: Status = {
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
   audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
   scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
-  hotkey_error: null, duplicated_frames: 0, last_save_timings: [],
+  hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */
@@ -95,7 +98,7 @@ export const previewSettings: Settings = {
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false,
+  launch_at_startup: false, organize_by_game: true, game_mappings: [],
 };
 
 export const VERSION = '0.2.0-alpha.1';

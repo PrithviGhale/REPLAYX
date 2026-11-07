@@ -5,7 +5,7 @@ import { useCapture } from '../capture';
 import { activeOf, useStatus } from '../store';
 import { bytes, canvasWidth, duration, encoderName, plan, sourceRect } from '../format';
 import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
-import { SourceIcon, Section, Thumb, clipKind, feedIndex } from './shared';
+import { SourceIcon, Section, Thumb, feedIndex } from './shared';
 import type { Page } from '../App';
 
 function ReplayRing({ value, total, live }: { value: number; total: number; live: boolean }) {
@@ -134,9 +134,9 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
           {clips.length === 0 ? <Empty icon={Save} title="No clips yet">Saved replays and recordings appear here.</Empty> : (
             <div className="recent">
               {clips.slice(0, 4).map(c => (
-                <button key={c.name} className="recent-item" onClick={() => navigate('clips')} title={c.name}>
+                <button key={c.id} className="recent-item" onClick={() => navigate('clips')} title={c.name}>
                   <Thumb clip={c} />
-                  <div><strong>{clipKind(c.name)}</strong><span>{new Date(c.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.probe && ` · ${duration(c.probe.duration)}`}</span></div>
+                  <div><strong>{c.category === 'Unsorted' ? c.kind : `${c.category} · ${c.kind}`}</strong><span>{new Date(c.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.probe && ` · ${duration(c.probe.duration)}`}</span></div>
                 </button>
               ))}
             </div>

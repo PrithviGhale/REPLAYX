@@ -1,11 +1,11 @@
 use crate::{
     audio,
     engine::{Engine, Status},
-    media::{command, Media, Probe},
-    model::{safe_clip, AudioSource, Settings},
+    library,
+    media::{command, Media},
+    model::{AudioSource, Settings},
     winutil,
 };
-use serde::Serialize;
 use std::{
     collections::HashMap,
     fs,
@@ -22,7 +22,18 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 type Reply<T> = Result<T, String>;
-type ClipCache = Arc<Mutex<HashMap<PathBuf, (u64, std::time::SystemTime, Option<Probe>)>>>;
+/// Persistent clip index plus background-probe bookkeeping.
+struct Library {
+    index: library::Index,
+    path: PathBuf,
+    probing: bool,
+    last_index_ms: u64,
+}
+impl Library {
+    fn save(&mut self) -> anyhow::Result<()> {
+        self.index.save(&self.path)
+    }
+}
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -33,7 +44,7 @@ struct AppState {
     icons: Arc<Mutex<HashMap<String, Option<String>>>>,
     testing_audio: Arc<Mutex<bool>>,
     app: tauri::AppHandle,
-    clip_cache: ClipCache,
+    library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
 }
 impl AppState {
@@ -69,7 +80,7 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
         "save_replay" | "stop_recording" => {
             let id = uuid::Uuid::new_v4().to_string();
             let began = std::time::Instant::now();
-            let emit = |stage: &str, clip: Option<Clip>, error: Option<String>| {
+            let emit = |stage: &str, clip: Option<library::Clip>, error: Option<String>| {
                 let _ = state.app.emit("clip-save", serde_json::json!({"id":id,"stage":stage,"clip":clip,"error":error,"elapsed_ms":began.elapsed().as_millis() as u64}));
             };
             emit("Saving", None, None);
@@ -94,26 +105,16 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
             engine.complete_save(&result);
             match &result {
                 Ok((path, probe)) => {
-                    let modified = fs::metadata(path)
-                        .and_then(|m| m.modified())
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    state
-                        .clip_cache
-                        .lock()
-                        .unwrap()
-                        .insert(path.clone(), (probe.bytes, modified, Some(probe.clone())));
-                    emit(
-                        "Ready",
-                        Some(Clip {
-                            name: path.file_name().unwrap().to_string_lossy().into(),
-                            modified: modified
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                            probe: Some(probe.clone()),
-                        }),
-                        None,
-                    );
+                    let root = engine.settings().output_dir;
+                    let id = library::id_for(&root, path);
+                    let clip = id.as_deref().and_then(|id| {
+                        let meta = fs::metadata(path).ok()?;
+                        let mut lib = state.library.lock().unwrap();
+                        lib.index.insert(id, &meta, probe.clone());
+                        let _ = lib.save();
+                        lib.index.clip(&root, id)
+                    });
+                    emit("Ready", clip, None);
                 }
                 Err(e) => emit("Failed", None, Some(e.to_string())),
             }
@@ -231,16 +232,16 @@ async fn app_icon(path: String, state: State<'_, AppState>) -> Reply<Option<Stri
     .await
     .map_err(err)?
 }
-/// Cached JPEG thumbnail of a clip as a data URL.
+/// Cached JPEG thumbnail of a clip as a data URL. Cache hits never wait for
+/// another thumbnail being generated; only generation is serialized.
 #[tauri::command]
-async fn clip_thumbnail(name: String, state: State<'_, AppState>) -> Reply<String> {
+async fn clip_thumbnail(id: String, state: State<'_, AppState>) -> Reply<String> {
     let root = state.engine.settings().output_dir;
     let cache = state.data_dir().join("thumbnails");
     let gate = state.thumbnail_gate.clone();
+    let library = state.library.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // A library of visible cards must not start dozens of simultaneous decoders.
-        let _permit = gate.lock().unwrap();
-        let path = safe_clip(&root, &name).map_err(err)?;
+        let path = library::resolve(&root, &id).map_err(err)?;
         let meta = fs::metadata(&path).map_err(err)?;
         let modified = meta
             .modified()
@@ -248,7 +249,7 @@ async fn clip_thumbnail(name: String, state: State<'_, AppState>) -> Reply<Strin
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let stem: String = name
+        let stem: String = id
             .chars()
             .map(|c| {
                 if c.is_ascii_alphanumeric() || c == '-' {
@@ -257,22 +258,40 @@ async fn clip_thumbnail(name: String, state: State<'_, AppState>) -> Reply<Strin
                     '_'
                 }
             })
-            .take(80)
+            .take(100)
             .collect();
         let file = cache.join(format!("{stem}-{modified}-{}.jpg", meta.len()));
-        let jpeg = match fs::read(&file) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                let media = Media::discover().map_err(err)?;
-                let duration = media.probe(&path).map(|p| p.duration).unwrap_or(0.);
-                let bytes = media.thumbnail(&path, duration, 480).map_err(err)?;
-                fs::create_dir_all(&cache).map_err(err)?;
-                prune_cache(&cache, 400);
-                fs::write(&file, &bytes).map_err(err)?;
-                bytes
-            }
-        };
-        Ok(format!("data:image/jpeg;base64,{}", winutil::base64(&jpeg)))
+        if let Ok(bytes) = fs::read(&file) {
+            return Ok(format!(
+                "data:image/jpeg;base64,{}",
+                winutil::base64(&bytes)
+            ));
+        }
+        // A grid of visible cards must not start dozens of decoders at once.
+        let _permit = gate.lock().unwrap();
+        if let Ok(bytes) = fs::read(&file) {
+            return Ok(format!(
+                "data:image/jpeg;base64,{}",
+                winutil::base64(&bytes)
+            ));
+        }
+        let media = Media::discover().map_err(err)?;
+        let duration = library
+            .lock()
+            .unwrap()
+            .index
+            .clip(&root, &id)
+            .and_then(|c| c.probe)
+            .map(|p| p.duration)
+            .unwrap_or(0.);
+        let bytes = media.thumbnail(&path, duration, 480).map_err(err)?;
+        fs::create_dir_all(&cache).map_err(err)?;
+        prune_cache(&cache, 400);
+        fs::write(&file, &bytes).map_err(err)?;
+        Ok(format!(
+            "data:image/jpeg;base64,{}",
+            winutil::base64(&bytes)
+        ))
     })
     .await
     .map_err(err)?
@@ -341,119 +360,133 @@ fn open_folder(state: State<AppState>) -> Reply<()> {
     command("explorer.exe").arg(&root).spawn().map_err(err)?;
     Ok(())
 }
-#[derive(Serialize)]
-struct Clip {
-    name: String,
-    modified: u64,
-    probe: Option<Probe>,
-}
+/// Clip list from the persistent index. Returns immediately; clips whose
+/// metadata is missing or stale are probed in the background and the whole
+/// list is re-sent as a `library-updated` event when they are done.
 #[tauri::command]
-async fn clips(state: State<'_, AppState>) -> Reply<Vec<Clip>> {
+async fn clips(state: State<'_, AppState>) -> Reply<Vec<library::Clip>> {
     let root = state.engine.settings().output_dir;
-    let cache = state.clip_cache.clone();
+    let library = state.library.clone();
+    let app = state.app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let media = Media::discover().map_err(err)?;
-        let mut out = Vec::new();
-        for entry in fs::read_dir(&root).map_err(err)? {
-            let entry = entry.map_err(err)?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.contains(".partial.") {
-                continue;
-            }
-            let Ok(path) = safe_clip(&root, &name) else {
-                continue;
-            };
-            let meta = fs::metadata(&path).map_err(err)?;
-            let stamp = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let cached = cache
-                .lock()
-                .unwrap()
-                .get(&path)
-                .filter(|(size, time, _)| *size == meta.len() && *time == stamp)
-                .cloned();
-            let probe = if let Some((_, _, probe)) = cached {
-                probe
-            } else {
-                let probe = media.probe(&path).ok();
-                cache
-                    .lock()
-                    .unwrap()
-                    .insert(path.clone(), (meta.len(), stamp, probe.clone()));
-                probe
-            };
-            out.push(Clip {
-                name,
-                modified: meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-                probe,
+        let started = std::time::Instant::now();
+        fs::create_dir_all(&root).map_err(err)?;
+        let found = library::scan(&root).map_err(err)?;
+        let (clips, stale) = {
+            let mut lib = library.lock().unwrap();
+            let stale = lib.index.stale(&found);
+            (lib.index.clips(&found), stale)
+        };
+        library.lock().unwrap().last_index_ms = started.elapsed().as_millis() as u64;
+        let busy = !stale.is_empty() && !library.lock().unwrap().probing;
+        if busy {
+            library.lock().unwrap().probing = true;
+            thread::spawn(move || {
+                let started = std::time::Instant::now();
+                let results = Media::discover()
+                    .map(|media| {
+                        library::probe_parallel(&found, &stale, 4, |p| media.probe(p).ok())
+                    })
+                    .unwrap_or_default();
+                let mut lib = library.lock().unwrap();
+                lib.index.apply(&found, results);
+                let clips = lib.index.clips(&found);
+                let _ = lib.save();
+                lib.probing = false;
+                lib.last_index_ms = started.elapsed().as_millis() as u64;
+                drop(lib);
+                let _ = app.emit("library-updated", clips);
             });
+        } else {
+            let _ = library.lock().unwrap().save();
         }
-        out.sort_by_key(|c| std::cmp::Reverse(c.modified));
-        Ok(out)
+        Ok(clips)
     })
     .await
     .map_err(err)?
 }
 #[tauri::command]
 async fn clip_action(
-    name: String,
+    id: String,
     operation: String,
-    new_name: Option<String>,
+    value: Option<String>,
     state: State<'_, AppState>,
 ) -> Reply<String> {
     let root = state.engine.settings().output_dir;
+    let library = state.library.clone();
+    let gate = state.thumbnail_gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = safe_clip(&root, &name).map_err(err)?;
         match operation.as_str() {
             "delete" => {
-                winutil::recycle(&path).map_err(err)?;
+                // Wait for any thumbnail decode that may be reading this file.
+                let _permit = gate.lock().unwrap();
+                library::delete_clip(&root, &id, winutil::recycle).map_err(err)?;
+                let mut lib = library.lock().unwrap();
+                lib.index.remove(&id);
+                let _ = lib.save();
+                Ok(id)
             }
             "rename" => {
-                let n = new_name.ok_or("New name required")?;
-                if n.len() > 160
-                    || n.trim() != n
-                    || n.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|'])
-                    || n.starts_with('.')
-                    || n.ends_with('.')
-                    || std::path::Path::new(&n).extension() != path.extension()
-                {
-                    return Err("Use a valid filename with the same extension".into());
+                let path = library::resolve(&root, &id).map_err(err)?;
+                let wanted = value.ok_or("New name required")?;
+                let ext = path.extension().unwrap().to_string_lossy().to_string();
+                let stem = wanted.trim().trim_end_matches(&format!(".{ext}")).to_string();
+                let clean = library::sanitize_component(&stem);
+                if stem.is_empty() || clean != stem || stem.len() > 150 {
+                    return Err("Use letters, numbers, spaces and dashes; these are not allowed: \\ / : * ? \" < > |".into());
                 }
-                let to = root.join(n);
+                let to = path.with_file_name(format!("{clean}.{ext}"));
                 if to.exists() {
-                    return Err("A clip with that name already exists".into());
+                    return Err("A clip with that name already exists in this folder".into());
                 }
-                fs::rename(path, to).map_err(err)?;
+                if library::in_use(&path) {
+                    return Err("The clip is open in another program. Close it and try again.".into());
+                }
+                fs::rename(&path, &to).map_err(err)?;
+                let new_id = match id.split_once('/') {
+                    Some((folder, _)) => format!("{folder}/{clean}.{ext}"),
+                    None => format!("{clean}.{ext}"),
+                };
+                library.lock().unwrap().index.remove(&id);
+                Ok(new_id)
+            }
+            "move" => {
+                let category = value.ok_or("Choose a game or category")?;
+                let _permit = gate.lock().unwrap();
+                let new_id = library::move_to_category(&root, &id, &category).map_err(err)?;
+                library.lock().unwrap().index.remove(&id);
+                Ok(new_id)
             }
             "folder" => {
+                let path = library::resolve(&root, &id).map_err(err)?;
                 command("explorer.exe")
-                    .arg("/select,")
-                    .arg(&path)
+                    .arg(format!("/select,{}", path.display()))
                     .spawn()
                     .map_err(err)?;
+                Ok(id)
             }
             "play" => {
+                let path = library::resolve(&root, &id).map_err(err)?;
                 open_local(&path)?;
+                Ok(id)
             }
             "mp4" => {
-                let output = root.join(format!(
-                    "{}-export-{}.mp4",
-                    path.file_stem().unwrap().to_string_lossy(),
-                    &uuid::Uuid::new_v4().to_string()[..8]
-                ));
+                let path = library::resolve(&root, &id).map_err(err)?;
+                let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                let dir = path.parent().unwrap();
+                let output = library::unique_path(dir, &format!("{stem}-export"), "mp4");
                 Media::discover()
                     .map_err(err)?
                     .export_mp4(&path, &output)
                     .map_err(err)?;
-                return Ok(output.file_name().unwrap().to_string_lossy().into());
+                let name = output.file_name().unwrap().to_string_lossy().to_string();
+                Ok(match id.split_once('/') {
+                    Some((folder, _)) => format!("{folder}/{name}"),
+                    None => name,
+                })
             }
-            _ => return Err("Unknown clip action".into()),
+            _ => Err("Unknown clip action".into()),
         }
-        Ok("Done".into())
     })
     .await
     .map_err(err)?
@@ -651,14 +684,19 @@ pub fn run() {
                 app.path().app_local_data_dir()?
             };
             let settings = Settings::load(&data.join("settings.json"))?;
-            let engine = Engine::new(data, settings.clone())?;
+            let engine = Engine::new(data.clone(), settings.clone())?;
             app.manage(AppState {
                 engine,
                 updating: Arc::new(Mutex::new(false)),
                 icons: Arc::new(Mutex::new(HashMap::new())),
                 testing_audio: Arc::new(Mutex::new(false)),
                 app: app.handle().clone(),
-                clip_cache: Arc::new(Mutex::new(HashMap::new())),
+                library: Arc::new(Mutex::new(Library {
+                    index: library::Index::load(&data.join("library-index.json")),
+                    path: data.join("library-index.json"),
+                    probing: false,
+                    last_index_ms: 0,
+                })),
                 thumbnail_gate: Arc::new(Mutex::new(())),
             });
             // Keep the startup entry pointing at this executable if enabled.

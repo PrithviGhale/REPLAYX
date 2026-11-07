@@ -427,3 +427,25 @@ details p { margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* 0.2.1: game categories, pending saves, incremental grid */
+.category-rail { display: flex; gap: 6px; flex-wrap: wrap; }
+.category-rail button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--line-2);
+  background: var(--surface); color: var(--text-2); cursor: pointer; font-weight: 550; font-size: 13px; }
+.category-rail button:hover { color: var(--text); border-color: #3a3d4d; }
+.category-rail button.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--text); }
+.category-rail button.on svg { color: var(--accent); }
+.category-rail small { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.pending-saves { display: grid; gap: 6px; }
+.pending { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.pending svg { color: var(--accent); flex: none; }
+.pending.failed { background: var(--bad-soft); border-color: rgba(255, 93, 110, 0.35); }
+.pending.failed svg { color: var(--bad); }
+.load-more { text-align: center; padding: 18px; }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--text-2); cursor: pointer; font-size: 12.5px; }
+.chip:hover { color: var(--text); border-color: var(--accent-line); }
+.detected { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600;
+  color: #b9b0ff; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.mappings { display: grid; gap: 8px; }
+.mapping { display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(160px, 1.4fr) auto; gap: 8px; align-items: center; }

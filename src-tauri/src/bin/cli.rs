@@ -46,6 +46,112 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if action == "library-bench" {
+        // Test D: library load time on fixture clips (hard links of one small
+        // real MKV) in test-output; never touches the user's recordings.
+        let media = Media::discover()?;
+        let base = std::env::current_dir()?
+            .join("test-output")
+            .join("library-bench");
+        std::fs::create_dir_all(&base)?;
+        let sample = base.join("sample.mkv");
+        if !sample.exists() {
+            let ok = std::process::Command::new(&media.ffmpeg)
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=s=1920x1080:r=60:d=4",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=48000:cl=stereo",
+                    "-t",
+                    "4",
+                    "-c:v",
+                    "libopenh264",
+                    "-c:a",
+                    "aac",
+                    "-shortest",
+                ])
+                .arg(&sample)
+                .status()?
+                .success();
+            if !ok {
+                bail!("Could not create the fixture clip")
+            }
+        }
+        for n in [10usize, 100, 1000] {
+            let root = base.join(format!("clips-{n}"));
+            if !root.exists() {
+                std::fs::create_dir_all(root.join("Fortnite"))?;
+                std::fs::create_dir_all(root.join("Roblox"))?;
+                for i in 0..n {
+                    let rel = match i % 3 {
+                        0 => format!("Fortnite/Fortnite_{i:05}.mkv"),
+                        1 => format!("Roblox/Roblox_{i:05}.mkv"),
+                        _ => format!("Replay-{i:05}.mkv"),
+                    };
+                    // NTFS allows 1023 links per file: rotate through copies.
+                    let source = base.join(format!("sample-{}.mkv", i / 900));
+                    if !source.exists() {
+                        std::fs::copy(&sample, &source)?;
+                    }
+                    std::fs::hard_link(&source, root.join(rel))?;
+                }
+            }
+            let index_file = base.join(format!("index-{n}.json"));
+            let _ = std::fs::remove_file(&index_file);
+            let t = std::time::Instant::now();
+            if n <= 100 {
+                for (_, path, _) in replayx_core::library::scan(&root)? {
+                    let _ = media.probe(&path);
+                }
+            }
+            let old_ms = (n <= 100).then(|| t.elapsed().as_millis());
+            let t = std::time::Instant::now();
+            let mut index = replayx_core::library::Index::load(&index_file);
+            let cold = index.list(&root, 4, |p| media.probe(p).ok())?;
+            index.save(&index_file)?;
+            let cold_ms = t.elapsed().as_millis();
+            let t = std::time::Instant::now();
+            let mut warm_index = replayx_core::library::Index::load(&index_file);
+            let warm = warm_index.list(&root, 4, |p| media.probe(p).ok())?;
+            let warm_ms = t.elapsed().as_millis();
+            let t = std::time::Instant::now();
+            let filtered = warm
+                .iter()
+                .filter(|c| c.category == "Roblox" && c.name.contains('5'))
+                .count();
+            let filter_us = t.elapsed().as_micros();
+            assert_eq!(cold.len(), n);
+            println!("{n:>5} clips: old sequential probe {} | new cold (4 threads) {cold_ms} ms | new warm (index reload) {warm_ms} ms | filter {filter_us} us ({filtered} hits)",
+                old_ms.map(|m| format!("{m} ms")).unwrap_or_else(|| "not run".into()));
+        }
+        return Ok(());
+    }
+    if action == "detect" {
+        // Read-only: prints the foreground process classification once a second.
+        let seconds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(10);
+        for _ in 0..seconds {
+            let (exe, what) = match replayx_core::games::foreground_process() {
+                Some((pid, path, _)) => (
+                    format!("{pid} {}", path.rsplit(['\\', '/']).next().unwrap_or(&path)),
+                    replayx_core::games::classify(&path, "", &[]),
+                ),
+                None => ("(none)".into(), replayx_core::games::Foreground::App),
+            };
+            println!(
+                "{} {exe:<48} -> {what:?}",
+                chrono::Local::now().format("%H:%M:%S")
+            );
+            thread::sleep(Duration::from_secs(1));
+        }
+        return Ok(());
+    }
     if action == "device-formats" {
         for (kind, name, format) in replayx_core::audio::device_formats()? {
             println!("{kind:<10} {name}: {format}");
@@ -58,7 +164,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if !["self-test", "capture-test", "record-test", "recover"].contains(&action) {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");

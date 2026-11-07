@@ -81,6 +81,25 @@ export function SettingsPage() {
             </Field>
             <p className="muted small">Saved as Matroska (.mkv), which survives crashes and keeps every audio track. Export any clip to MP4 from the library.</p>
           </Card>
+          <Card title="Game detection" subtitle="REPLAYX looks at which program is in front while it captures (process name only; nothing is read from games).">
+            <Toggle label="Organize clips by game" checked={draft.organize_by_game} disabled={active} onChange={v => patch({ organize_by_game: v })}
+              description="Saves into a folder per game, e.g. Fortnite\Fortnite_2026-11-07_15-30-22.mkv. Desktop activity goes to Desktop. Existing clips are not moved." />
+            <div className="mappings">
+              <span className="field-label">Your corrections</span>
+              {draft.game_mappings.length === 0 && <p className="muted small">None. Add one if a game isn't recognised, or to stop an app being treated as a game.</p>}
+              {draft.game_mappings.map((m, i) => (
+                <div className="mapping" key={i}>
+                  <input aria-label="Executable" value={m.exe} disabled={active} placeholder="game.exe"
+                    onChange={e => patch({ game_mappings: draft.game_mappings.map((x, n) => n === i ? { ...x, exe: e.target.value.trim() } : x) })} />
+                  <span className="muted">→</span>
+                  <input aria-label="Game name" value={m.name} disabled={active} placeholder="Game name (empty = not a game)"
+                    onChange={e => patch({ game_mappings: draft.game_mappings.map((x, n) => n === i ? { ...x, name: e.target.value } : x) })} />
+                  <Button size="sm" variant="ghost" disabled={active} onClick={() => patch({ game_mappings: draft.game_mappings.filter((_, n) => n !== i) })}>Remove</Button>
+                </div>
+              ))}
+              <Button size="sm" disabled={active || draft.game_mappings.length >= 200} onClick={() => patch({ game_mappings: [...draft.game_mappings, { exe: '', name: '' }] })}>Add correction</Button>
+            </div>
+          </Card>
           <Card title="Startup and window">
             <Toggle label="Start with Windows" checked={draft.launch_at_startup} disabled={active} onChange={v => patch({ launch_at_startup: v })}
               description="Opens REPLAYX in the system tray when you sign in. Capture never starts on its own." />

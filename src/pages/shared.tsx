@@ -5,7 +5,7 @@ import { api, native, type AudioSource, type Clip } from '../api';
 const thumbs = new Map<string, string>();
 /** Clip still, requested only once visible and cached for the session. */
 export function Thumb({ clip, className = '' }: { clip: Clip; className?: string }) {
-  const key = `${clip.name}:${clip.modified}`;
+  const key = `${clip.id}:${clip.modified}:${clip.bytes}`;
   const [url, setUrl] = useState<string | undefined>(thumbs.get(key));
   const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -15,11 +15,11 @@ export function Thumb({ clip, className = '' }: { clip: Clip; className?: string
     const io = new IntersectionObserver(entries => {
       if (!entries.some(e => e.isIntersecting)) return;
       io.disconnect();
-      api.thumbnail(clip.name).then(u => { thumbs.set(key, u); setUrl(u); }).catch(() => setFailed(true));
+      api.thumbnail(clip.id).then(u => { thumbs.set(key, u); setUrl(u); }).catch(() => setFailed(true));
     }, { rootMargin: '200px' });
     io.observe(el);
     return () => io.disconnect();
-  }, [clip.name, key, url, failed]);
+  }, [clip.id, key, url, failed]);
   return (
     <div ref={ref} className={`thumb ${className}`}>
       {url ? <img src={url} alt="" draggable={false} /> : <Film size={26} className={failed ? '' : 'pulse'} />}
@@ -50,14 +50,6 @@ export const kindLabel: Record<string, string> = {
 
 /** Index of a source among enabled sources = its meter/feed index. */
 export const feedIndex = (sources: AudioSource[], i: number) => sources.slice(0, i).filter(s => s.enabled).length;
-
-export function clipKind(name: string) {
-  if (name.startsWith('Replay')) return 'Replay';
-  if (name.startsWith('Recording')) return 'Recording';
-  if (name.startsWith('Recovered')) return 'Recovered';
-  if (name.endsWith('.mp4')) return 'Export';
-  return 'Clip';
-}
 
 export function Section({ children }: { children: React.ReactNode }) {
   return <div className="page">{children}</div>;

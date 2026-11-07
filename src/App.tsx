@@ -37,6 +37,13 @@ function StatePill() {
   return <span className={`state-pill ${tone}`} role="status" aria-live="polite"><i />{text}{s.saving > 0 && (s.replay || s.recording) && <em>· saving</em>}</span>;
 }
 
+/** Game REPLAYX currently attributes footage to (only while capturing). */
+function DetectedGame() {
+  const s = useStatus(x => ({ game: x.detected_game, on: x.replay || x.recording }));
+  if (!s.on || !s.game) return null;
+  return <span className="detected" title="Detected from the foreground app; clips are filed under this game">{s.game}</span>;
+}
+
 function CaptureDock() {
   const { draft } = useApp();
   const { go, busy, saved } = useCapture();
@@ -134,6 +141,7 @@ export function App() {
         <header className="topbar">
           <h1>{title}</h1>
           <StatePill />
+          <DetectedGame />
           <div className="spacer" />
           <CaptureDock />
         </header>

@@ -6,6 +6,4 @@ export function applySaveEvent(pending: SaveEvent[], event: SaveEvent): SaveEven
   if (prior && (prior.stage === 'Failed' || prior.elapsed_ms > event.elapsed_ms)) return pending;
   return [...pending.filter(x => x.id !== event.id), event].slice(-20);
 }
-export function upsertClip(clips: Clip[], clip: Clip): Clip[] {
-  return [clip, ...clips.filter(x => x.name !== clip.name)].sort((a, b) => b.modified - a.modified);
-}
+export { upsertClip } from './library.ts';

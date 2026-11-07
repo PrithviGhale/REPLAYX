@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { api, errorText, native, previewSettings, type Caps, type Clip, type Settings } from './api';
 import { refreshNow } from './store';
 import { listen } from '@tauri-apps/api/event';
-import { applySaveEvent, upsertClip, type SaveEvent } from './save-events';
+import { applySaveEvent, type SaveEvent } from './save-events';
+import { removeClip, upsertClip } from './library';
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string };
 type Ctx = {
@@ -12,6 +13,8 @@ type Ctx = {
   setMix: (index: number, volume: number, muted: boolean) => Promise<void>;
   caps: Caps | null; refreshCaps: () => Promise<void>;
   clips: Clip[]; refreshClips: () => Promise<void>;
+  /** Apply a finished delete/move locally; no rescan needed. */
+  dropClip: (id: string) => void; putClip: (clip: Clip) => void;
   pendingSaves: SaveEvent[];
   busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string) => Promise<T | undefined>;
   toast: (kind: Toast['kind'], text: string) => void; toasts: Toast[]; dismiss: (id: number) => void;
@@ -52,13 +55,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (closed) return;
       setPendingSaves(p => applySaveEvent(p, event));
       if (event.stage === 'Ready' && event.clip) {
+        // Ready means validated and playable; it is never sent earlier.
         libraryRevision.current++;
         setClips(c => upsertClip(c, event.clip!));
         refreshNow();
       }
     });
-    return () => { closed = true; void subscription.then(unlisten => unlisten()); };
+    // Background metadata for clips the index had not seen yet.
+    const indexed = listen<Clip[]>('library-updated', ({ payload }) => {
+      if (closed) return;
+      libraryRevision.current++;
+      setClips(payload);
+    });
+    return () => {
+      closed = true;
+      void subscription.then(unlisten => unlisten());
+      void indexed.then(unlisten => unlisten());
+    };
   }, []);
+  const dropClip = useCallback((id: string) => { libraryRevision.current++; setClips(c => removeClip(c, id)); }, []);
+  const putClip = useCallback((clip: Clip) => { libraryRevision.current++; setClips(c => upsertClip(c, clip)); }, []);
 
   useEffect(() => {
     if (!native) return;
@@ -102,7 +118,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (native) await api.setMix(index, volume, muted).catch(e => toast('error', errorText(e)));
   }, [toast]);
 
-  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, pendingSaves, busy, run, toast, toasts, dismiss };
+  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, dropClip, putClip, pendingSaves, busy, run, toast, toasts, dismiss };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

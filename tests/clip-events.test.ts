@@ -14,7 +14,10 @@ test('late stages cannot overwrite failure or newer progress', () => {
   const newer = [event('two', 'Validating', 100)];
   assert.deepEqual(applySaveEvent(newer, event('two', 'Remuxing', 50)), newer);
 });
-test('ready events replace by name without a filesystem rescan', () => {
-  const clip = {name:'Replay.mkv', modified:5, probe:null};
-  assert.deepEqual(upsertClip([{...clip, modified:1}], clip), [clip]);
+test('ready events replace by id without a filesystem rescan', () => {
+  const clip = { id: 'Fortnite/Fortnite_1.mkv', name: 'Fortnite_1.mkv', category: 'Fortnite', kind: 'Replay', modified: 5, bytes: 1, probe: null };
+  assert.deepEqual(upsertClip([{ ...clip, modified: 1 }], clip), [clip]);
+  // Same file name in another game folder is a different clip.
+  const other = { ...clip, id: 'Roblox/Fortnite_1.mkv', category: 'Roblox' };
+  assert.equal(upsertClip([other], clip).length, 2);
 });
