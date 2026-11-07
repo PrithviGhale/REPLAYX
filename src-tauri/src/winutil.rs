@@ -198,6 +198,12 @@ pub fn exe_icon_png(path: &Path) -> Option<Vec<u8>> {
 
 /// Move a file to the Recycle Bin instead of deleting it permanently.
 pub fn recycle(path: &Path) -> Result<()> {
+    // SHFileOperation rejects verbatim ("\\?\") paths with error 124, which is what
+    // canonicalize() returns; always pass a plain absolute path.
+    let path = crate::library::shell_path(path);
+    if !path.is_absolute() {
+        bail!("Recycle Bin requires an absolute path")
+    }
     let mut from: Vec<u16> = path.to_string_lossy().encode_utf16().collect();
     from.extend([0, 0]);
     let mut op = SHFILEOPSTRUCTW {
@@ -207,8 +213,11 @@ pub fn recycle(path: &Path) -> Result<()> {
         ..Default::default()
     };
     let code = unsafe { SHFileOperationW(&mut op) };
-    if code != 0 || op.fAnyOperationsAborted.as_bool() {
-        bail!("Windows could not move the clip to the Recycle Bin (code {code})")
+    if code != 0 {
+        bail!(crate::library::recycle_error(code))
+    }
+    if op.fAnyOperationsAborted.as_bool() {
+        bail!("Moving the clip to the Recycle Bin was cancelled")
     }
     Ok(())
 }
@@ -377,6 +386,20 @@ mod tests {
         // Large images split into several stored deflate blocks.
         let big = png_rgba(256, 256, &vec![7; 256 * 256 * 4]);
         assert!(big.len() > 256 * 256 * 4);
+    }
+
+    #[test]
+    fn recycle_bin_accepts_canonical_paths() {
+        // Opt-in: moves one temporary 1-byte file into the user's Recycle Bin.
+        if std::env::var_os("REPLAYX_RECYCLE_TEST").is_none() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("rx-recycle-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("replayx-test-clip.mkv"), b"x").unwrap();
+        let trashed = crate::library::delete_clip(&root, "replayx-test-clip.mkv", recycle).unwrap();
+        assert!(!trashed.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
