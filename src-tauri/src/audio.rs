@@ -403,6 +403,113 @@ pub fn devices() -> Result<Vec<AudioDevice>> {
     }
     Ok(out)
 }
+/// Result of a short test capture through the real producer (no encoder).
+#[derive(Debug, Clone, Serialize)]
+pub struct TestCapture {
+    pub seconds: u64,
+    pub packets: u64,
+    pub peak: f32,
+    pub rms: f64,
+    pub discontinuities: u64,
+    pub device_glitches: u64,
+    pub timestamp_errors: u64,
+    pub drift_correction_ppm: f32,
+    pub measured_device_clock_ppm: f32,
+    pub endpoint_mix_format: Option<String>,
+    /// Interleaved stereo f32 at 48kHz, exactly as delivered to the encoder.
+    #[serde(skip)]
+    pub pcm: Vec<f32>,
+}
+
+/// Capture `seconds` of audio from `source`, calling `on_level(peak, elapsed)`
+/// about every 100ms. Used by the CLI diagnostic and the in-app device test.
+pub fn record_test(
+    source: AudioSource,
+    seconds: u64,
+    mut on_level: impl FnMut(f32, f64),
+) -> Result<TestCapture> {
+    use std::io::Read;
+    let feed = spawn(source)?;
+    let mut socket = std::net::TcpStream::connect(feed.url.trim_start_matches("tcp://"))?;
+    socket.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let began = Instant::now();
+    let limit = seconds as usize * RATE as usize * CHANNELS * 4;
+    let mut bytes = Vec::with_capacity(limit);
+    let mut input = [0u8; 8192];
+    let mut last_level = Instant::now();
+    while bytes.len() < limit {
+        if let Some(error) = feed.meter.error.lock().unwrap().clone() {
+            bail!("Audio capture error: {error}")
+        }
+        if began.elapsed() > Duration::from_secs(seconds + 5) {
+            bail!("Audio capture did not deliver enough samples")
+        }
+        let count = socket.read(&mut input[..8192.min(limit - bytes.len())])?;
+        if count == 0 {
+            bail!("Audio transport closed unexpectedly")
+        }
+        bytes.extend_from_slice(&input[..count]);
+        if last_level.elapsed() > Duration::from_millis(100) {
+            on_level(
+                f32::from_bits(feed.meter.peak.load(Ordering::Relaxed)),
+                began.elapsed().as_secs_f64(),
+            );
+            last_level = Instant::now();
+        }
+    }
+    let m = feed.meter.clone();
+    let format = m.format.lock().unwrap().clone();
+    let pcm: Vec<f32> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
+        .collect();
+    if pcm.iter().any(|v| !v.is_finite()) {
+        bail!("Nonfinite audio sample")
+    }
+    let peak = pcm.iter().fold(0f32, |p, v| p.max(v.abs()));
+    let rms =
+        (pcm.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / pcm.len().max(1) as f64).sqrt();
+    Ok(TestCapture {
+        seconds,
+        packets: m.packets.load(Ordering::Relaxed),
+        peak,
+        rms,
+        discontinuities: m.discontinuities.load(Ordering::Relaxed),
+        device_glitches: m.device_glitches.load(Ordering::Relaxed),
+        timestamp_errors: m.timestamp_errors.load(Ordering::Relaxed),
+        drift_correction_ppm: f32::from_bits(m.correction_ppm.load(Ordering::Relaxed)),
+        measured_device_clock_ppm: f32::from_bits(m.clock_ppm.load(Ordering::Relaxed)),
+        endpoint_mix_format: format,
+        pcm,
+    })
+}
+
+/// Write interleaved stereo 48kHz samples as a 16-bit PCM WAV file.
+pub fn write_wav16(path: &std::path::Path, pcm: &[f32]) -> Result<()> {
+    let data: Vec<u8> = pcm
+        .iter()
+        .flat_map(|v| ((v.clamp(-1., 1.) * 32767.) as i16).to_le_bytes())
+        .collect();
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend((36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend(16u32.to_le_bytes());
+    wav.extend(1u16.to_le_bytes());
+    wav.extend((CHANNELS as u16).to_le_bytes());
+    wav.extend(RATE.to_le_bytes());
+    wav.extend((RATE * 4).to_le_bytes());
+    wav.extend(4u16.to_le_bytes());
+    wav.extend(16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend((data.len() as u32).to_le_bytes());
+    wav.extend(data);
+    std::fs::write(path, wav)?;
+    Ok(())
+}
+
 /// Endpoint mix formats (what Windows converts from), read without starting a stream.
 pub fn device_formats() -> Result<Vec<(String, String, String)>> {
     wasapi::initialize_mta().ok()?;

@@ -60,6 +60,8 @@ pub struct Settings {
     pub gpu_scaling: bool,
     /// AAC bitrate per audio track.
     pub audio_bitrate_kbps: u32,
+    /// Start REPLAYX in the tray at Windows sign-in. Capture never auto-starts.
+    pub launch_at_startup: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -89,6 +91,7 @@ impl Default for Settings {
             check_updates: false,
             gpu_scaling: true,
             audio_bitrate_kbps: 192,
+            launch_at_startup: false,
         }
     }
 }

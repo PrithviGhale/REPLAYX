@@ -1,12 +1,6 @@
 use anyhow::{bail, Result};
 use replayx_core::{engine::Engine, media::Media, model::Settings};
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-    path::PathBuf,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, thread, time::Duration};
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     let action = args.get(1).map(String::as_str).unwrap_or("help");
@@ -34,6 +28,24 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
+    if action == "audio-sessions" {
+        let sessions = replayx_core::winutil::audio_sessions()?;
+        for s in &sessions {
+            println!(
+                "{:>6}  {:<8} {}  {}",
+                s.pid,
+                if s.active { "playing" } else { "idle" },
+                s.name,
+                s.path
+            );
+        }
+        if let (Some(s), Some(out)) = (sessions.iter().find(|s| !s.path.is_empty()), args.get(2)) {
+            let png = replayx_core::winutil::exe_icon_png(std::path::Path::new(&s.path))
+                .ok_or_else(|| anyhow::anyhow!("No icon"))?;
+            std::fs::write(out, png)?;
+        }
+        return Ok(());
+    }
     if action == "device-formats" {
         for (kind, name, format) in replayx_core::audio::device_formats()? {
             println!("{kind:<10} {name}: {format}");
@@ -46,7 +58,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if !["self-test", "capture-test", "recover"].contains(&action) {
-        println!("replayx-cli encoders | devices | device-formats | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -217,50 +229,7 @@ fn audio_test(args: &[String]) -> Result<()> {
         audio_device_source(kind, &device)?
     };
     let name = source.name.clone();
-    let feed = replayx_core::audio::spawn(source)?;
-    let mut socket = TcpStream::connect(feed.url.strip_prefix("tcp://").unwrap())?;
-    socket.set_read_timeout(Some(Duration::from_secs(2)))?;
-    let began = Instant::now();
-    let mut pcm = Vec::new();
-    let mut input = [0u8; 8192];
-    let limit = seconds as usize * 48000 * 2 * 4;
-    while pcm.len() < limit {
-        if let Some(error) = feed.meter.error.lock().unwrap().clone() {
-            bail!("Audio capture error: {error}")
-        }
-        if began.elapsed() > Duration::from_secs(seconds + 5) {
-            bail!("Audio capture did not deliver enough samples")
-        }
-        let count = socket.read(&mut input[..8192.min(limit - pcm.len())])?;
-        if count == 0 {
-            bail!("Audio transport closed unexpectedly")
-        }
-        pcm.extend_from_slice(&input[..count]);
-    }
-    use std::sync::atomic::Ordering;
-    let packets = feed.meter.packets.load(Ordering::Relaxed);
-    let gaps = feed.meter.gaps.load(Ordering::Relaxed);
-    let discontinuities = feed.meter.discontinuities.load(Ordering::Relaxed);
-    let device_glitches = feed.meter.device_glitches.load(Ordering::Relaxed);
-    let timestamp_errors = feed.meter.timestamp_errors.load(Ordering::Relaxed);
-    let correction_ppm = f32::from_bits(feed.meter.correction_ppm.load(Ordering::Relaxed));
-    let clock_ppm = f32::from_bits(feed.meter.clock_ppm.load(Ordering::Relaxed));
-    let format = feed.meter.format.lock().unwrap().clone();
-    drop(socket);
-    drop(feed);
-    let mut data = Vec::with_capacity(pcm.len() / 2);
-    let mut power = 0f64;
-    let mut peak = 0f32;
-    for bytes in pcm.as_chunks::<4>().0 {
-        let sample = f32::from_le_bytes(*bytes);
-        if !sample.is_finite() {
-            bail!("Nonfinite audio sample")
-        }
-        power += f64::from(sample).powi(2);
-        peak = peak.max(sample.abs());
-        data.extend_from_slice(&((sample.clamp(-1., 1.) * 32767.) as i16).to_le_bytes());
-    }
-    let rms = (power / (pcm.len() / 4) as f64).sqrt();
+    let capture = replayx_core::audio::record_test(source, seconds, |_, _| {})?;
     let dir = std::env::current_dir()?.join("test-output").join(format!(
         "audio-test-{}-{}-{}",
         kind,
@@ -268,24 +237,17 @@ fn audio_test(args: &[String]) -> Result<()> {
         &uuid::Uuid::new_v4().to_string()[..8]
     ));
     std::fs::create_dir_all(&dir)?;
-    let mut wave = std::fs::File::create(dir.join("capture.wav"))?;
-    wave.write_all(b"RIFF")?;
-    wave.write_all(&(36 + data.len() as u32).to_le_bytes())?;
-    wave.write_all(b"WAVEfmt ")?;
-    wave.write_all(&16u32.to_le_bytes())?;
-    wave.write_all(&1u16.to_le_bytes())?;
-    wave.write_all(&2u16.to_le_bytes())?;
-    wave.write_all(&48000u32.to_le_bytes())?;
-    wave.write_all(&192000u32.to_le_bytes())?;
-    wave.write_all(&4u16.to_le_bytes())?;
-    wave.write_all(&16u16.to_le_bytes())?;
-    wave.write_all(b"data")?;
-    wave.write_all(&(data.len() as u32).to_le_bytes())?;
-    wave.write_all(&data)?;
-    wave.sync_all()?;
+    replayx_core::audio::write_wav16(&dir.join("capture.wav"), &capture.pcm)?;
     // Exact producer output (pre-encoder) for lossless analysis.
-    std::fs::write(dir.join("capture.f32"), &pcm)?;
-    let report = serde_json::json!({"kind":kind,"device":device,"name":name,"seconds":seconds,"packets":packets,"queue_gaps":gaps,"discontinuities":discontinuities,"device_glitches":device_glitches,"timestamp_errors":timestamp_errors,"drift_correction_ppm":correction_ppm,"measured_device_clock_ppm":clock_ppm,"endpoint_mix_format":format,"peak":peak,"rms":rms,"file":dir.join("capture.wav"),"note":"Real device PCM capture. Nonzero levels do not prove intelligible speech, source isolation, editor compatibility, or A/V synchronization."});
+    let raw: Vec<u8> = capture.pcm.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(dir.join("capture.f32"), raw)?;
+    let packets = capture.packets;
+    let mut report = serde_json::to_value(&capture)?;
+    report["kind"] = kind.into();
+    report["device"] = device.clone().into();
+    report["name"] = name.clone().into();
+    report["file"] = serde_json::json!(dir.join("capture.wav"));
+    report["note"] = "Real device PCM capture. Nonzero levels do not prove intelligible speech, source isolation, editor compatibility, or A/V synchronization.".into();
     std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&report)?)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if packets == 0 {

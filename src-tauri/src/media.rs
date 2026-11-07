@@ -29,6 +29,11 @@ pub struct Probe {
     pub duration: f64,
     /// Container start time; the concat demuxer re-bases each file by this.
     pub start_time: f64,
+    /// Audio track titles in stream order (empty string when untitled).
+    #[serde(default)]
+    pub audio_titles: Vec<String>,
+    #[serde(default)]
+    pub fps: f64,
     pub bytes: u64,
     pub video_codec: String,
     pub audio_tracks: usize,
@@ -125,6 +130,18 @@ impl Media {
                 .iter()
                 .filter(|s| s["codec_type"] == "audio")
                 .count(),
+            audio_titles: streams
+                .iter()
+                .filter(|s| s["codec_type"] == "audio")
+                .map(|s| s["tags"]["title"].as_str().unwrap_or("").to_owned())
+                .collect(),
+            fps: video["avg_frame_rate"]
+                .as_str()
+                .and_then(|r| r.split_once('/'))
+                .and_then(|(n, d)| {
+                    Some(n.parse::<f64>().ok()? / d.parse::<f64>().ok().filter(|d| *d > 0.)?)
+                })
+                .unwrap_or(0.),
             width: video["width"].as_u64().unwrap_or(0),
             height: video["height"].as_u64().unwrap_or(0),
         })
@@ -357,6 +374,44 @@ impl Media {
         }
         fs::rename(&part, destination)?;
         Ok(verified)
+    }
+    /// JPEG still from roughly a third of the way into the clip.
+    pub fn thumbnail(&self, path: &Path, duration: f64, width: u32) -> Result<Vec<u8>> {
+        let at = (duration / 3.).clamp(0., 5.);
+        let out = command(&self.ffmpeg)
+            .args([
+                "-hide_banner",
+                "-v",
+                "error",
+                "-nostdin",
+                "-ss",
+                &format!("{at:.3}"),
+                "-i",
+            ])
+            .arg(path)
+            .args([
+                "-map",
+                "0:v:0",
+                "-frames:v",
+                "1",
+                "-vf",
+                &format!("scale={width}:-2"),
+                "-q:v",
+                "4",
+                "-f",
+                "image2pipe",
+                "-c:v",
+                "mjpeg",
+                "-",
+            ])
+            .output()?;
+        if !out.status.success() || out.stdout.len() < 100 {
+            bail!(
+                "Thumbnail failed: {}",
+                summarize_error(&String::from_utf8_lossy(&out.stderr))
+            )
+        }
+        Ok(out.stdout)
     }
     pub fn export_mp4(&self, input: &Path, output: &Path) -> Result<Probe> {
         let original = self.probe(input)?;

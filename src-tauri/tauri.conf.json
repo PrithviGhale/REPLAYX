@@ -15,12 +15,14 @@
   "app": {
     "windows": [
       {
-        "title": "REPLAYX — Capture everything. Miss nothing.",
-        "width": 1180,
-        "height": 800,
-        "minWidth": 900,
-        "minHeight": 650,
-        "backgroundColor": "#0c0d12"
+        "title": "REPLAYX",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "backgroundColor": "#0b0c10",
+        "label": "main",
+        "visible": false
       }
     ],
     "security": {

@@ -1,10 +1,13 @@
 use crate::{
+    audio,
     engine::{Engine, Status},
     media::{command, Media, Probe},
-    model::{safe_clip, Settings},
+    model::{safe_clip, AudioSource, Settings},
+    winutil,
 };
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     fs,
     path::PathBuf,
     str::FromStr,
@@ -14,7 +17,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager, State,
+    Emitter, Manager, State,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
@@ -26,6 +29,13 @@ fn err(e: impl std::fmt::Display) -> String {
 struct AppState {
     engine: Engine,
     updating: Arc<Mutex<bool>>,
+    icons: Arc<Mutex<HashMap<String, Option<String>>>>,
+    testing_audio: Arc<Mutex<bool>>,
+}
+impl AppState {
+    fn data_dir(&self) -> PathBuf {
+        self.engine.0.lock().unwrap().data_dir.clone()
+    }
 }
 #[tauri::command]
 fn status(state: State<AppState>) -> Status {
@@ -117,6 +127,11 @@ fn save_settings(settings: Settings, app: tauri::AppHandle, state: State<AppStat
     {
         return Err("Stop capture before changing settings".into());
     }
+    if settings.launch_at_startup != previous.launch_at_startup
+        || (settings.launch_at_startup && !winutil::autostart_enabled())
+    {
+        winutil::set_autostart(settings.launch_at_startup).map_err(err)?;
+    }
     let warning = bind_hotkeys(&app, &settings)?;
     if let Err(e) = state.engine.set_settings(settings) {
         let _ = bind_hotkeys(&app, &previous);
@@ -143,6 +158,140 @@ async fn processes() -> Reply<serde_json::Value> {
     tauri::async_runtime::spawn_blocking(||{
     let sys=sysinfo::System::new_all();let mut list:Vec<_>=sys.processes().iter().filter(|(pid,_)|pid.as_u32()>4).map(|(pid,p)|serde_json::json!({"pid":pid.as_u32(),"name":p.name().to_string_lossy(),"started":p.start_time()})).collect();list.sort_by_key(|p|p["name"].as_str().unwrap_or("").to_lowercase());Ok(serde_json::json!(list))
 }).await.map_err(err)?
+}
+#[tauri::command]
+async fn audio_sessions() -> Reply<Vec<winutil::AudioSession>> {
+    tauri::async_runtime::spawn_blocking(|| winutil::audio_sessions().map_err(err))
+        .await
+        .map_err(err)?
+}
+/// PNG data URL of an executable's icon. Only existing local .exe files.
+#[tauri::command]
+async fn app_icon(path: String, state: State<'_, AppState>) -> Reply<Option<String>> {
+    if let Some(hit) = state.icons.lock().unwrap().get(&path) {
+        return Ok(hit.clone());
+    }
+    let icons = state.icons.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        let url = (p.is_absolute()
+            && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+            && p.is_file())
+        .then(|| winutil::exe_icon_png(p))
+        .flatten()
+        .map(|png| format!("data:image/png;base64,{}", winutil::base64(&png)));
+        icons.lock().unwrap().insert(path, url.clone());
+        Ok(url)
+    })
+    .await
+    .map_err(err)?
+}
+/// Cached JPEG thumbnail of a clip as a data URL.
+#[tauri::command]
+async fn clip_thumbnail(name: String, state: State<'_, AppState>) -> Reply<String> {
+    let root = state.engine.settings().output_dir;
+    let cache = state.data_dir().join("thumbnails");
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = safe_clip(&root, &name).map_err(err)?;
+        let meta = fs::metadata(&path).map_err(err)?;
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let stem: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(80)
+            .collect();
+        let file = cache.join(format!("{stem}-{modified}-{}.jpg", meta.len()));
+        let jpeg = match fs::read(&file) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                let media = Media::discover().map_err(err)?;
+                let duration = media.probe(&path).map(|p| p.duration).unwrap_or(0.);
+                let bytes = media.thumbnail(&path, duration, 480).map_err(err)?;
+                fs::create_dir_all(&cache).map_err(err)?;
+                prune_cache(&cache, 400);
+                fs::write(&file, &bytes).map_err(err)?;
+                bytes
+            }
+        };
+        Ok(format!("data:image/jpeg;base64,{}", winutil::base64(&jpeg)))
+    })
+    .await
+    .map_err(err)?
+}
+/// Keep at most `keep` files, removing the least recently modified.
+fn prune_cache(dir: &std::path::Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort();
+    for (_, path) in files.iter().take(files.len() - keep) {
+        let _ = fs::remove_file(path);
+    }
+}
+/// Record a few seconds from one source through the real capture path,
+/// emitting `audio-test-level` events, and keep the result as a WAV file.
+#[tauri::command]
+async fn audio_test(
+    source: AudioSource,
+    seconds: u64,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<audio::TestCapture> {
+    {
+        let mut busy = state.testing_audio.lock().unwrap();
+        if *busy {
+            return Err("An audio test is already running".into());
+        }
+        *busy = true;
+    }
+    let file = state.data_dir().join("tests").join("audio-test.wav");
+    let flag = state.testing_audio.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let capture = audio::record_test(source, seconds.clamp(2, 15), |peak, elapsed| {
+            let _ = app.emit("audio-test-level", (peak, elapsed));
+        })
+        .map_err(err)?;
+        fs::create_dir_all(file.parent().unwrap()).map_err(err)?;
+        audio::write_wav16(&file, &capture.pcm).map_err(err)?;
+        Ok(capture)
+    })
+    .await
+    .map_err(err);
+    *flag.lock().unwrap() = false;
+    result?
+}
+#[tauri::command]
+fn play_audio_test(state: State<AppState>) -> Reply<()> {
+    let file = state.data_dir().join("tests").join("audio-test.wav");
+    if !file.is_file() {
+        return Err("Run a test recording first".into());
+    }
+    open_local(&file)
+}
+#[tauri::command]
+fn open_folder(state: State<AppState>) -> Reply<()> {
+    let root = state.engine.settings().output_dir;
+    fs::create_dir_all(&root).map_err(err)?;
+    command("explorer.exe").arg(&root).spawn().map_err(err)?;
+    Ok(())
 }
 #[derive(Serialize)]
 struct Clip {
@@ -195,7 +344,7 @@ async fn clip_action(
         let path = safe_clip(&root, &name).map_err(err)?;
         match operation.as_str() {
             "delete" => {
-                fs::remove_file(&path).map_err(err)?;
+                winutil::recycle(&path).map_err(err)?;
             }
             "rename" => {
                 let n = new_name.ok_or("New name required")?;
@@ -375,6 +524,15 @@ fn background_action(app: tauri::AppHandle, name: &'static str) {
 }
 pub fn run() {
     tauri::Builder::default()
+        // A second launch focuses the running instance instead of failing on
+        // the data-directory lock.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -431,7 +589,19 @@ pub fn run() {
             app.manage(AppState {
                 engine,
                 updating: Arc::new(Mutex::new(false)),
+                icons: Arc::new(Mutex::new(HashMap::new())),
+                testing_audio: Arc::new(Mutex::new(false)),
             });
+            // Keep the startup entry pointing at this executable if enabled.
+            if settings.launch_at_startup {
+                let _ = winutil::set_autostart(true);
+            }
+            // Sign-in launches start in the tray; everything else shows the window.
+            if !std::env::args().any(|a| a == "--background") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
             app.state::<AppState>()
                 .engine
                 .0
@@ -509,6 +679,9 @@ pub fn run() {
             let handle = app.handle().clone();
             thread::spawn(move || {
                 let mut sys = sysinfo::System::new();
+                let own = sysinfo::Pid::from_u32(std::process::id());
+                let mut family = vec![own];
+                let mut tick = 0u64;
                 loop {
                     thread::sleep(std::time::Duration::from_secs(1));
                     let state = handle.state::<AppState>();
@@ -516,20 +689,28 @@ pub fn run() {
                     if let Some(tray) = handle.tray_by_id("main-tray") {
                         let _ = tray.set_tooltip(Some(format!("REPLAYX — {}", status.state)));
                     }
-                    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-                    let own = sysinfo::Pid::from_u32(std::process::id());
-                    let mut family = std::collections::HashSet::from([own]);
-                    loop {
-                        let before = family.len();
-                        for (pid, process) in sys.processes() {
-                            if process.parent().is_some_and(|p| family.contains(&p)) {
-                                family.insert(*pid);
+                    // Rediscover child processes (encoder, WebView) every 5s; refresh
+                    // only REPLAYX's own processes every second.
+                    if tick.is_multiple_of(5) {
+                        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                        family = vec![own];
+                        loop {
+                            let before = family.len();
+                            for (pid, process) in sys.processes() {
+                                if !family.contains(pid)
+                                    && process.parent().is_some_and(|p| family.contains(&p))
+                                {
+                                    family.push(*pid);
+                                }
+                            }
+                            if family.len() == before {
+                                break;
                             }
                         }
-                        if family.len() == before {
-                            break;
-                        }
+                    } else {
+                        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&family), true);
                     }
+                    tick += 1;
                     let mut memory = 0;
                     let mut cpu = 0.;
                     for (pid, p) in sys.processes() {
@@ -584,7 +765,13 @@ pub fn run() {
             clip_action,
             check_update,
             install_update,
-            exit_app
+            exit_app,
+            audio_sessions,
+            app_icon,
+            clip_thumbnail,
+            audio_test,
+            play_audio_test,
+            open_folder
         ])
         .run(tauri::generate_context!())
         .expect("REPLAYX could not start; check FFmpeg installation and settings.json");
