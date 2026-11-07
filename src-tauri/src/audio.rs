@@ -77,6 +77,28 @@ pub struct Meter {
     pub format: Mutex<Option<String>>,
 }
 
+/// Largest device channel count opened natively (microphone arrays).
+const MAX_DEVICE_CHANNELS: usize = 16;
+
+/// Convert interleaved device samples to interleaved stereo.
+/// 1 channel is duplicated, 2 pass through, and more (microphone arrays,
+/// usually with no channel mask) are averaged into centred mono, which keeps a
+/// coherent voice at its level while uncorrelated capsule noise is reduced.
+pub fn to_stereo(samples: Vec<f32>, channels: usize) -> Vec<f32> {
+    match channels {
+        2 => samples,
+        0 => Vec::new(),
+        1 => samples.iter().flat_map(|v| [*v, *v]).collect(),
+        n => samples
+            .chunks_exact(n)
+            .flat_map(|frame| {
+                let mono = frame.iter().sum::<f32>() / n as f32;
+                [mono, mono]
+            })
+            .collect(),
+    }
+}
+
 /// Counters produced by [`Timeline`]; mirrored into [`Meter`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TimelineStats {
@@ -521,11 +543,40 @@ pub fn device_formats() -> Result<Vec<(String, String, String)>> {
     ] {
         for d in &en.get_device_collection(&dir)? {
             let d = d?;
-            let format = d
+            let mut format = d
                 .get_iaudioclient()
                 .and_then(|c| c.get_mixformat())
                 .map(|f| describe_format(&f))
                 .unwrap_or_else(|e| format!("unavailable: {e}"));
+            if kind == "microphone" {
+                // Negotiate (never start) the native-channel stream REPLAYX uses.
+                let opened = d.get_iaudioclient().and_then(|mut c| {
+                    let n = c.get_mixformat()?.get_nchannels() as usize;
+                    let f = WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, n, None);
+                    c.initialize_client(
+                        &f,
+                        &Direction::Capture,
+                        &StreamMode::PollingShared {
+                            autoconvert: true,
+                            buffer_duration_hns: 1_000_000,
+                        },
+                    )?;
+                    Ok(n)
+                });
+                format += &match opened {
+                    Ok(n) => format!(
+                        " | opens natively as {n}ch float → {}",
+                        if n == 1 {
+                            "duplicated"
+                        } else if n == 2 {
+                            "stereo"
+                        } else {
+                            "averaged mono"
+                        }
+                    ),
+                    Err(e) => format!(" | native open failed ({e}); stereo fallback"),
+                };
+            }
             out.push((kind.to_owned(), d.get_friendlyname()?, format));
         }
     }
@@ -570,11 +621,23 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
         let result = (|| -> Result<()> {
             wasapi::initialize_mta().ok()?;
             let en = DeviceEnumerator::new()?;
-            let mut client = if source.kind == "application" || source.kind == "exclude" {
-                AudioClient::new_application_loopback_client(
+            let stream = StreamMode::PollingShared {
+                // Windows converts rate and sample type (AUTOCONVERTPCM +
+                // SRC_DEFAULT_QUALITY); 100ms buffer tolerates stalls under game load.
+                autoconvert: true,
+                buffer_duration_hns: 1_000_000,
+            };
+            let float =
+                |n: usize| WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, n, None);
+            // `channels` is the layout delivered by Windows; it is converted to
+            // stereo by `to_stereo` before entering the timeline.
+            let (client, channels) = if source.kind == "application" || source.kind == "exclude" {
+                let mut c = AudioClient::new_application_loopback_client(
                     source.pid,
                     source.kind == "application",
-                )?
+                )?;
+                c.initialize_client(&float(CHANNELS), &Direction::Capture, &stream)?;
+                (c, CHANNELS)
             } else {
                 let dir = if source.kind == "microphone" {
                     Direction::Capture
@@ -586,24 +649,41 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 } else {
                     en.get_device(&source.device)?
                 };
-                let client = device.get_iaudioclient()?;
-                if let Ok(mix) = client.get_mixformat() {
-                    *mt.format.lock().unwrap() = Some(describe_format(&mix));
+                let mut c = device.get_iaudioclient()?;
+                let native = c.get_mixformat().ok();
+                if let Some(mix) = &native {
+                    *mt.format.lock().unwrap() = Some(describe_format(mix));
                 }
-                client
+                // Microphones open at their native channel count so REPLAYX, not an
+                // unspecified channel matrix, decides how arrays become stereo.
+                // Loopback keeps Windows' mask-aware surround-to-stereo downmix.
+                let wanted = native
+                    .filter(|_| source.kind == "microphone")
+                    .map(|m| m.get_nchannels() as usize)
+                    .filter(|n| (1..=MAX_DEVICE_CHANNELS).contains(n))
+                    .unwrap_or(CHANNELS);
+                match c.initialize_client(&float(wanted), &Direction::Capture, &stream) {
+                    Ok(()) => (c, wanted),
+                    Err(_) if wanted != CHANNELS => {
+                        let mut stereo = device.get_iaudioclient()?;
+                        stereo.initialize_client(&float(CHANNELS), &Direction::Capture, &stream)?;
+                        (stereo, CHANNELS)
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             };
-            // Windows converts any endpoint rate/channel count/sample type to this
-            // format (AUTOCONVERTPCM + SRC_DEFAULT_QUALITY), so every frame is 8 bytes.
-            let format = WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, 2, None);
-            client.initialize_client(
-                &format,
-                &Direction::Capture,
-                &StreamMode::PollingShared {
-                    autoconvert: true,
-                    // 100ms device buffer tolerates scheduler stalls under game load.
-                    buffer_duration_hns: 1_000_000,
-                },
-            )?;
+            if channels != CHANNELS {
+                let mut f = mt.format.lock().unwrap();
+                *f = Some(format!(
+                    "{} → {}",
+                    f.clone().unwrap_or_default(),
+                    if channels == 1 {
+                        "mono duplicated to both channels"
+                    } else {
+                        "channels averaged to centred mono"
+                    }
+                ));
+            }
             let reader: IAudioCaptureClient = unsafe { client.as_iaudioclient().GetService()? };
             let _ = ready_tx.send(Ok::<(), String>(()));
             while !conn.load(Ordering::Relaxed) {
@@ -635,7 +715,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                             Some(&mut stamp),
                         )?
                     };
-                    let sample_count = frames as usize * CHANNELS;
+                    let sample_count = frames as usize * channels;
                     // Never dereference a silent WASAPI packet; Windows may return a null pointer.
                     let samples: Vec<f32> =
                         if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
@@ -651,6 +731,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                                 .collect()
                         };
                     unsafe { reader.ReleaseBuffer(frames)? };
+                    let samples = to_stereo(samples, channels);
                     // Windows commonly flags the first packet after Start; only later
                     // flags indicate lost device data.
                     if flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0 {
@@ -1087,6 +1168,31 @@ mod tests {
         assert!(t.holdback_ms() > 120. && t.holdback_ms() < 200.);
         // Only startup audio older than the adapted holdback is discarded.
         assert!(t.stats.dropped_frames < RATE as u64 / 5);
+    }
+
+    #[test]
+    fn device_layouts_convert_to_stereo() {
+        assert_eq!(
+            to_stereo(vec![0.1, 0.2, 0.3, 0.4], 2),
+            vec![0.1, 0.2, 0.3, 0.4]
+        );
+        assert_eq!(to_stereo(vec![0.5, -0.25], 1), vec![0.5, 0.5, -0.25, -0.25]);
+        // A 4-capsule array frame: coherent voice keeps its level.
+        assert_eq!(to_stereo(vec![0.4, 0.4, 0.4, 0.4], 4), vec![0.4, 0.4]);
+        let out = to_stereo(vec![1.0, 0.0, 0.0, -1.0, 0.2, 0.2, 0.2, 0.2], 4);
+        assert_eq!(out, vec![0.0, 0.0, 0.2, 0.2]);
+        // Uncorrelated noise: averaging N channels lowers RMS by about sqrt(N).
+        let mut rng = Lcg(3);
+        let noise: Vec<f32> = (0..48_000 * 4)
+            .map(|_| (rng.unit() * 2. - 1.) as f32)
+            .collect();
+        let rms = |v: &[f32]| {
+            (v.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
+        let ratio = rms(&noise) / rms(&to_stereo(noise.clone(), 4));
+        assert!((ratio - 2.0).abs() < 0.05, "{ratio}");
+        // Partial trailing frames are dropped, never misaligned.
+        assert_eq!(to_stereo(vec![0.1; 6], 4).len(), 2);
     }
 
     #[test]
