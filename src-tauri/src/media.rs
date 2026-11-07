@@ -676,6 +676,25 @@ mod tests {
     }
 
     #[test]
+    fn media_lock_is_pinned_to_an_immutable_reviewed_release() {
+        let lock: serde_json::Value = serde_json::from_str(
+            include_str!("../../tools/ffmpeg-lock.json").trim_start_matches('\u{feff}'),
+        )
+        .unwrap();
+        let url = lock["browser_download_url"].as_str().unwrap();
+        assert!(url.starts_with("https://github.com/"));
+        assert!(!url.contains("/download/latest/"), "floating asset: {url}");
+        assert!(url.contains("/download/autobuild-"));
+        let digest = lock["digest"].as_str().unwrap();
+        assert!(digest.starts_with("sha256:") && digest.len() == 7 + 64);
+        assert!(lock["runtime_dir"].as_str().unwrap().ends_with("/bin"));
+        assert!(!lock["reviewed"]
+            .as_str()
+            .unwrap_or("NOT REVIEWED")
+            .starts_with("NOT REVIEWED"));
+    }
+
+    #[test]
     fn display_capture_regrids_timestamps_before_scaling() {
         let source = CaptureRect {
             x: 0,
