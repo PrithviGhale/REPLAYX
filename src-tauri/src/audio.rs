@@ -48,6 +48,8 @@ const DRIFT_GAIN_PER_SECOND: f64 = 0.05;
 const MAX_RATIO_DEVIATION: f64 = 0.005;
 /// Queue bound beyond the holdback before backpressure becomes an error.
 const MAX_BACKLOG_FRAMES: usize = RATE as usize / 4;
+/// Paced chunks buffered between capture and the FFmpeg socket writer.
+pub const OUTPUT_CHANNEL_CHUNKS: usize = 300;
 
 #[derive(Default)]
 pub struct Meter {
@@ -450,7 +452,9 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
         .volume
         .store(source.volume.to_bits(), Ordering::Relaxed);
     meter.muted.store(source.muted, Ordering::Relaxed);
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(25);
+    // 3s of 10ms chunks: FFmpeg may not read audio while it initialises GPU
+    // devices; sustained stalls are caught by the 3s audio-write health check.
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CHUNKS);
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     let st = stop.clone();
     let mt = meter.clone();
@@ -597,7 +601,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                         Ok(()) => {}
                         Err(mpsc::TrySendError::Full(_)) => {
                             mt.gaps.fetch_add(1, Ordering::Relaxed);
-                            bail!("Audio output backpressure exceeded 250ms")
+                            bail!("Audio output backpressure exceeded 3s; the encoder stopped reading audio")
                         }
                         Err(_) => return Ok(()),
                     }
@@ -640,7 +644,9 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 thread::sleep(Duration::from_millis(10));
             };
             socket.set_nonblocking(false)?;
-            socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+            // Backstop only: FFmpeg may pause reading while it initialises GPU
+            // devices. Real stalls are reported by the engine's 3s write check.
+            socket.set_write_timeout(Some(Duration::from_secs(10)))?;
             socket.set_nodelay(true)?;
             connected.store(true, Ordering::Relaxed);
             while !st.load(Ordering::Relaxed) {

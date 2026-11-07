@@ -56,6 +56,10 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub diagnostics: bool,
     pub check_updates: bool,
+    /// Try GPU scaling paths before the CPU fallback.
+    pub gpu_scaling: bool,
+    /// AAC bitrate per audio track.
+    pub audio_bitrate_kbps: u32,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -83,12 +87,14 @@ impl Default for Settings {
             close_to_tray: false,
             diagnostics: false,
             check_updates: false,
+            gpu_scaling: true,
+            audio_bitrate_kbps: 192,
         }
     }
 }
 impl Settings {
     pub fn validate(&self) -> Result<()> {
-        if !["native", "stretch"].contains(&self.canvas_mode.as_str()) {
+        if !crate::geometry::CANVAS_MODES.contains(&self.canvas_mode.as_str()) {
             bail!("Unknown canvas mode")
         }
         if let Some(rect) = self.source_rect {
@@ -97,7 +103,9 @@ impl Settings {
             };
             rect.validate(32768, 32768)?;
         }
-        if ![480, 720, 1080, 1440, 2160].contains(&self.height) || ![30, 60].contains(&self.fps) {
+        if ![480, 720, 1080, 1440, 2160].contains(&self.height)
+            || ![30, 60, 120, 144].contains(&self.fps)
+        {
             bail!("Unsupported resolution or frame rate")
         }
         if ![30, 60, 180, 300, 600, 900, 1800].contains(&self.replay_seconds) {
@@ -120,6 +128,9 @@ impl Settings {
         .contains(&self.encoder.as_str())
         {
             bail!("Unsupported encoder")
+        }
+        if ![128, 160, 192, 256, 320].contains(&self.audio_bitrate_kbps) {
+            bail!("Unsupported audio bitrate")
         }
         if !["balanced", "quality", "performance"].contains(&self.preset.as_str()) {
             bail!("Invalid preset")

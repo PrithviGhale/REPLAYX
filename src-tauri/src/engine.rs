@@ -3,7 +3,7 @@ use crate::{
     buffer::{snapshot, Ring, Segment},
     geometry::{self, DisplayGeometry},
     health,
-    media::{self, Media, Probe},
+    media::{self, Media, Probe, Scaler},
     model::Settings,
 };
 use anyhow::{bail, Context, Result};
@@ -53,6 +53,10 @@ pub struct Status {
     pub recovery_sessions: usize,
     pub geometry: Option<DisplayGeometry>,
     pub scaling: String,
+    /// Why faster scaling paths were not used (probe errors), if any.
+    pub scaling_detail: Option<String>,
+    pub output_width: u32,
+    pub output_height: u32,
     pub segment_age_ms: u64,
     pub frame_age_ms: u64,
     pub audio_written_bytes: Vec<u64>,
@@ -81,6 +85,8 @@ struct Pipeline {
     last_geometry_check: Instant,
     last_segment_ms: u64,
     validated: bool,
+    expected_size: Option<(u32, u32)>,
+    scaler: Scaler,
     synthetic: bool,
 }
 struct Recovery {
@@ -106,6 +112,10 @@ pub struct Inner {
     recording: Option<Recording>,
     recovery: Option<Recovery>,
     ring_audio_tracks: usize,
+    /// Last successful video path for an identical display/plan/encoder request.
+    video_path_cache: Option<(String, Scaler, String)>,
+    /// GPU paths that passed a probe but failed before their first valid segment.
+    denied_paths: Vec<(String, String)>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -169,6 +179,8 @@ impl Engine {
             recording: None,
             recovery: None,
             ring_audio_tracks: 0,
+            video_path_cache: None,
+            denied_paths: Vec::new(),
             _instance_lock: instance_lock,
         })));
         let weak = Arc::downgrade(&e.0);
@@ -480,6 +492,72 @@ impl Inner {
             &uuid::Uuid::new_v4().to_string()[..8]
         ))
     }
+    /// Pick the most efficient scaler/encoder chain whose real probe succeeds.
+    /// Returns the scaler, encoder and a summary of rejected faster paths.
+    fn select_video_path(
+        &mut self,
+        synthetic: bool,
+        geometry: Option<&DisplayGeometry>,
+        plan: Option<&geometry::VideoPlan>,
+    ) -> Result<(Scaler, String, Option<String>)> {
+        let (Some(g), Some(plan), false) = (geometry, plan, synthetic) else {
+            let encoder = self.media.choose_encoder(&self.settings.encoder)?;
+            return Ok((Scaler::Cpu, encoder, None));
+        };
+        let key = format!(
+            "{}|{}|{:?}|{}|{}|{}|{}",
+            g.adapter_luid,
+            self.settings.display,
+            plan,
+            self.settings.encoder,
+            self.settings.fps,
+            self.settings.preset,
+            self.settings.gpu_scaling
+        );
+        if let Some((cached, scaler, encoder)) = &self.video_path_cache {
+            if *cached == key {
+                return Ok((*scaler, encoder.clone(), self.status.scaling_detail.clone()));
+            }
+        }
+        let mut rejected = Vec::new();
+        let candidates = if self.settings.gpu_scaling {
+            media::scaling_candidates(&self.settings.encoder)
+        } else {
+            rejected.push("GPU scaling disabled in settings".into());
+            Vec::new()
+        };
+        for (scaler, encoder) in candidates {
+            if !scaler.supports(plan) {
+                continue;
+            }
+            let id = format!("{key}|{scaler:?}|{encoder}");
+            if let Some((_, reason)) = self.denied_paths.iter().find(|(d, _)| *d == id) {
+                rejected.push(format!(
+                    "{} + {encoder}: failed during capture startup ({reason})",
+                    scaler.label()
+                ));
+                continue;
+            }
+            match self
+                .media
+                .probe_video(&self.settings, scaler, encoder, Some(plan))
+            {
+                Ok(()) => {
+                    let detail = (!rejected.is_empty()).then(|| rejected.join("; "));
+                    self.video_path_cache = Some((key, scaler, encoder.into()));
+                    return Ok((scaler, encoder.into(), detail));
+                }
+                Err(e) => rejected.push(format!("{} + {encoder}: {e}", scaler.label())),
+            }
+        }
+        let encoder = self.media.choose_encoder(&self.settings.encoder)?;
+        self.media
+            .probe_video(&self.settings, Scaler::Cpu, &encoder, Some(plan))
+            .map_err(|e| anyhow::anyhow!("Capture could not start with {encoder}: {e}"))?;
+        let detail = (!rejected.is_empty()).then(|| rejected.join("; "));
+        self.video_path_cache = Some((key, Scaler::Cpu, encoder.clone()));
+        Ok((Scaler::Cpu, encoder, detail))
+    }
     fn start_pipeline(&mut self, synthetic: bool) -> Result<()> {
         self.status.state = "Starting".into();
         self.settings.validate()?;
@@ -496,13 +574,20 @@ impl Inner {
         } else {
             None
         };
-        let encoder = self.media.choose_encoder(&self.settings.encoder)?;
-        let gpu_scaling = !synthetic
-            && self
-                .media
-                .gpu_scaling_works(&self.settings, &encoder, geometry.as_ref());
-        if !synthetic && self.settings.capture == "desktop-duplication" && !gpu_scaling {
-            self.status.notice=Some("GPU scaling probe failed or is unavailable. Desktop Duplication uses CPU scaling with hardware encoding.".into());
+        let plan = match &geometry {
+            Some(g) => Some(geometry::plan(
+                g.region(self.settings.source_rect)?,
+                self.settings.height,
+                &self.settings.canvas_mode,
+            )?),
+            None => None,
+        };
+        let (scaler, encoder, scaling_detail) =
+            self.select_video_path(synthetic, geometry.as_ref(), plan.as_ref())?;
+        if scaler == Scaler::Cpu && plan.is_some() {
+            self.status.notice = Some(
+                "GPU scaling is unavailable on this display adapter; using the CPU fallback (see Performance for details).".into(),
+            );
         }
         let dir = self
             .data_dir
@@ -528,14 +613,7 @@ impl Inner {
             "-progress",
             "pipe:1",
         ]);
-        let filter = media::video_input(
-            &mut c,
-            &self.settings,
-            &encoder,
-            synthetic,
-            gpu_scaling,
-            geometry.as_ref(),
-        )?;
+        let filter = media::video_input(&mut c, &self.settings, scaler, synthetic, plan.as_ref())?;
         let source_count = if synthetic { 2 } else { feeds.len() };
         if synthetic {
             for frequency in [440, 880] {
@@ -544,6 +622,10 @@ impl Inner {
         } else {
             for f in &feeds {
                 c.args([
+                    // Let FFmpeg's demuxer thread keep draining PCM while the video
+                    // graph and encoder initialise.
+                    "-thread_queue_size",
+                    "4096",
                     "-probesize",
                     "32",
                     "-analyzeduration",
@@ -694,12 +776,14 @@ impl Inner {
         self.status.frames = 0;
         self.status.elapsed = 0.;
         self.status.geometry = geometry.clone();
-        self.status.scaling = if gpu_scaling {
-            "D3D11 GPU"
+        self.status.scaling = if synthetic {
+            "Synthetic test source".into()
         } else {
-            "CPU fallback"
-        }
-        .into();
+            scaler.label().into()
+        };
+        self.status.scaling_detail = scaling_detail;
+        (self.status.output_width, self.status.output_height) =
+            plan.map(|p| (p.width, p.height)).unwrap_or_default();
         self.status.buffer_bytes = 0;
         self.status.buffer_seconds = 0.;
         self.ring = Ring::default();
@@ -726,6 +810,8 @@ impl Inner {
             last_geometry_check: Instant::now(),
             last_segment_ms: 0,
             validated: false,
+            expected_size: plan.map(|p| (p.width, p.height)),
+            scaler,
             synthetic,
         });
         Ok(())
@@ -768,10 +854,15 @@ impl Inner {
                 if probe.audio_tracks != p.expected_audio {
                     bail!("Finalized segment is missing configured audio tracks")
                 };
-                if self.settings.canvas_mode == "stretch" {
-                    let (w, h) = geometry::canvas(self.settings.height);
+                // Every display-capture mode has an exact planned frame size; a mismatch
+                // would mean stale geometry or a wrong scaler, e.g. desktop leakage.
+                if let Some((w, h)) = p.expected_size {
                     if (probe.width, probe.height) != (w as u64, h as u64) {
-                        bail!("Encoded dimensions do not match the target canvas")
+                        bail!(
+                            "Encoded dimensions {}x{} do not match the planned {w}x{h} frame",
+                            probe.width,
+                            probe.height
+                        )
                     }
                 }
                 p.validated = true;
@@ -834,6 +925,44 @@ impl Inner {
         collected
     }
     fn fail(&mut self, error: String) {
+        // A GPU path can pass its short probe yet fail in the full pipeline (for
+        // example no usable keyframes). Before any valid footage exists, deny that
+        // path for this configuration and restart on the next one.
+        let startup_gpu_failure = self.recovery.is_none()
+            && self
+                .pipeline
+                .as_ref()
+                .is_some_and(|p| !p.validated && !p.synthetic && p.scaler != Scaler::Cpu)
+            // Audio device/transport failures say nothing about the video path.
+            && !error.starts_with("Audio");
+        if startup_gpu_failure {
+            if let Some((key, scaler, encoder)) = self.video_path_cache.take() {
+                self.denied_paths
+                    .push((format!("{key}|{scaler:?}|{encoder}"), error.clone()));
+                let (replay, recording) = (self.status.replay, self.status.recording);
+                let _ = self.stop_pipeline();
+                match self.start_pipeline(false) {
+                    Ok(()) => {
+                        self.status.replay = replay;
+                        self.status.recording = recording;
+                        self.status.notice = Some(format!(
+                            "{} + {encoder} failed during startup ({error}). Switched to {}.",
+                            scaler.label(),
+                            self.status.scaling
+                        ));
+                        return;
+                    }
+                    Err(e) => {
+                        return self.fail_final(format!(
+                            "{error}. Fallback capture path also failed: {e:#}"
+                        ))
+                    }
+                }
+            }
+        }
+        self.fail_final(error)
+    }
+    fn fail_final(&mut self, error: String) {
         self.recovery = None;
         let _ = self.stop_pipeline();
         self.status.replay = false;

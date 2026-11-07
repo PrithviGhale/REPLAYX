@@ -162,19 +162,94 @@ pub fn canvas(height: u32) -> (u32, u32) {
     };
     (width, height)
 }
-pub fn scale_filter(height: u32, mode: &str, gpu: bool) -> String {
-    let (w, h) = canvas(height);
-    if mode == "stretch" {
-        if gpu {
-            format!("scale_d3d11=width={w}:height={h}:format=nv12,setsar=1")
-        } else {
-            format!("scale={w}:{h}:flags=bilinear,setsar=1,format=yuv420p")
-        }
-    } else if gpu {
-        format!("scale_d3d11=width=trunc(iw*{h}/ih/2)*2:height={h}:format=nv12,setsar=1")
-    } else {
-        format!("scale=-2:{h}:flags=bilinear,setsar=1,format=yuv420p")
+/// Aspect handling for the encoded frame.
+/// - `stretch`: fill the 16:9 canvas exactly (stretched 4:3 gameplay).
+/// - `fit`: preserve source aspect inside the 16:9 canvas with black bars.
+/// - `crop`: preserve aspect and fill the 16:9 canvas, cropping the source
+///   centre at capture time so cropped pixels are never copied.
+/// - `native`: preserve source aspect at the selected height, no bars.
+pub const CANVAS_MODES: [&str; 4] = ["stretch", "fit", "crop", "native"];
+
+/// What is captured and how it is placed in the encoded frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoPlan {
+    /// Captured source rectangle in output-local physical pixels.
+    pub source: CaptureRect,
+    /// Encoded frame size.
+    pub width: u32,
+    pub height: u32,
+    /// Scaled image size inside the frame; smaller than the frame only for `fit`.
+    pub image_width: u32,
+    pub image_height: u32,
+}
+impl VideoPlan {
+    pub fn padded(&self) -> bool {
+        (self.image_width, self.image_height) != (self.width, self.height)
     }
+    pub fn pad_filter(&self) -> Option<String> {
+        self.padded().then(|| {
+            format!(
+                "pad={}:{}:{}:{}:black",
+                self.width,
+                self.height,
+                ((self.width - self.image_width) / 2) & !1,
+                ((self.height - self.image_height) / 2) & !1
+            )
+        })
+    }
+}
+fn even(v: u32) -> u32 {
+    (v & !1).max(2)
+}
+fn scaled(v: u32, num: u32, den: u32) -> u32 {
+    even(((v as u64 * num as u64 + den as u64 / 2) / den as u64) as u32)
+}
+pub fn plan(source: CaptureRect, height: u32, mode: &str) -> Result<VideoPlan> {
+    let (cw, ch) = canvas(height);
+    if cw == 0 {
+        bail!("Unsupported output height {height}")
+    }
+    let (sw, sh) = (source.width, source.height);
+    let fixed = |source: CaptureRect, iw: u32, ih: u32| VideoPlan {
+        source,
+        width: cw,
+        height: ch,
+        image_width: iw,
+        image_height: ih,
+    };
+    Ok(match mode {
+        "stretch" => fixed(source, cw, ch),
+        "fit" => {
+            // Largest image with the source aspect that fits the canvas.
+            if sw as u64 * ch as u64 >= sh as u64 * cw as u64 {
+                fixed(source, cw, scaled(sh, cw, sw).min(ch))
+            } else {
+                fixed(source, scaled(sw, ch, sh).min(cw), ch)
+            }
+        }
+        "crop" => {
+            let mut s = source;
+            if sw as u64 * ch as u64 > sh as u64 * cw as u64 {
+                s.width = scaled(sh, cw, ch).min(sw);
+                s.x += (sw - s.width) / 2;
+            } else {
+                s.height = scaled(sw, ch, cw).min(sh);
+                s.y += (sh - s.height) / 2;
+            }
+            fixed(s, cw, ch)
+        }
+        "native" => {
+            let w = scaled(sw, ch, sh);
+            VideoPlan {
+                source,
+                width: w,
+                height: ch,
+                image_width: w,
+                image_height: ch,
+            }
+        }
+        _ => bail!("Unknown aspect mode"),
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -224,11 +299,11 @@ mod tests {
                     height: h
                 }
             );
-            assert_eq!(
-                scale_filter(1080, "stretch", false),
-                "scale=1920:1080:flags=bilinear,setsar=1,format=yuv420p"
-            );
-            assert!(scale_filter(1080, "stretch", true).contains("width=1920:height=1080"));
+            let p = plan(geom(w, h).region(None).unwrap(), 1080, "stretch").unwrap();
+            assert_eq!((p.width, p.height), (1920, 1080));
+            assert_eq!((p.image_width, p.image_height), (1920, 1080));
+            assert_eq!((p.source.width, p.source.height), (w, h));
+            assert!(!p.padded());
         }
     }
     #[test]
@@ -293,5 +368,110 @@ mod tests {
         let mut g = geom(1080, 1920);
         g.rotation = 2;
         assert!(g.region(None).is_err());
+    }
+    fn full(w: u32, h: u32) -> CaptureRect {
+        CaptureRect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+        }
+    }
+    #[test]
+    fn fit_letterboxes_or_pillarboxes_without_distortion() {
+        // 4:3 game into 16:9: pillarbox 1440x1080 centred.
+        let p = plan(full(1440, 1080), 1080, "fit").unwrap();
+        assert_eq!(
+            (p.width, p.height, p.image_width, p.image_height),
+            (1920, 1080, 1440, 1080)
+        );
+        assert_eq!(p.pad_filter().unwrap(), "pad=1920:1080:240:0:black");
+        // Offsets are even and the image always fits inside the frame.
+        for (w, h) in [(1440, 1080), (3440, 1440), (1366, 768), (1280, 1024)] {
+            let p = plan(full(w, h), 720, "fit").unwrap();
+            let pad = p.pad_filter().unwrap_or_default();
+            if let [_, _, x, y] = pad
+                .trim_start_matches("pad=")
+                .split(':')
+                .take(4)
+                .collect::<Vec<_>>()[..]
+            {
+                let (x, y): (u32, u32) = (x.parse().unwrap(), y.parse().unwrap());
+                assert!(x % 2 == 0 && y % 2 == 0);
+                assert!(x + p.image_width <= p.width && y + p.image_height <= p.height);
+            }
+        }
+        // 16:10 laptop panel into 16:9: pillarbox 1728x1080.
+        let p = plan(full(2560, 1600), 1080, "fit").unwrap();
+        assert_eq!((p.image_width, p.image_height), (1728, 1080));
+        // Ultrawide 21:9: letterbox.
+        let p = plan(full(3440, 1440), 1080, "fit").unwrap();
+        assert_eq!((p.image_width, p.image_height), (1920, 804));
+        // 16:9 source: no bars.
+        assert!(!plan(full(2560, 1440), 1080, "fit").unwrap().padded());
+    }
+    #[test]
+    fn crop_fills_canvas_by_cropping_source_centre_at_capture() {
+        let p = plan(full(2560, 1600), 1080, "crop").unwrap();
+        assert_eq!(
+            p.source,
+            CaptureRect {
+                x: 0,
+                y: 80,
+                width: 2560,
+                height: 1440
+            }
+        );
+        assert_eq!((p.width, p.height), (1920, 1080));
+        assert!(!p.padded());
+        let p = plan(full(1440, 1080), 1080, "crop").unwrap();
+        assert_eq!(
+            p.source,
+            CaptureRect {
+                x: 0,
+                y: 135,
+                width: 1440,
+                height: 810
+            }
+        );
+        // Crop respects a manual region offset.
+        let r = CaptureRect {
+            x: 100,
+            y: 50,
+            width: 1440,
+            height: 1080,
+        };
+        assert_eq!(plan(r, 720, "crop").unwrap().source.y, 50 + 135);
+    }
+    #[test]
+    fn native_keeps_source_aspect_at_selected_height() {
+        let p = plan(full(1440, 1080), 1080, "native").unwrap();
+        assert_eq!((p.width, p.height), (1440, 1080));
+        let p = plan(full(2560, 1600), 1080, "native").unwrap();
+        assert_eq!((p.width, p.height), (1728, 1080));
+        let p = plan(full(1280, 960), 720, "native").unwrap();
+        assert_eq!((p.width, p.height), (960, 720));
+    }
+    #[test]
+    fn every_mode_produces_even_encoder_dimensions() {
+        for mode in CANVAS_MODES {
+            for (w, h) in [
+                (1366, 768),
+                (1281, 961),
+                (2560, 1080),
+                (1440, 1080),
+                (3840, 2160),
+            ] {
+                for height in [480, 720, 1080, 1440] {
+                    let p = plan(full(w, h), height, mode).unwrap();
+                    for v in [p.width, p.height, p.image_width, p.image_height] {
+                        assert_eq!(v % 2, 0, "{mode} {w}x{h}@{height}");
+                    }
+                    assert!(p.image_width <= p.width && p.image_height <= p.height);
+                    assert!(p.source.width <= w && p.source.height <= h);
+                }
+            }
+        }
+        assert!(plan(full(1920, 1080), 1080, "zoom").is_err());
     }
 }

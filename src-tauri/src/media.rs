@@ -1,6 +1,6 @@
 use crate::{
     buffer::Segment,
-    geometry::{self, DisplayGeometry},
+    geometry::{self, VideoPlan},
     model::Settings,
 };
 use anyhow::{bail, Context, Result};
@@ -222,49 +222,60 @@ impl Media {
         }
         bail!("No working video encoder")
     }
-    pub fn gpu_scaling_works(
+    /// Run the exact capture -> filter -> encoder chain for a few frames.
+    /// Returns FFmpeg's last error lines when it fails, for diagnostics.
+    pub fn probe_video(
         &self,
         s: &Settings,
+        scaler: Scaler,
         encoder: &str,
-        geometry: Option<&DisplayGeometry>,
-    ) -> bool {
-        if s.capture != "desktop-duplication" || encoder != "h264_nvenc" {
-            return false;
-        }
+        plan: Option<&VideoPlan>,
+    ) -> std::result::Result<(), String> {
         let mut c = command(&self.ffmpeg);
-        c.args(["-v", "error"]);
-        let Ok(filter) = video_input(&mut c, s, encoder, false, true, geometry) else {
-            return false;
-        };
-        let Ok(mut child) = c
-            .args([
-                "-vf",
-                &filter,
-                "-c:v",
-                encoder,
-                "-frames:v",
-                "3",
-                "-f",
-                "null",
-                "-",
-            ])
+        c.args(["-hide_banner", "-v", "error", "-nostdin"]);
+        let filter = video_input(&mut c, s, scaler, false, plan).map_err(|e| e.to_string())?;
+        c.args([
+            "-vf",
+            &filter,
+            "-c:v",
+            encoder,
+            "-frames:v",
+            "5",
+            "-f",
+            "null",
+            "-",
+        ]);
+        let mut child = c
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
-        else {
-            return false;
-        };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Ok(Some(result)) = child.try_wait() {
-                return result.success();
+            .map_err(|e| e.to_string())?;
+        let stderr = child.stderr.take();
+        let reader = thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut e) = stderr {
+                use std::io::Read;
+                let _ = e.read_to_string(&mut text);
+            }
+            text
+        });
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let status = loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                break Some(status);
             }
             if Instant::now() > deadline {
                 let _ = child.kill();
                 let _ = child.wait();
-                return false;
+                break None;
             }
             thread::sleep(Duration::from_millis(20));
+        };
+        let text = reader.join().unwrap_or_default();
+        match status {
+            Some(s) if s.success() => Ok(()),
+            Some(_) => Err(summarize_error(&text)),
+            None => Err("Probe timed out".into()),
         }
     }
     pub fn concat(
@@ -365,13 +376,119 @@ impl Media {
     }
 }
 
+/// How captured frames are scaled before encoding. Desktop Duplication frames
+/// live on the GPU that drives the display; on hybrid laptops that is often the
+/// integrated GPU while NVENC is on the discrete GPU, so a D3D11 texture cannot
+/// be handed to NVENC directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Scaler {
+    /// Direct3D 11 video processor, frames stay on the display GPU (zero copy).
+    D3d11,
+    /// Intel VPP + Quick Sync encode, frames stay on the Intel GPU (zero copy).
+    QsvZeroCopy,
+    /// Intel VPP scaling, then only the scaled NV12 frame is copied to the encoder.
+    QsvHybrid,
+    /// Full-resolution download and software scaling.
+    Cpu,
+}
+impl Scaler {
+    pub fn label(self) -> &'static str {
+        match self {
+            Scaler::D3d11 => "GPU zero-copy (Direct3D 11)",
+            Scaler::QsvZeroCopy => "GPU zero-copy (Intel Quick Sync)",
+            Scaler::QsvHybrid => "GPU scaling (Intel VPP) + scaled-frame transfer",
+            Scaler::Cpu => "CPU fallback",
+        }
+    }
+    /// Whether the scaler can produce this plan's frame (padding needs system memory).
+    pub fn supports(self, plan: &VideoPlan) -> bool {
+        !matches!(self, Scaler::D3d11 | Scaler::QsvZeroCopy) || !plan.padded()
+    }
+}
+
+/// Ordered scaler/encoder candidates for a requested encoder. The first chain
+/// whose real probe succeeds is used; the CPU path is always last.
+pub fn scaling_candidates(requested: &str) -> Vec<(Scaler, &'static str)> {
+    match requested {
+        "auto" => vec![
+            (Scaler::D3d11, "h264_nvenc"),
+            (Scaler::D3d11, "h264_amf"),
+            (Scaler::QsvZeroCopy, "h264_qsv"),
+            (Scaler::QsvHybrid, "h264_nvenc"),
+            (Scaler::QsvHybrid, "h264_amf"),
+        ],
+        "h264_nvenc" => vec![
+            (Scaler::D3d11, "h264_nvenc"),
+            (Scaler::QsvHybrid, "h264_nvenc"),
+        ],
+        "h264_amf" => vec![(Scaler::D3d11, "h264_amf"), (Scaler::QsvHybrid, "h264_amf")],
+        "h264_qsv" => vec![(Scaler::QsvZeroCopy, "h264_qsv")],
+        _ => vec![],
+    }
+}
+
+fn summarize_error(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.contains("non monotonically increasing dts"))
+        .collect();
+    let first = lines.first().copied().unwrap_or("Probe failed");
+    first.chars().take(240).collect()
+}
+
+/// Build the filter chain for a scaler. `plan` is required for Desktop Duplication.
+pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
+    let (iw, ih) = (plan.image_width, plan.image_height);
+    let pad = plan
+        .pad_filter()
+        .map(|p| format!(",{p}"))
+        .unwrap_or_default();
+    match scaler {
+        Scaler::D3d11 => format!("scale_d3d11=width={iw}:height={ih}:format=nv12,setsar=1"),
+        Scaler::QsvZeroCopy => {
+            format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12,setsar=1")
+        }
+        Scaler::QsvHybrid => format!(
+            "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12,hwdownload,format=nv12{pad},setsar=1"
+        ),
+        Scaler::Cpu => format!(
+            "hwdownload,format=bgra,scale={iw}:{ih}:flags=bilinear{pad},setsar=1,format=yuv420p"
+        ),
+    }
+}
+
+/// Desktop Duplication stamps frames with DWM present times. On high-refresh
+/// displays two frames often fall in one output slot and the next slot is
+/// empty, so CFR conversion drops one and duplicates another (visible judder).
+/// Snap each frame to its nearest slot, never earlier than one slot after the
+/// previous frame: every captured frame is kept and output stays on real time.
+pub fn regrid_filter(fps: u32) -> String {
+    let slot = format!("round(PTS*TB*{fps})/(TB*{fps})");
+    format!("setpts='if(isnan(PREV_OUTPTS),{slot},max(PREV_OUTPTS+1/(TB*{fps}),{slot}))'")
+}
+
+/// CPU filter for sources without a precomputed plan (GDI capture, synthetic).
+pub fn expression_filter(height: u32, mode: &str) -> String {
+    let (w, h) = geometry::canvas(height);
+    match mode {
+        "stretch" => format!("scale={w}:{h}:flags=bilinear,setsar=1,format=yuv420p"),
+        "fit" => format!(
+            "scale={w}:{h}:flags=bilinear:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p"
+        ),
+        "crop" => format!(
+            "scale={w}:{h}:flags=bilinear:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,format=yuv420p"
+        ),
+        _ => format!("scale=-2:{h}:flags=bilinear,setsar=1,format=yuv420p"),
+    }
+}
+
 pub fn video_input(
     c: &mut Command,
     s: &Settings,
-    encoder: &str,
+    scaler: Scaler,
     synthetic: bool,
-    gpu_scaling: bool,
-    geometry: Option<&DisplayGeometry>,
+    plan: Option<&VideoPlan>,
 ) -> Result<String> {
     if synthetic {
         c.args([
@@ -384,26 +501,24 @@ pub fn video_input(
                 s.fps
             ),
         ]);
-        return Ok(geometry::scale_filter(s.height, &s.canvas_mode, false));
+        return Ok(expression_filter(s.height, &s.canvas_mode));
     }
     if s.capture == "desktop-duplication" {
-        let geometry = geometry.context("Missing validated display geometry")?;
-        let rect = geometry.region(s.source_rect)?;
+        let plan = plan.context("Missing validated display geometry")?;
+        let rect = plan.source;
         c.args([
             "-f",
             "lavfi",
             "-i",
             &format!(
                 "ddagrab=output_idx={}:framerate={}:draw_mouse=1:video_size={}x{}:offset_x={}:offset_y={}",
-                s.display, s.fps,rect.width,rect.height,rect.x,rect.y
+                s.display, s.fps, rect.width, rect.height, rect.x, rect.y
             ),
         ]);
-        if encoder == "h264_nvenc" && gpu_scaling {
-            return Ok(geometry::scale_filter(s.height, &s.canvas_mode, true));
-        }
         return Ok(format!(
-            "hwdownload,format=bgra,{}",
-            geometry::scale_filter(s.height, &s.canvas_mode, false)
+            "{},{}",
+            regrid_filter(s.fps),
+            video_filter(plan, scaler)
         ));
     }
     c.args(["-f", "gdigrab", "-framerate", &s.fps.to_string(), "-i"]);
@@ -412,7 +527,7 @@ pub fn video_input(
     } else {
         "desktop".into()
     });
-    Ok(geometry::scale_filter(s.height, &s.canvas_mode, false))
+    Ok(expression_filter(s.height, &s.canvas_mode))
 }
 pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
     c.args([
@@ -425,6 +540,17 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
         "-bf",
         "0",
     ]);
+    // Segments must start with IDR frames so each 2s file decodes on its own and
+    // the segment muxer can split; QSV otherwise emits only one IDR per stream.
+    match encoder {
+        "h264_nvenc" => {
+            c.args(["-forced-idr", "1"]);
+        }
+        "h264_qsv" | "h264_amf" => {
+            c.args(["-forced_idr", "1"]);
+        }
+        _ => {}
+    }
     if encoder == "h264_nvenc" {
         c.args([
             "-preset",
@@ -463,7 +589,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
         "-c:a",
         "aac",
         "-b:a",
-        "192k",
+        &format!("{}k", s.audio_bitrate_kbps),
         "-ar",
         "48000",
     ]);
@@ -484,6 +610,105 @@ pub fn concat_durations(spans: &[f64], starts: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::{plan, CaptureRect};
+
+    fn args_for(encoder: &str) -> Vec<String> {
+        let mut c = Command::new("ffmpeg");
+        encoding_args(&mut c, &Settings::default(), encoder);
+        c.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn display_capture_regrids_timestamps_before_scaling() {
+        let source = CaptureRect {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1600,
+        };
+        let p = plan(source, 1080, "stretch").unwrap();
+        let mut c = Command::new("ffmpeg");
+        let s = Settings {
+            fps: 60,
+            ..Settings::default()
+        };
+        let f = video_input(&mut c, &s, Scaler::QsvZeroCopy, false, Some(&p)).unwrap();
+        assert!(f.starts_with(
+            "setpts='if(isnan(PREV_OUTPTS),round(PTS*TB*60)/(TB*60),max(PREV_OUTPTS+1/(TB*60)"
+        ));
+        assert!(f.contains(",hwmap=derive_device=qsv"));
+        let input: Vec<_> = c
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(input
+            .iter()
+            .any(|a| a.contains("ddagrab=output_idx=0:framerate=60")
+                && a.contains("video_size=2560x1600")));
+    }
+
+    #[test]
+    fn hardware_encoders_force_idr_segment_starts() {
+        // Regression: h264_qsv emitted a single IDR, so 2s segments never closed.
+        for (encoder, flag) in [
+            ("h264_qsv", "-forced_idr"),
+            ("h264_amf", "-forced_idr"),
+            ("h264_nvenc", "-forced-idr"),
+        ] {
+            let args = args_for(encoder);
+            let i = args.iter().position(|a| a == flag).expect(encoder);
+            assert_eq!(args[i + 1], "1");
+            assert!(args.iter().any(|a| a == "expr:gte(t,n_forced*2)"));
+        }
+    }
+
+    #[test]
+    fn zero_copy_paths_are_tried_before_transfers_and_cpu_is_never_a_candidate() {
+        let auto = scaling_candidates("auto");
+        assert_eq!(auto[0], (Scaler::D3d11, "h264_nvenc"));
+        let qsv = auto
+            .iter()
+            .position(|c| c.0 == Scaler::QsvZeroCopy)
+            .unwrap();
+        let hybrid = auto.iter().position(|c| c.0 == Scaler::QsvHybrid).unwrap();
+        assert!(qsv < hybrid);
+        assert!(scaling_candidates("h264_nvenc")
+            .iter()
+            .all(|c| c.1 == "h264_nvenc"));
+        for r in [
+            "auto",
+            "h264_nvenc",
+            "h264_qsv",
+            "h264_amf",
+            "libopenh264",
+            "mpeg4",
+        ] {
+            assert!(scaling_candidates(r).iter().all(|c| c.0 != Scaler::Cpu));
+        }
+    }
+
+    #[test]
+    fn letterboxed_plans_skip_paths_that_cannot_pad_on_the_gpu() {
+        let source = CaptureRect {
+            x: 0,
+            y: 0,
+            width: 1440,
+            height: 1080,
+        };
+        let fit = plan(source, 1080, "fit").unwrap();
+        assert!(!Scaler::D3d11.supports(&fit) && !Scaler::QsvZeroCopy.supports(&fit));
+        assert!(Scaler::QsvHybrid.supports(&fit) && Scaler::Cpu.supports(&fit));
+        assert!(video_filter(&fit, Scaler::QsvHybrid).contains("pad=1920:1080:240:0:black"));
+        assert!(video_filter(&fit, Scaler::Cpu).contains("pad=1920:1080:240:0:black"));
+        let stretch = plan(source, 1080, "stretch").unwrap();
+        assert!(Scaler::QsvZeroCopy.supports(&stretch));
+        let f = video_filter(&stretch, Scaler::QsvZeroCopy);
+        assert!(f.contains("vpp_qsv=w=1920:h=1080") && !f.contains("hwdownload"));
+        assert!(video_filter(&stretch, Scaler::Cpu)
+            .starts_with("hwdownload,format=bgra,scale=1920:1080"));
+    }
 
     #[test]
     fn first_segment_priming_offset_leaves_no_seam_gap() {

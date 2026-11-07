@@ -46,7 +46,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if !["self-test", "capture-test", "recover"].contains(&action) {
-        println!("replayx-cli encoders | devices | device-formats | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -87,6 +87,20 @@ fn main() -> Result<()> {
         settings.canvas_mode = "stretch".into();
         settings.height = 1080;
         settings.bitrate_mbps = 12;
+    }
+    // Optional overrides: fps=60 mode=stretch|fit|crop|native height=1080 encoder=h264_nvenc
+    for arg in args.iter().skip(4) {
+        match arg.split_once('=') {
+            Some(("fps", v)) => settings.fps = v.parse()?,
+            Some(("mode", v)) => settings.canvas_mode = v.into(),
+            Some(("height", v)) => settings.height = v.parse()?,
+            Some(("encoder", v)) => settings.encoder = v.into(),
+            Some(("bitrate", v)) => settings.bitrate_mbps = v.parse()?,
+            Some(("gpu", v)) => settings.gpu_scaling = v != "0",
+            Some(("replay", v)) => settings.replay_seconds = v.parse()?,
+            Some(("buffer", v)) => settings.buffer_mb = v.parse()?,
+            _ => {}
+        }
     }
     let data = if action == "recover" {
         PathBuf::from(args.get(2).expect("data directory required"))
