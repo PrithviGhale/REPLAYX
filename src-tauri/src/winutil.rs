@@ -390,7 +390,10 @@ mod tests {
 
     #[test]
     fn audio_session_enumeration_runs() {
-        // Hardware-dependent content; the enumeration itself must not fail.
+        // Hardware-dependent: hosted CI runners have no audio service/endpoints.
+        if std::env::var_os("REPLAYX_NO_HARDWARE").is_some() {
+            return;
+        }
         let sessions = audio_sessions().unwrap();
         assert!(sessions.iter().all(|s| s.pid != 0 && !s.name.is_empty()));
     }

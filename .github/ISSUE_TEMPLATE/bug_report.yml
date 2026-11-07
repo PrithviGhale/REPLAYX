@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in REPLAYX does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping. **Do not attach recordings, screenshots or logs that show private information** (Discord calls, messages, accounts).
+  - type: input
+    id: version
+    attributes: { label: REPLAYX version, description: "Settings → About", placeholder: "0.1.3-alpha.1" }
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: What did you do, what did you expect, and what happened instead? }
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Instant Replay, Recording, Audio, Video / scaling, Stretched resolution, Clips library, Hotkeys, Installer / updates, Other]
+    validations: { required: true }
+  - type: textarea
+    id: system
+    attributes:
+      label: System
+      description: Windows version, GPU(s) and driver, display resolution/refresh, laptop or desktop, game (if any)
+      placeholder: "Windows 11 24H2 · RTX 4070 Laptop + Iris Xe · 2560x1600 240 Hz · Valorant 1440x1080 stretched"
+    validations: { required: true }
+  - type: textarea
+    id: performance
+    attributes:
+      label: Performance page
+      description: While the problem happens, copy the Encoder, Scaling path, dropped frames and audio Breaks values
+  - type: textarea
+    id: steps
+    attributes: { label: Steps to reproduce }

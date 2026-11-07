@@ -8,7 +8,7 @@ permissions:
 jobs:
   checks:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +20,12 @@ jobs:
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
           rustup override set 1.98.0
-          New-Item -ItemType Directory -Force src-tauri/media | Out-Null
+      - name: Pinned FFmpeg runtime (checksum-verified)
+        shell: pwsh
+        run: ./scripts/setup-media.ps1
       - name: Build, unit tests and lint
         shell: pwsh
+        env:
+          # Hosted runners have no audio endpoints or displays.
+          REPLAYX_NO_HARDWARE: '1'
         run: ./scripts/check.ps1
