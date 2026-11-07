@@ -11,7 +11,7 @@ const stem = (n: string) => n.replace(/\.(mkv|mp4)$/i, '');
 const ext = (n: string) => n.match(/\.(mkv|mp4)$/i)?.[0] ?? '';
 
 export function ClipsPage() {
-  const { clips, refreshClips, run, busy, draft } = useApp();
+  const { clips, refreshClips, pendingSaves, run, busy, draft } = useApp();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<'new' | 'old' | 'long' | 'size'>('new');
@@ -49,6 +49,11 @@ export function ClipsPage() {
       </div>
 
       <div className={`library ${clip ? 'with-detail' : ''}`}>
+        {pendingSaves.map(save => <Card key={save.id}>
+          <Badge tone={save.stage === 'Failed' ? 'rec' : 'accent'}>{save.stage}</Badge>
+          <p>{save.error ?? `Preparing your clip · ${(save.elapsed_ms / 1000).toFixed(1)}s at last stage`}</p>
+          <span className="muted small">{save.stage === 'Failed' ? 'Source footage retained for recovery.' : 'The clip becomes playable after validation.'}</span>
+        </Card>)}
         {clips.length === 0 ? (
           <Card><Empty icon={FileVideo} title="Your library is empty">Enable Instant Replay and press save, or start a recording. Clips are stored in {draft.output_dir}.</Empty></Card>
         ) : list.length === 0 ? (

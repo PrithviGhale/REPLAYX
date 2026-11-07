@@ -14,12 +14,10 @@ export function useCapture() {
       stop_recording: 'Finalizing recording', save_replay: 'Saving replay', stop_all: 'Stopping capture', recover: 'Recovering',
     } as Record<ActionName, string>)[name];
     const result = await run(label, () => api.action<{ file?: string; probe?: Probe }>(name));
-    if (result && (name === 'save_replay' || name === 'stop_recording')) {
-      await refreshClips().catch(() => undefined);
-    }
+    if (result && name === 'recover') await refreshClips().catch(() => undefined);
     return result;
   }, [dirty, save, run, refreshClips]);
   const saved = (r: { file?: string; probe?: Probe } | undefined) =>
-    r?.probe ? `${r.file} · ${duration(r.probe.duration)} · verified by full decode` : undefined;
+    r?.probe ? `${r.file} · ${duration(r.probe.duration)} · ready` : undefined;
   return { go, busy, saved };
 }

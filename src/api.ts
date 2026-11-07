@@ -31,6 +31,7 @@ export type Status = {
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
   scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
+  duplicated_frames: number; last_save_timings: { stage: string; elapsed_ms: number }[];
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
@@ -84,7 +85,7 @@ export const emptyStatus: Status = {
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
   audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
   scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
-  hotkey_error: null,
+  hotkey_error: null, duplicated_frames: 0, last_save_timings: [],
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */

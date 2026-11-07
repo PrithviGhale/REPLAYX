@@ -5,6 +5,8 @@ try {
     if ($LASTEXITCODE) { throw 'npm ci failed' }
     npm.cmd run build
     if ($LASTEXITCODE) { throw 'Frontend build failed' }
+    npm.cmd run test:frontend
+    if ($LASTEXITCODE) { throw 'Frontend tests failed' }
     cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
     if ($LASTEXITCODE) { throw 'Rust formatting failed' }
     cargo test --manifest-path src-tauri/Cargo.toml --features desktop --locked

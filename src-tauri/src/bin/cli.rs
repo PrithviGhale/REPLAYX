@@ -57,7 +57,7 @@ fn main() -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&p)?);
         return Ok(());
     }
-    if !["self-test", "capture-test", "recover"].contains(&action) {
+    if !["self-test", "capture-test", "record-test", "recover"].contains(&action) {
         println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
@@ -126,6 +126,8 @@ fn main() -> Result<()> {
     }
     if action == "self-test" {
         engine.start_synthetic(false)?;
+    } else if action == "record-test" {
+        engine.start_recording()?;
     } else {
         engine.start_replay()?;
     }
@@ -154,7 +156,11 @@ fn main() -> Result<()> {
             )?;
         }
     }
-    let first = engine.save_replay()?;
+    let first = if action == "record-test" {
+        engine.stop_recording()?
+    } else {
+        engine.save_replay()?
+    };
     let second = engine.save_replay()?;
     let worker = thread::spawn(move || first.run());
     let b = second.run();

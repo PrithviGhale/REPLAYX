@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>REPLAYX silent motion fixture</title>
+<style>body{margin:0;overflow:hidden;background:#101820}canvas{display:block;width:100vw;height:100vh}</style>
+<canvas id="c"></canvas><script>
+const c=document.querySelector('canvas'),g=c.getContext('2d');const start=performance.now();let last=0,missed=0;
+function draw(now){c.width=innerWidth;c.height=innerHeight;g.scale(innerWidth/320,innerHeight/180);
+const t=(now-start)/1000,tick=Math.floor(t*60);if(now-last>25&&last)missed++;last=now;
+g.fillStyle='#101820';g.fillRect(0,0,320,180);
+for(let i=0;i<24;i++){g.fillStyle=tick&(1<<i)?'white':'black';g.fillRect(8+i*12,7,8,8)}
+for(let i=0;i<8;i++){g.fillStyle=['#f0a020','#30c0c0','#c080f0'][i%3];g.fillRect(t*(60+i*15)%345-25,25+i*13,25,9)}
+g.fillStyle='white';g.font='5px monospace';g.textAlign='center';g.fillText(`Silent motion • tick ${tick} • source callbacks >25ms: ${missed}`,160,155);
+g.fillText('F11 exits fullscreen • no sound or microphone',160,165);requestAnimationFrame(draw)}requestAnimationFrame(draw);
+</script>

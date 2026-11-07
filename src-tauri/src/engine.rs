@@ -34,6 +34,8 @@ pub struct Status {
     pub free_bytes: u64,
     pub frames: u64,
     pub dropped_frames: u64,
+    pub duplicated_frames: u64,
+    pub last_save_timings: Vec<media::StageTiming>,
     pub fps: f64,
     pub elapsed: f64,
     pub write_mbps: f64,
@@ -66,6 +68,7 @@ pub struct Status {
 struct Progress {
     frames: AtomicU64,
     dropped: AtomicU64,
+    duplicated: AtomicU64,
     last_ms: AtomicU64,
     fps: AtomicU64,
     lines: Mutex<Vec<String>>,
@@ -126,13 +129,34 @@ pub struct SaveJob {
     path: PathBuf,
     expected_audio: usize,
     dir: PathBuf,
+    requested: Instant,
 }
 impl SaveJob {
     pub fn run(self) -> Result<(PathBuf, Probe)> {
-        let probe = self
-            .media
-            .concat(&self.segments, &self.path, self.expected_audio)?;
-        cleanup_saved_snapshot(&self.dir, &self.segments)?;
+        self.run_progress(|_| {})
+    }
+    pub fn run_progress(self, mut progress: impl FnMut(&str)) -> Result<(PathBuf, Probe)> {
+        let prepared_ms = self.requested.elapsed().as_millis() as u64;
+        let mut probe = self.media.concat_progress(
+            &self.segments,
+            &self.path,
+            self.expected_audio,
+            false,
+            &mut progress,
+        )?;
+        for t in &mut probe.save_timings {
+            t.elapsed_ms += prepared_ms;
+        }
+        probe.save_timings.insert(
+            0,
+            media::StageTiming {
+                stage: "Snapshot prepared".into(),
+                elapsed_ms: prepared_ms,
+            },
+        );
+        // Publication succeeded. Cleanup failure must not turn a playable clip
+        // into a failed save; remaining pins are recoverable on next launch.
+        let _ = cleanup_saved_snapshot(&self.dir, &self.segments);
         Ok((self.path, probe))
     }
 }
@@ -279,6 +303,7 @@ impl Engine {
         Ok(())
     }
     pub fn stop_recording(&self) -> Result<SaveJob> {
+        let requested = Instant::now();
         let mut i = self.0.lock().unwrap();
         if i.recording.is_none() {
             bail!("No active recording")
@@ -295,6 +320,7 @@ impl Engine {
             path: i.clip_path("Recording"),
             expected_audio: expected,
             dir: rec.dir,
+            requested,
         };
         i.status.saving += 1;
         if restart {
@@ -307,6 +333,7 @@ impl Engine {
         Ok(job)
     }
     pub fn save_replay(&self) -> Result<SaveJob> {
+        let requested = Instant::now();
         let mut i = self.0.lock().unwrap();
         i.collect_segments()?;
         let dir = i
@@ -325,15 +352,18 @@ impl Engine {
             path: i.clip_path("Replay"),
             expected_audio: i.expected_audio(),
             dir,
+            requested,
         })
     }
     pub fn complete_save(&self, result: &Result<(PathBuf, Probe)>) {
         let mut i = self.0.lock().unwrap();
         i.status.saving = i.status.saving.saturating_sub(1);
         match result {
-            Ok((p, _)) => {
+            Ok((p, probe)) => {
                 i.status.last_clip = p.file_name().map(|p| p.to_string_lossy().into());
-                i.status.notice = Some("Clip saved and fully decoded for verification".into());
+                i.status.notice =
+                    Some("Clip ready — streams and playback boundaries checked".into());
+                i.status.last_save_timings = probe.save_timings.clone();
             }
             Err(e) => {
                 i.status.error = Some(format!("Save failed; source segments preserved: {e:#}"));
@@ -610,6 +640,10 @@ impl Inner {
             "-y",
             "-stats_period",
             "0.5",
+            "-filter_complex_threads",
+            "2",
+            "-filter_buffered_frames",
+            "64",
             "-progress",
             "pipe:1",
         ]);
@@ -748,6 +782,10 @@ impl Inner {
                         }
                         "drop_frames" => {
                             p.dropped
+                                .store(value.parse().unwrap_or(0), Ordering::Relaxed);
+                        }
+                        "dup_frames" => {
+                            p.duplicated
                                 .store(value.parse().unwrap_or(0), Ordering::Relaxed);
                         }
                         "fps" => {
@@ -1048,6 +1086,7 @@ impl Inner {
         }
         self.status.frames = p.progress.frames.load(Ordering::Relaxed);
         self.status.dropped_frames = p.progress.dropped.load(Ordering::Relaxed);
+        self.status.duplicated_frames = p.progress.duplicated.load(Ordering::Relaxed);
         self.status.fps = f64::from_bits(p.progress.fps.load(Ordering::Relaxed));
         self.status.elapsed = p.started.elapsed().as_secs_f64();
         self.status.audio_peaks = p
@@ -1158,6 +1197,7 @@ impl Inner {
                 path: self.clip_path("Recording-part"),
                 expected_audio: expected,
                 dir: r.dir,
+                requested: Instant::now(),
             });
         if job.is_some() {
             self.status.saving += 1;

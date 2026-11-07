@@ -22,6 +22,7 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 type Reply<T> = Result<T, String>;
+type ClipCache = Arc<Mutex<HashMap<PathBuf, (u64, std::time::SystemTime, Option<Probe>)>>>;
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -31,6 +32,9 @@ struct AppState {
     updating: Arc<Mutex<bool>>,
     icons: Arc<Mutex<HashMap<String, Option<String>>>>,
     testing_audio: Arc<Mutex<bool>>,
+    app: tauri::AppHandle,
+    clip_cache: ClipCache,
+    thumbnail_gate: Arc<Mutex<()>>,
 }
 impl AppState {
     fn data_dir(&self) -> PathBuf {
@@ -63,15 +67,56 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
         "stop_replay" => engine.stop_replay(),
         "start_recording" => engine.start_recording(),
         "save_replay" | "stop_recording" => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let began = std::time::Instant::now();
+            let emit = |stage: &str, clip: Option<Clip>, error: Option<String>| {
+                let _ = state.app.emit("clip-save", serde_json::json!({"id":id,"stage":stage,"clip":clip,"error":error,"elapsed_ms":began.elapsed().as_millis() as u64}));
+            };
+            emit("Saving", None, None);
             let job = if name == "save_replay" {
                 engine.save_replay()
             } else {
                 engine.stop_recording()
-            }
-            .map_err(err)?;
+            };
+            let job = match job {
+                Ok(job) => job,
+                Err(e) => {
+                    emit("Failed", None, Some(e.to_string()));
+                    return Err(err(e));
+                }
+            };
             drop(updating);
-            let result = job.run();
+            let result = job.run_progress(|stage| {
+                if stage != "Ready" {
+                    emit(stage, None, None);
+                }
+            });
             engine.complete_save(&result);
+            match &result {
+                Ok((path, probe)) => {
+                    let modified = fs::metadata(path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    state
+                        .clip_cache
+                        .lock()
+                        .unwrap()
+                        .insert(path.clone(), (probe.bytes, modified, Some(probe.clone())));
+                    emit(
+                        "Ready",
+                        Some(Clip {
+                            name: path.file_name().unwrap().to_string_lossy().into(),
+                            modified: modified
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            probe: Some(probe.clone()),
+                        }),
+                        None,
+                    );
+                }
+                Err(e) => emit("Failed", None, Some(e.to_string())),
+            }
             return result.map(|(p,probe)|serde_json::json!({"file":p.file_name().unwrap().to_string_lossy(),"probe":probe})).map_err(err);
         }
         "stop_all" => engine.shutdown(),
@@ -191,7 +236,10 @@ async fn app_icon(path: String, state: State<'_, AppState>) -> Reply<Option<Stri
 async fn clip_thumbnail(name: String, state: State<'_, AppState>) -> Reply<String> {
     let root = state.engine.settings().output_dir;
     let cache = state.data_dir().join("thumbnails");
+    let gate = state.thumbnail_gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // A library of visible cards must not start dozens of simultaneous decoders.
+        let _permit = gate.lock().unwrap();
         let path = safe_clip(&root, &name).map_err(err)?;
         let meta = fs::metadata(&path).map_err(err)?;
         let modified = meta
@@ -302,6 +350,7 @@ struct Clip {
 #[tauri::command]
 async fn clips(state: State<'_, AppState>) -> Reply<Vec<Clip>> {
     let root = state.engine.settings().output_dir;
+    let cache = state.clip_cache.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let media = Media::discover().map_err(err)?;
         let mut out = Vec::new();
@@ -315,6 +364,23 @@ async fn clips(state: State<'_, AppState>) -> Reply<Vec<Clip>> {
                 continue;
             };
             let meta = fs::metadata(&path).map_err(err)?;
+            let stamp = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let cached = cache
+                .lock()
+                .unwrap()
+                .get(&path)
+                .filter(|(size, time, _)| *size == meta.len() && *time == stamp)
+                .cloned();
+            let probe = if let Some((_, _, probe)) = cached {
+                probe
+            } else {
+                let probe = media.probe(&path).ok();
+                cache
+                    .lock()
+                    .unwrap()
+                    .insert(path.clone(), (meta.len(), stamp, probe.clone()));
+                probe
+            };
             out.push(Clip {
                 name,
                 modified: meta
@@ -323,7 +389,7 @@ async fn clips(state: State<'_, AppState>) -> Reply<Vec<Clip>> {
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
-                probe: media.probe(&path).ok(),
+                probe,
             });
         }
         out.sort_by_key(|c| std::cmp::Reverse(c.modified));
@@ -591,6 +657,9 @@ pub fn run() {
                 updating: Arc::new(Mutex::new(false)),
                 icons: Arc::new(Mutex::new(HashMap::new())),
                 testing_audio: Arc::new(Mutex::new(false)),
+                app: app.handle().clone(),
+                clip_cache: Arc::new(Mutex::new(HashMap::new())),
+                thumbnail_gate: Arc::new(Mutex::new(())),
             });
             // Keep the startup entry pointing at this executable if enabled.
             if settings.launch_at_startup {

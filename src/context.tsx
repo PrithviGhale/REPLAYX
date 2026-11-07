@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText, native, previewSettings, type Caps, type Clip, type Settings } from './api';
 import { refreshNow } from './store';
+import { listen } from '@tauri-apps/api/event';
+import { applySaveEvent, upsertClip, type SaveEvent } from './save-events';
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string };
 type Ctx = {
@@ -10,6 +12,7 @@ type Ctx = {
   setMix: (index: number, volume: number, muted: boolean) => Promise<void>;
   caps: Caps | null; refreshCaps: () => Promise<void>;
   clips: Clip[]; refreshClips: () => Promise<void>;
+  pendingSaves: SaveEvent[];
   busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string) => Promise<T | undefined>;
   toast: (kind: Toast['kind'], text: string) => void; toasts: Toast[]; dismiss: (id: number) => void;
 };
@@ -21,6 +24,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(!native);
   const [caps, setCaps] = useState<Caps | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
+  const [pendingSaves, setPendingSaves] = useState<SaveEvent[]>([]);
+  const libraryRevision = useRef(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
@@ -33,7 +38,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [dismiss]);
 
   const refreshCaps = useCallback(async () => { if (native) setCaps(await api.capabilities()); }, []);
-  const refreshClips = useCallback(async () => { if (native) setClips(await api.clips()); }, []);
+  const refreshClips = useCallback(async () => {
+    if (!native) return;
+    const revision = libraryRevision.current;
+    const result = await api.clips();
+    if (revision === libraryRevision.current) setClips(result);
+  }, []);
+
+  useEffect(() => {
+    if (!native) return;
+    let closed = false;
+    const subscription = listen<SaveEvent>('clip-save', ({ payload: event }) => {
+      if (closed) return;
+      setPendingSaves(p => applySaveEvent(p, event));
+      if (event.stage === 'Ready' && event.clip) {
+        libraryRevision.current++;
+        setClips(c => upsertClip(c, event.clip!));
+        refreshNow();
+      }
+    });
+    return () => { closed = true; void subscription.then(unlisten => unlisten()); };
+  }, []);
 
   useEffect(() => {
     if (!native) return;
@@ -77,7 +102,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (native) await api.setMix(index, volume, muted).catch(e => toast('error', errorText(e)));
   }, [toast]);
 
-  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, busy, run, toast, toasts, dismiss };
+  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, pendingSaves, busy, run, toast, toasts, dismiss };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

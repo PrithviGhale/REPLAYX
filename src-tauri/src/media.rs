@@ -39,6 +39,13 @@ pub struct Probe {
     pub audio_tracks: usize,
     pub width: u64,
     pub height: u64,
+    #[serde(default)]
+    pub save_timings: Vec<StageTiming>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageTiming {
+    pub stage: String,
+    pub elapsed_ms: u64,
 }
 #[derive(Serialize)]
 pub struct Encoder {
@@ -144,6 +151,7 @@ impl Media {
                 .unwrap_or(0.),
             width: video["width"].as_u64().unwrap_or(0),
             height: video["height"].as_u64().unwrap_or(0),
+            save_timings: Vec::new(),
         })
     }
     pub fn verify(&self, path: &Path, expected_audio: usize) -> Result<Probe> {
@@ -301,6 +309,26 @@ impl Media {
         destination: &Path,
         expected_audio: usize,
     ) -> Result<Probe> {
+        self.concat_progress(segments, destination, expected_audio, true, &mut |_| {})
+    }
+    pub fn concat_progress(
+        &self,
+        segments: &[Segment],
+        destination: &Path,
+        expected_audio: usize,
+        full_decode: bool,
+        progress: &mut impl FnMut(&str),
+    ) -> Result<Probe> {
+        let started = Instant::now();
+        let mut timings = Vec::new();
+        let mut mark = |stage: &str| {
+            timings.push(StageTiming {
+                stage: stage.into(),
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            });
+            progress(stage);
+        };
+        mark("Inspecting segments");
         if segments.is_empty() {
             bail!("No finalized footage yet. Wait for the first 2-second segment.")
         }
@@ -333,6 +361,7 @@ impl Media {
             })
             .collect::<String>();
         fs::write(&list, lines)?;
+        mark("Remuxing");
         let part = destination.with_extension("partial.mkv");
         let output = command(&self.ffmpeg)
             .args([
@@ -340,6 +369,7 @@ impl Media {
                 "-v",
                 "error",
                 "-nostdin",
+                "-xerror",
                 "-f",
                 "concat",
                 "-safe",
@@ -364,7 +394,12 @@ impl Media {
                 String::from_utf8_lossy(&output.stderr)
             )
         }
-        let verified = self.verify(&part, expected_audio)?;
+        mark("Validating");
+        let mut verified = if full_decode {
+            self.verify(&part, expected_audio)?
+        } else {
+            self.verify_playable(&part, expected_audio)?
+        };
         let expected: f64 = segments.iter().map(|s| s.end - s.start).sum();
         if (verified.duration - expected).abs() > 0.75 + (segments.len() as f64 * 0.05) {
             bail!(
@@ -373,7 +408,43 @@ impl Media {
             )
         }
         fs::rename(&part, destination)?;
+        mark("Ready");
+        verified.save_timings = timings;
         Ok(verified)
+    }
+    /// The remux has already read every packet. Validate stream layout, duration
+    /// and decode both ends before publication. Full decode remains available
+    /// for recovery, export and offline acceptance tests, not every live save.
+    fn verify_playable(&self, path: &Path, expected_audio: usize) -> Result<Probe> {
+        let p = self.probe(path)?;
+        if p.audio_tracks != expected_audio || p.width == 0 || p.height == 0 {
+            bail!("Saved clip has an unexpected stream layout")
+        }
+        for at in [0., (p.duration - 1.).max(0.)] {
+            let out = command(&self.ffmpeg)
+                .args([
+                    "-v",
+                    "error",
+                    "-xerror",
+                    "-threads",
+                    "2",
+                    "-ss",
+                    &format!("{at:.3}"),
+                    "-i",
+                ])
+                .arg(path)
+                .args([
+                    "-t", "1", "-map", "0:v", "-map", "0:a?", "-threads", "1", "-f", "null", "-",
+                ])
+                .output()?;
+            if !out.status.success() {
+                bail!(
+                    "Saved clip failed playback validation: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            }
+        }
+        Ok(p)
     }
     /// JPEG still from roughly a third of the way into the clip.
     pub fn thumbnail(&self, path: &Path, duration: f64, width: u32) -> Result<Vec<u8>> {
@@ -513,14 +584,12 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     }
 }
 
-/// Desktop Duplication stamps frames with DWM present times. On high-refresh
-/// displays two frames often fall in one output slot and the next slot is
-/// empty, so CFR conversion drops one and duplicates another (visible judder).
-/// Snap each frame to its nearest slot, never earlier than one slot after the
-/// previous frame: every captured frame is kept and output stays on real time.
+/// Quantize acquisition time without pushing a burst into future slots.
+/// CFR selects/drops colliding frames and repeats missing slots. The previous
+/// max(previous+slot, timestamp) accumulated phase error after stalls/bursts,
+/// concealing drops while moving video ahead of its monotonic capture clock.
 pub fn regrid_filter(fps: u32) -> String {
-    let slot = format!("round(PTS*TB*{fps})/(TB*{fps})");
-    format!("setpts='if(isnan(PREV_OUTPTS),{slot},max(PREV_OUTPTS+1/(TB*{fps}),{slot}))'")
+    format!("setpts=round(PTS*TB*{fps})/(TB*{fps})")
 }
 
 /// CPU filter for sources without a precomputed plan (GDI capture, synthetic).
@@ -588,6 +657,10 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
     c.args([
         "-c:v",
         encoder,
+        "-r",
+        &s.fps.to_string(),
+        "-enc_time_base",
+        &format!("1:{}", s.fps),
         "-b:v",
         &format!("{}M", s.bitrate_mbps),
         "-g",
@@ -709,9 +782,7 @@ mod tests {
             ..Settings::default()
         };
         let f = video_input(&mut c, &s, Scaler::QsvZeroCopy, false, Some(&p)).unwrap();
-        assert!(f.starts_with(
-            "setpts='if(isnan(PREV_OUTPTS),round(PTS*TB*60)/(TB*60),max(PREV_OUTPTS+1/(TB*60)"
-        ));
+        assert!(f.starts_with("setpts=round(PTS*TB*60)/(TB*60),"));
         assert!(f.contains(",hwmap=derive_device=qsv"));
         let input: Vec<_> = c
             .get_args()
