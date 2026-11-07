@@ -25,7 +25,7 @@ FFmpeg's `ddagrab` implements Desktop Duplication. Its frames are D3D11 textures
 
 Letterboxed plans skip the zero-copy scalers, because padding happens in system memory. The selection is cached per adapter, display, plan and encoder settings. A GPU path that passes its probe but fails before the first validated segment is denied for that configuration, and capture restarts on the next path. The chosen path, encoded size and rejection reasons are part of `Status`. Hardware encoders force IDR frames at the 2 s keyframes, so every segment decodes on its own.
 
-Desktop Duplication stamps frames with DWM present times. At 60 fps on high-refresh displays, two frames often land in one output slot and the next slot stays empty, which CFR conversion turns into a drop plus a duplicate. `media::regrid_filter` snaps each frame to its nearest slot, never earlier than one slot after the previous frame. Every frame is kept and output stays tied to real time.
+FFmpeg's `ddagrab` paces acquisition with a monotonic clock and stamps each frame at acquisition time (not the DWM present time, as 0.2.0 documentation wrongly said). `media::regrid_filter` rounds each timestamp to its nearest 1/fps slot before constant-frame-rate output. 0.2.0 instead forced every frame to at least one slot after the previous one; on real motion that built up a backlog and caused 7% repeated pictures with freezes of up to 53 frames, the stutter users saw. With rounding, a saved 1080p60 replay of a 60 Hz motion pattern showed 0.36% single-frame slips in steady state (see VALIDATION.md). Windows Graphics Capture (`gfxcapture`) was measured as an alternative and repeated 15.7% of pictures, so it is not used.
 
 The first finalized segment's dimensions must equal the plan's frame, which catches stale geometry or desktop leakage. GDI all-desktop and window-title modes are explicit user choices, scaled on the CPU. A failure never silently switches to capturing a wider desktop region.
 
@@ -63,6 +63,35 @@ Output is first written as `.partial.mkv`. Only after stream inspection, duratio
 ## Watchdog
 
 A background thread checks process exit, encoded-frame progress, finalized segments, audio-source errors, and storage every 200ms. A six-second frame stall, eight-second finalized-segment stall, three-second PCM write stall after startup, missing microphone packets, audio queue overflow, or storage below a 128MiB reserve stops capture and exposes Error. Startup requires 256MiB free on both volumes. Healthy capture requires encoded frames and a probed finalized segment with the expected tracks and canvas dimensions. These are liveness checks, not proof of perceptual audio quality or synchronization.
+
+## Saving clips
+
+A save hard-links the selected finalized segments into a snapshot (milliseconds), then a worker joins them
+with the concat demuxer and stream copy (no re-encode), validates stream layout, duration and decodes the
+first and last second, and only then renames the `.partial.mkv` into place and reports `Ready`.
+Each finalized segment's container start time is probed once in the background at below-normal priority
+(the session's first segment starts after AAC priming and its last can also start late, so starts are never
+assumed); saves only probe segments still unknown. The concat script gives every segment minimal probing,
+which removed about 30 ms of per-file stream detection. Stopping a recording records the encoder's output time
+and waits, without holding the engine lock, for the running encoder to finalize the segment containing that
+moment; capture and replay continue. Save commands return at once; progress and the finished clip are sent
+as `clip-save` events.
+
+## Game detection and clip organization
+
+`games.rs` samples the foreground window's process once a second while capturing (documented Win32 calls only:
+`GetForegroundWindow`, `GetWindowThreadProcessId`, `QueryFullProcessImageNameW`). The executable is classified
+by user mappings, a table of known game executables, an explicit list of launchers/helpers that are never the
+game, and store install folders (`steamapps\common\<Game>`, `Epic Games\<Game>`, …). Only changes are stored.
+A clip's game is attributed over its own footage window: the top game needs 30% of the time and twice the
+runner-up's, otherwise `Mixed` (games dominate) or `Desktop`. Clips are saved as
+`<Game>\<Game>_YYYY-MM-DD_HH-MM-SS.mkv` (sanitized, collision-safe) with `REPLAYX_GAME`/`REPLAYX_KIND` tags.
+
+`library.rs` defines clip ids as paths relative to the clips folder (one category level), validates them
+before any filesystem access, and keeps a persistent metadata index (`library-index.json`) so unchanged clips
+are never probed again. The UI receives the list immediately and stale metadata later via `library-updated`.
+Deletion goes to the Recycle Bin with a shell-safe path (0.2.0 passed a `\\?\` verbatim path, which the shell
+rejects with error 124, so Delete never worked).
 
 ## Desktop shell and UI
 

@@ -303,7 +303,15 @@ fn main() -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&p)?);
         return Ok(());
     }
-    if !["self-test", "capture-test", "record-test", "recover"].contains(&action) {
+    if ![
+        "self-test",
+        "record-self-test",
+        "capture-test",
+        "record-test",
+        "recover",
+    ]
+    .contains(&action)
+    {
         println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
@@ -321,7 +329,7 @@ fn main() -> Result<()> {
         bitrate_mbps: 3,
         ..Default::default()
     };
-    if action == "self-test" {
+    if action == "self-test" || action == "record-self-test" {
         settings.audio.clear();
         settings.audio.push(Default::default());
         settings.audio.push(Default::default());
@@ -372,6 +380,12 @@ fn main() -> Result<()> {
     }
     if action == "self-test" {
         engine.start_synthetic(false)?;
+    } else if action == "record-self-test" {
+        // Synthetic source (generated pattern and tones; nothing is captured or
+        // played): replay first, then a recording on the same pipeline.
+        engine.start_synthetic(false)?;
+        thread::sleep(Duration::from_secs(3));
+        engine.start_recording()?;
     } else if action == "record-test" {
         engine.start_recording()?;
     } else {
@@ -402,11 +416,22 @@ fn main() -> Result<()> {
             )?;
         }
     }
-    let first = if action == "record-test" {
+    let stop_started = std::time::Instant::now();
+    let frames_before = engine.status().frames;
+    let first = if action == "record-test" || action == "record-self-test" {
         engine.stop_recording()?
     } else {
         engine.save_replay()?
     };
+    let handover_ms = stop_started.elapsed().as_millis();
+    if action == "record-self-test" {
+        thread::sleep(Duration::from_secs(2));
+        let s = engine.status();
+        println!(
+            "stop -> job handed over in {handover_ms} ms; replay still on: {} ({}); frames {} -> {} during the next 2 s",
+            s.replay, s.state, frames_before, s.frames
+        );
+    }
     let second = engine.save_replay()?;
     let worker = thread::spawn(move || first.run());
     let b = second.run();
@@ -416,7 +441,11 @@ fn main() -> Result<()> {
     engine.shutdown()?;
     let (path, probe) = a?;
     let (other, _) = b?;
-    let result = serde_json::json!({"kind":action,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
+    println!(
+        "first clip ready {} ms after the stop/save request",
+        stop_started.elapsed().as_millis()
+    );
+    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
     std::fs::write(run.join("report.json"), serde_json::to_vec_pretty(&result)?)?;
     std::fs::write(
         run.join("samples.json"),

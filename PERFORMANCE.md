@@ -1,12 +1,39 @@
 # Performance evidence and pending benchmark
 
+## 0.2.1-alpha.1
+
+**Smoothness (decoded motion, not FPS counters).** A silent full-screen pattern encodes a 60 Hz tick in on-screen bits; `scripts/motion-check.py` reads the tick from every decoded frame (validated against an independent numpy implementation). 20 s runs, 2560×1600 @ 240 Hz → 1920×1080, Quick Sync zero-copy:
+
+| Capture and timing | Repeated pictures | Longest freeze |
+| --- | --- | --- |
+| `ddagrab` + max(previous+slot) re-grid (0.2.0) | 7.17% | 53 frames |
+| `ddagrab`, no re-timing | 1.08% | 7 frames |
+| `ddagrab` + slot rounding (0.2.1) | 0.83%, all in the first 0.3 s | 8 frames (startup only) |
+| `gfxcapture` (Windows Graphics Capture) + rounding | 15.7% | 6 frames |
+
+Full app pipeline (capture → segments → saved replay), 28 s: startup 0.3 s of repeats, then **6 repeated and 7 skipped pictures in 1,659 frames (0.36%)**, isolated single-frame slips. The 0.2.0 "0 dropped frames" figure below came from FFmpeg's counter on an almost static desktop and did not show this.
+
+**Saving** (synthetic 1080p60 12 Mbps fixtures, `replayx-cli save-bench`; game running in the background at the time):
+
+| Clip | 0.2.0 | 0.2.1 (segments probed during capture) |
+| --- | --- | --- |
+| 60 s replay (30 segments, 93 MB) | ≈6 s | 0.96 s |
+| 10 min (300 segments, 913 MB) | ≈56–62 s | 5.0 s |
+
+Real capture: a saved replay was ready **608 ms** after the save request. Synthetic recording: Stop handed over the clip in 706 ms (waiting for the in-flight segment), ready ≈1.0 s after Stop, with replay still encoding.
+
+**Library** (`replayx-cli library-bench`, fixture clips): 100 clips 6.5 s → 46 ms (index reload); 1,000 clips 478 ms warm, 20.4 s for the one-time first index on 4 threads, which runs in the background while the list is already shown.
+
+**Game impact** of 0.2.1 is not measured: no in-game FPS or frame-time comparison has been run. Overhead added by 0.2.1: one foreground-process query per second while capturing, and one small `ffprobe` per finalized 2 s segment at below-normal priority.
+
+
 ## 0.2.0-alpha.1 (Zephyrus M16: Iris Xe display GPU + RTX 4070 Laptop, 2560×1600 @ 240 Hz, game running)
 
 | Path (1080p60) | Encoder process CPU, 15 s isolated | Whole capture-test CPU, 30 s | Dropped frames |
 | --- | --- | --- | --- |
 | CPU scaling + NVENC (0.1.x path) | 1.94 cores | 2.05 cores | 57 / 2,665 |
 | Intel VPP + NVENC | 1.07 cores | 1.76 cores | 36 / 2,788 |
-| Intel Quick Sync zero-copy | 0.56 cores | 1.17–1.32 cores | 37–46 before re-gridding, **0 / 2,658 after** |
+| Intel Quick Sync zero-copy | 0.56 cores | 1.17–1.32 cores | 37–46 (FFmpeg counter; see the 0.2.1 correction above) |
 
 The "whole capture-test" figure includes REPLAYX, FFmpeg, startup probes and the full decode that verifies both saved clips, sampled once per second (`scripts/measure-capture.ps1`). Peak private memory summed across all of those processes was 0.8–1.2 GB. How it splits between the recorder and the save-verification decoders was not measured, so this is not a steady-state recorder figure. GPU utilization, encoder latency and in-game FPS impact were **not** measured.
 

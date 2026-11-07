@@ -1,3 +1,33 @@
+# Validation — 0.2.1-alpha.1 (November 7, 2026)
+
+Same laptop as below (Iris Xe drives the 2560×1600 @ 240 Hz panel; RTX 4070 Laptop). Roblox was open in the background for the whole session; capture tests ran only after the user approved them, while nobody was playing.
+
+## Hardware tests actually run
+
+| Test | Result |
+| --- | --- |
+| A. Smooth 60 fps (silent motion pattern, decoded tick per frame) | Current pipeline 0.83% repeats in 20 s, all in the first 0.3 s; steady state 0 repeats/0 skips over 1,181 frames. Full app path (saved replay, 28 s): 0.36% isolated single-frame slips after startup. 0.2.0's re-grid: 7.17%, freezes up to 53 frames. `gfxcapture`: 15.7%. |
+| B. Replay save (real capture) | Saved into `Desktop\Desktop_2026-11-07_18-05-31.mkv`, 1920×1080 60 fps, ready 608 ms after the save request (snapshot 24 ms, no segment probing needed, remux 186 ms, validation 397 ms). Concurrent second save also succeeded. |
+| C. Stop recording (synthetic source: generated pattern/tones, nothing captured) | Clip handed over 706 ms after Stop, ready ≈1.0 s after Stop; replay kept encoding (685 → 777 frames in the next 2 s). 22.0 s file with titled tracks. A 60 s real-desktop recording was not run (outside the approved capture time). |
+| E. Recycle Bin | Root cause reproduced with a temporary file (`\\?\` path → SHFileOperation error 124, file kept). After the fix a real round trip moved a temporary 1-byte file to the Recycle Bin. |
+| F. Game detection (read-only) | Live foreground sampling classified Opera and VS Code as desktop apps. Classifier verified against the real installed paths of running processes: RobloxPlayerBeta → Roblox; EpicGamesLauncher, EpicWebHelper, EpicOnlineServicesUserHelper, steam, steamwebhelper, RobloxCrashHandler → not games. **Detection while actually playing Fortnite, Roblox or Valorant in the foreground was not observed.** |
+
+## Measurements without capture (fixtures)
+
+- Save path, synthetic 1080p60 12 Mbps segments: 60 s replay ≈6 s → 0.96 s; 10 min ≈56–62 s → 5.0 s. Concat per-file probing removed: 10 min remux 10.0 s → 3.9 s with packet-identical output (framemd5).
+- Real capture segments: the first segment of a session starts at 0.021 s (AAC priming) and the final segment of one session at 0.032 s, so start times are probed per segment, not assumed.
+- Library (D): 10 clips 623 → 15 ms, 100 clips 6,477 → 46 ms, 1,000 clips 478 ms warm (first-ever index 20.4 s in the background); filtering 1,000 clips takes microseconds.
+
+## Automated
+
+Rust: 79 tests (library ids/traversal/delete/in-use/index, game classification and attribution, concat list, audio timeline, geometry, encoders). Frontend: 8 tests (save events, library filters, delete/selection, category moves). Clippy `-D warnings`, rustfmt and TypeScript clean.
+
+## Not verified
+
+Real gameplay detection (Fortnite/Roblox/Valorant in the foreground), 15-minute soak (not authorized this session), in-game FPS impact, audio with real devices after these changes (only synthetic tones; the audio timeline code was not modified and its tests pass), a 60 s real-desktop recording, installer install/upgrade, stretched Valorant.
+
+---
+
 # Validation — 0.2.0-alpha.1 (November 7, 2026)
 
 All measurements are on the development laptop: **ASUS ROG Zephyrus M16 (GU604VI), Intel Iris Xe + RTX 4070 Laptop GPU (Optimus), 2560×1600 @ 240 Hz panel at 125% scaling, Windows 11**. The panel is driven by the Intel GPU. A game (Fortnite) was running for the whole session, so every capture also had a real game in the background. Release CLI builds were used unless noted.

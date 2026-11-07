@@ -10,7 +10,8 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--seconds', type=int, default=20)
-parser.add_argument('--mode', choices=['old', 'fps', 'round'], required=True)
+parser.add_argument('--mode', choices=['old', 'fps', 'round', 'none'], required=True)
+parser.add_argument('--source', choices=['ddagrab', 'gfx'], default='ddagrab')
 parser.add_argument('--encoder', choices=['qsv', 'hybrid', 'cpu'], default='qsv')
 parser.add_argument('--name', required=True)
 args = parser.parse_args()
@@ -22,6 +23,7 @@ filters = {
     'old': "setpts='if(isnan(PREV_OUTPTS),round(PTS*TB*60)/(TB*60),max(PREV_OUTPTS+1/(TB*60),round(PTS*TB*60)/(TB*60)))'",
     'fps': 'fps=fps=60:start_time=0:round=near',
     'round': 'setpts=round(PTS*TB*60)/(TB*60)',
+    'none': 'null',
 }
 scalers = {
     'qsv': 'hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,setsar=1',
@@ -30,7 +32,8 @@ scalers = {
 }
 cmd = [str(runtime/'ffmpeg.exe'), '-hide_banner', '-nostdin', '-v', 'verbose', '-stats_period', '0.5',
        '-progress', str(out/'progress.txt'), '-f', 'lavfi', '-i',
-       f"ddagrab=framerate=60:draw_mouse=0:video_size={g['active_width']}x{g['active_height']}",
+       (f"ddagrab=framerate=60:draw_mouse=0:video_size={g['active_width']}x{g['active_height']}" if args.source == 'ddagrab'
+        else "gfxcapture=monitor_idx=0:max_framerate=60:capture_cursor=0"),
        '-vf', filters[args.mode]+','+scalers[args.encoder], '-c:v', 'h264_qsv' if args.encoder=='qsv' else 'h264_nvenc',
        '-b:v', '12M', '-g', '120', '-bf', '0', '-fps_mode', 'cfr', '-t', str(args.seconds), '-n', str(out/'capture.mkv')]
 begin = time.perf_counter()

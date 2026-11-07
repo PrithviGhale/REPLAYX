@@ -1,6 +1,14 @@
-# Known limitations — 0.2.0-alpha.1
+# Known limitations — 0.2.1-alpha.1
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## New in 0.2.1 and not yet verified on real hardware
+
+- **Game detection** has only been checked against real process paths and desktop apps, not while a game was actually in front. If a game is not recognised, add a correction in Settings → General → Game detection, or use Change game in Clips.
+- Steady-state 60 fps capture still shows occasional single-frame slips (0.36% in the measured replay); the first ~0.3 s after capture starts repeats frames while the pipeline warms up.
+- Game attribution needs at least 30% of a clip's time in one game; shorter moments are filed as Desktop. Clips recorded before 0.2.1 stay in the clips folder as **Unsorted**.
+- Long clips still take time to join: about 5 s for 10 minutes on the development laptop. The Clips page shows progress; the file appears only once it is validated.
+- The first launch after upgrading indexes existing clips in the background (about 2 s per 100 clips); the list is shown immediately and details fill in.
 
 ## Not yet verified on real hardware
 

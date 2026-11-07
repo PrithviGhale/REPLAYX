@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-alpha.1 — smooth 60 fps, fast saves, game folders, working Delete
+
+- **Stutter fixed (root cause found).** 0.2.0's timestamp re-grid pushed frames into future slots and caused repeated pictures and freezes on real motion (7.17%, up to 53 frames). Slot rounding (begun in the Codex session) brings a saved 1080p60 replay to 0.36% isolated single-frame slips. Windows Graphics Capture was measured and rejected (15.7%).
+- **Saves are much faster and never block the app.** Segment start times are probed in the background during capture, the concat step no longer runs full stream detection per segment, validation decodes only the clip's ends, and Stop recording no longer restarts capture. A 60 s replay is ready in about 1 s (was about 6 s).
+- **Delete works.** 0.2.0 passed a `\\?\` path to the Recycle Bin, which Windows rejects; every delete failed. Fixed, with a confirmation that names the file, Windows' real reason on failure, and protection against deleting anything outside the clips folder.
+- **Automatic game detection.** REPLAYX recognises the game in front (Fortnite, Roblox, Valorant, Minecraft, Counter-Strike 2 and more, plus Steam/Epic/Xbox install folders) using only the process name and path, while it captures. Launchers do not count.
+- **Clips organized by game.** New clips are saved as `Game\Game_YYYY-MM-DD_HH-MM-SS.mkv` based on what was actually played during the clip; `Desktop` and `Mixed` when appropriate. Library has game categories, search by game, Change game and corrections in Settings. Existing clips are not moved.
+- **Library opens instantly.** A persistent metadata index replaces per-launch probing (100 clips: 6.5 s → 46 ms); thumbnails no longer queue behind each other.
+- Codex session work included and checkpointed: save progress events, faster validation, motion test fixture, research notes.
+
 
 ## 0.2.0-alpha.1 — GPU capture path, redesigned app
 

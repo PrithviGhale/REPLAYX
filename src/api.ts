@@ -101,4 +101,4 @@ export const previewSettings: Settings = {
   launch_at_startup: false, organize_by_game: true, game_mappings: [],
 };
 
-export const VERSION = '0.2.0-alpha.1';
+export const VERSION = '0.2.1-alpha.1';
