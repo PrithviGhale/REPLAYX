@@ -34,6 +34,14 @@ Rendered with the mocked-IPC preview (`dev/`) in headless Edge and inspected pag
 
 `scripts/check.ps1`: npm ci (0 known vulnerabilities), TypeScript/Vite build, rustfmt, **59 Rust tests passed, 0 failed**, Clippy `-D warnings` clean.
 
+## Build artifacts
+
+Built November 7, 15:30 local, from commit `19a21e5` plus this record:
+- `src-tauri/target/release/replayx.exe`, 14,322,176 bytes, SHA-256 `F15B64A2CA41BD7BE67BBA718774F0AE4D76A39B154795261FA61EE44F7C8C54`
+- `src-tauri/target/release/bundle/nsis/REPLAYX_0.2.0-alpha.1_x64-setup.exe`, 59,466,337 bytes, SHA-256 `82520298A6488FCCEB940A9F73E2617FC58B637F6D64FC345A7893DEA76F3377`
+
+Both report FileVersion 0.2.0-alpha.1. Resources were staged by `prepare-bundle.ps1` from the re-pinned runtime (`n9.0.2-47-gb204e94e90-20261106`). The installer has **not** been installed or run.
+
 ## Pending (needs the user or a free desktop)
 
 | Item | Why pending |
