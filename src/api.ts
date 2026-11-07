@@ -97,4 +97,4 @@ export const previewSettings: Settings = {
   launch_at_startup: false,
 };
 
-export const VERSION = '0.1.3-alpha.1';
+export const VERSION = '0.2.0-alpha.1';

@@ -12,11 +12,28 @@ Finalized CSV entries → retention ring → pinned hard-link snapshot → conca
 
 ## Capture and encoding
 
-FFmpeg's `ddagrab` implements Desktop Duplication. NVENC, AMF, QSV, OpenH264 and MPEG-4 fallback are tried with actual three-frame encode probes, in that order. The complete D3D11 scaling-to-NVENC path is separately probed; unsupported adapters use `hwdownload` and CPU scaling. That fallback has real CPU/memory bandwidth cost. GDI all-desktop and window-title modes are explicit user choices. A failure never silently switches to capturing a wider desktop region.
+FFmpeg's `ddagrab` implements Desktop Duplication. Its frames are D3D11 textures on **the GPU that drives the display**. On hybrid laptops that is usually the integrated GPU, while NVENC sits on the discrete GPU, so those textures cannot be handed to NVENC directly.
+
+`geometry::plan` turns the validated source rectangle, output height and aspect mode into a `VideoPlan`: the capture rectangle (Crop to fill crops here, at capture time), the encoded frame size, and the scaled image size (smaller than the frame only for letterboxing). `media::scaling_candidates` lists chains in order of cost, and `Engine::select_video_path` runs each with a real 5-frame capture→filter→encode probe that keeps FFmpeg's error text:
+
+| Scaler | Chain | Copies |
+| --- | --- | --- |
+| `D3d11` | `scale_d3d11` → NVENC/AMF | none (display GPU = encoder GPU) |
+| `QsvZeroCopy` | `hwmap` to QSV → `vpp_qsv` → `h264_qsv` | none (Intel display GPU) |
+| `QsvHybrid` | `vpp_qsv` → download scaled NV12 → NVENC/AMF | one scaled frame |
+| `Cpu` | download BGRA → `swscale` → encoder | full-resolution frame |
+
+Letterboxed plans skip the zero-copy scalers, because padding happens in system memory. The selection is cached per adapter, display, plan and encoder settings. A GPU path that passes its probe but fails before the first validated segment is denied for that configuration, and capture restarts on the next path. The chosen path, encoded size and rejection reasons are part of `Status`. Hardware encoders force IDR frames at the 2 s keyframes, so every segment decodes on its own.
+
+Desktop Duplication stamps frames with DWM present times. At 60 fps on high-refresh displays, two frames often land in one output slot and the next slot stays empty, which CFR conversion turns into a drop plus a duplicate. `media::regrid_filter` snaps each frame to its nearest slot, never earlier than one slot after the previous frame. Every frame is kept and output stays tied to real time.
+
+The first finalized segment's dimensions must equal the plan's frame, which catches stale geometry or desktop leakage. GDI all-desktop and window-title modes are explicit user choices, scaled on the CPU. A failure never silently switches to capturing a wider desktop region.
 
 Windows Graphics Capture is not implemented. Individual outputs on the default DXGI adapter are selected by index. GDI captures the virtual desktop across all displays. Arbitrary monitor subsets and cross-adapter DXGI enumeration are not implemented.
 
 ## Audio
+
+Microphones open at their native channel count; `audio::to_stereo` duplicates mono, passes stereo through, and averages arrays to centred mono. System and per-app loopback request stereo and keep Windows' mask-aware surround downmix.
 
 Dedicated COM MTA threads use wasapi-rs to initialize device and process-loopback clients in shared polling mode with a 100ms device buffer. Each requests 48kHz stereo 32-bit float with `AUTOCONVERTPCM | SRC_DEFAULT_QUALITY`, so Windows converts any endpoint rate, channel count or sample type; packets are decoded explicitly as little-endian f32. Capture reads `IAudioCaptureClient` directly to correctly handle silent packets that may have null buffers.
 
@@ -46,6 +63,12 @@ Output is first written as `.partial.mkv`. Only after stream inspection, duratio
 ## Watchdog
 
 A background thread checks process exit, encoded-frame progress, finalized segments, audio-source errors, and storage every 200ms. A six-second frame stall, eight-second finalized-segment stall, three-second PCM write stall after startup, missing microphone packets, audio queue overflow, or storage below a 128MiB reserve stops capture and exposes Error. Startup requires 256MiB free on both volumes. Healthy capture requires encoded frames and a probed finalized segment with the expected tracks and canvas dimensions. These are liveness checks, not proof of perceptual audio quality or synchronization.
+
+## Desktop shell and UI
+
+`desktop.rs` exposes Tauri commands: status, settings, capture actions, mix, capabilities, WASAPI audio sessions, executable icons, clip list/thumbnails/actions, device test, updater and folder opening. `winutil.rs` holds the Windows integrations: session enumeration, icon→PNG, Recycle Bin, autostart. A single-instance plugin focuses the running window on relaunch. Process metrics refresh REPLAYX's own process tree each second and rescan the system every 5 s.
+
+The React UI (`src/`) polls `status` every 250 ms while capturing and every second when idle. `store.ts` exposes selector subscriptions with shallow comparison, so only components whose slice changed re-render. Settings are edited as a draft and saved explicitly. Volume and mute apply live through `set_mix`. Pages sit behind an error boundary. `dev/` contains a mocked-IPC preview and DevTools-protocol tooling for screenshots; it is not part of the app build.
 
 ## Official references used
 

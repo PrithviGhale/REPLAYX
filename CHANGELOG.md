@@ -1,5 +1,31 @@
 # Changelog
 
+
+## 0.2.0-alpha.1 — GPU capture path, redesigned app
+
+**Video**
+- Root cause of "GPU scaling fails": on hybrid laptops the display (and so every Desktop Duplication frame) belongs to the integrated GPU while NVENC is on the discrete GPU, and `scale_d3d11` also cannot allocate its output pool on this driver. Capture now probes a ladder of real capture→scale→encode chains — D3D11 zero-copy, Intel Quick Sync zero-copy, Intel VPP + scaled-frame transfer, CPU — and uses the first that works. The path and the reason faster paths were rejected are shown in the app.
+- A path that passes its probe but fails before the first valid segment is skipped automatically and capture restarts on the next one.
+- Frames are re-timed onto exact output slots: on a 240 Hz display, 60 fps capture went from 37–57 dropped frames per 30 s to 0.
+- Fixed Quick Sync producing a single keyframe, which stopped the replay buffer from ever closing a segment; hardware encoders now force IDR frames at segment starts.
+- Fixed audio failing (“backpressure exceeded”) while FFmpeg initialised a GPU encoder.
+- Aspect modes: Stretch to fill, Preserve aspect (letterbox), Crop to fill (cropped at capture), Native. Every mode's encoded size is validated against its plan.
+- Optional GPU-scaling switch; 120/144 fps selectable (experimental); audio bitrate setting.
+
+**Audio**
+- Microphones open at their native channel count; arrays (e.g. 4 channels, no mask) are averaged to centred mono instead of relying on an unspecified Windows channel matrix.
+- In-app device test with live level and playback.
+- Mixer lists apps that actually have audio sessions (with icons), so game, Discord and browser can each get their own track.
+
+**App**
+- Complete UI redesign (Home, Instant Replay, Video, Audio, Clips, Performance, Settings), wired to the real engine; persistent capture controls on every page; unsaved-changes bar; error boundary per page.
+- Clips library with thumbnails, track names, rename, MP4 export and delete-to-Recycle-Bin.
+- Optional start with Windows (tray only; capture never auto-starts); a second launch focuses the running window.
+- Lower monitoring overhead (process metrics no longer scan every process each second).
+
+**Build and distribution**
+- FFmpeg pinned to the immutable release `autobuild-2026-11-06-12-50` (the previous floating `latest` asset had already changed); binaries byte-identical to the validated runtime. License corrected to LGPL-3.0-or-later.
+- GitHub CI and a draft-only release workflow with optional signed updater artifacts; contributing guide and issue/PR templates.
 ## 0.1.3-alpha.1 — audio crackle repair
 
 - Fixed crackling/distorted audio. The capture thread re-placed every WASAPI packet by its jittery QPC timestamp, inserting or dropping samples at most 10ms packet boundaries. Samples are now contiguous; clock drift is corrected by a slow controller and a band-limited resampler; re-anchoring happens only after idle/starvation or gross (>50ms) timing jumps and is counted. Measured on real loopback: 570 to 0 phase discontinuities in 6s of a test tone; isolated capture matches the source file's THD+N.

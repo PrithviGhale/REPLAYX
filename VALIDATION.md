@@ -1,3 +1,53 @@
+# Validation — 0.2.0-alpha.1 (November 7, 2026)
+
+All measurements are on the development laptop: **ASUS ROG Zephyrus M16 (GU604VI), Intel Iris Xe + RTX 4070 Laptop GPU (Optimus), 2560×1600 @ 240 Hz panel at 125% scaling, Windows 11**. The panel is driven by the Intel GPU. A game (Fortnite) was running for the whole session, so every capture also had a real game in the background. Release CLI builds were used unless noted.
+
+## GPU scaling (root cause and fix)
+
+- `scale_d3d11` fails with `Could not create the texture (80070057)` even on the Intel GPU alone, and Desktop Duplication textures cannot reach NVENC on the other adapter. The old probe discarded FFmpeg's error, so this was never visible.
+- Isolated encoder-process CPU, 15 s at 60 fps, 2560×1600 → 1920×1080 (`scripts/bench-scaling.ps1`): CPU scale + NVENC **1.94 cores** (9.7% of the machine); Intel VPP + NVENC **1.07** (−45%); Intel VPP + Quick Sync zero-copy **0.56** (−71%); D3D11 + NVENC fails.
+- Full pipeline, 30 s, 60 fps, system audio, two overlapping saves (`scripts/measure-capture.ps1`, whole-run CPU including probes and the save-verification decodes): CPU path 2.05 cores, 57 dropped / 2,665; hybrid 1.76, 36 / 2,788; zero-copy 1.17–1.25, 37–46 dropped per ~2,500 frames.
+- Bugs found on the way: Quick Sync emitted one IDR, so no 2 s segment closed (fixed with forced IDR); audio failed while FFmpeg initialised Quick Sync (3 s hand-off buffer, demuxer queue); a probe-passing path failing in the pipeline now falls back automatically. The fallback was observed working: an NVENC request whose hybrid path had been denied ran on CPU and saved valid clips.
+
+## Frame pacing
+
+- Raw Desktop Duplication at 60 fps on the 240 Hz panel: 599 frames in 10 s (right count), but present-time stamps put **186 frame pairs in the same 1/60 s slot and left 187 slots empty**. At 30 fps pacing was clean.
+- Slot re-gridding (`media::regrid_filter`): 20 s, Quick Sync: dropped 5 → **0**, duplicated 33 → 20 (remaining duplicates are slots with no new frame).
+- Full pipeline after the fix, 30 s at 60 fps: **0 dropped of 2,658 frames, 59.7 fps**, zero-copy Quick Sync, 0 audio discontinuities, both clips decode-verified.
+- Real game capture: a 65 s 1080p60 run with Fortnite in front recorded the game correctly with **0 dropped frames**. The planned flash/beep A/V-sync measurement in that run was invalid: the game covered the stimulus window. Its beeps were also audible to the player; audible tests were stopped once the game was noticed.
+
+## Audio
+
+- The 0.1.3 crackle fix is unchanged and its regression tests pass. A UI/engine change exposed a separate startup bug (above), now fixed.
+- Microphones: `replayx-cli device-formats` negotiates, without starting, the native format. The Realtek array opens as **4 ch float** and is averaged to mono; Voicemod as 2 ch. Speech has not been recorded or listened to, because nobody was asked to speak.
+- App sessions: enumeration on the live system listed Discord, Fortnite, FxSound and Voicemod (playing) and Spotify, Opera GX and Steam (idle). The extracted Discord icon decodes as valid 32×32 RGBA PNG (FFmpeg).
+
+## FFmpeg runtime
+
+Re-pinned to `autobuild-2026-11-06-12-50` (`n9.0.2-47-gb204e94e90`, SHA-256 `8e83cbb0…78ee`). All 224 files are byte-identical to the previously validated runtime. Defender custom scan: no threats (1.463.176.0). `ffmpeg -L` reports LGPL v3+; no GPL or nonfree flags. The old floating `latest` URL had already been republished with different bytes.
+
+## UI
+
+Rendered with the mocked-IPC preview (`dev/`) in headless Edge and inspected page by page: Home, Video, Audio, Clips (with detail), Performance, Settings. Fixes found that way: hero layout, 16:10 label, missing explanation of locked settings, and an error boundary. **The redesigned UI has not been run inside the native app window yet**: that needs the desktop, which the game was using.
+
+## Automated checks
+
+`scripts/check.ps1`: npm ci (0 known vulnerabilities), TypeScript/Vite build, rustfmt, **59 Rust tests passed, 0 failed**, Clippy `-D warnings` clean.
+
+## Pending (needs the user or a free desktop)
+
+| Item | Why pending |
+| --- | --- |
+| Launch and click through the native app | Would cover the running game |
+| Installer install / launch / record / uninstall / upgrade | Changes the system; needs approval and GUI |
+| Valorant 1440×1080 stretched, via Windows and NVIDIA/Intel scaling | Needs the user to play |
+| 30-minute replay soak, memory and A/V drift over time | Would load the PC during gameplay |
+| 120 / 144 fps capture | Same |
+| Microphone speech, Discord + game isolation in a real call | Needs the user's voice and consent |
+| Human listening test of the 0.1.3 audio fix | Needs the user |
+
+---
+
 # Audio repair validation — 0.1.3-alpha.1 (November 7, 2026)
 
 **Reported defect:** recorded audio sounded crackly/distorted. Clips open in the default Windows player (there is no in-app player), so "preview" and "independent playback" use the same file; the defect was measured in the file and in the raw producer PCM before FFmpeg.

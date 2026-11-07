@@ -1,6 +1,16 @@
 # Performance evidence and pending benchmark
 
-0.1.3-alpha.1 observations (release CLI, desktop not gameplay, 2560x1600 @ 240Hz source, NVENC, CPU scaling fallback because the GPU scaling probe fails, 1920x1080 stretch at 30fps): 40 of 826 and 25 of 814 frames dropped in two 20-second runs (about 3-5%). The new audio resampler costs about 3 million multiply-adds per second per source (32 taps x 2 channels x 48kHz). That figure is arithmetic, not a measurement; CPU, GPU and game-FPS impact remain unmeasured.
+## 0.2.0-alpha.1 (Zephyrus M16: Iris Xe display GPU + RTX 4070 Laptop, 2560×1600 @ 240 Hz, game running)
+
+| Path (1080p60) | Encoder process CPU, 15 s isolated | Whole capture-test CPU, 30 s | Dropped frames |
+| --- | --- | --- | --- |
+| CPU scaling + NVENC (0.1.x path) | 1.94 cores | 2.05 cores | 57 / 2,665 |
+| Intel VPP + NVENC | 1.07 cores | 1.76 cores | 36 / 2,788 |
+| Intel Quick Sync zero-copy | 0.56 cores | 1.17–1.32 cores | 37–46 before re-gridding, **0 / 2,658 after** |
+
+The "whole capture-test" figure includes REPLAYX, FFmpeg, startup probes and the full decode that verifies both saved clips, sampled once per second (`scripts/measure-capture.ps1`). Peak private memory summed across all of those processes was 0.8–1.2 GB. How it splits between the recorder and the save-verification decoders was not measured, so this is not a steady-state recorder figure. GPU utilization, encoder latency and in-game FPS impact were **not** measured.
+
+
 
 Current-version gameplay performance is unmeasured because Windows blocked the media runtime. Earlier CLI CPU/memory values of zero were uninstrumented fields, not zero overhead.
 

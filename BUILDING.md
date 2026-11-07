@@ -12,7 +12,7 @@ npm run desktop
 
 ## Media runtime
 
-`scripts/setup-media.ps1` downloads the LGPL shared FFmpeg archive selected by `tools/ffmpeg-lock.json` and checks its SHA-256. The existing lock points at a floating upstream asset: if the upstream archive changes, setup fails closed. A checksum proves agreement with the lock, not that a binary is safe. A reviewed immutable archive/source mirror remains a public-release requirement.
+`scripts/setup-media.ps1` downloads the LGPL shared FFmpeg archive pinned in `tools/ffmpeg-lock.json` and verifies its SHA-256. The lock points at the immutable dated release `autobuild-2026-11-06-12-50`, and the script refuses floating `latest` URLs. If the download is unavailable, pass a copy of the same file with `-ArchivePath`. To move to a newer build, use `-RefreshTag autobuild-YYYY-MM-DD-HH-MM`; it marks the lock as *not reviewed* until you scan it, run the media tests, and update the `reviewed` field (a unit test enforces this). A checksum proves agreement with the lock, not that a binary is safe.
 
 The earlier FFmpeg development snapshot was quarantined as Trojan:Win32/Wacatac.C!ml. Version 0.1.2-alpha.1 replaces it with the SHA-256-pinned BtbN 9.0 LGPL stable-branch build. The extracted replacement passed a Windows Defender custom scan with real-time protection enabled before execution. No exclusion, restore or protection-disable action was used. Review and scan future dependency changes before execution.
 
@@ -32,6 +32,16 @@ npm run tauri -- build
 ```
 
 Executable: `src-tauri\target\release\replayx.exe`. NSIS installers: `src-tauri\target\release\bundle\nsis\`. These paths alone do not establish successful installation or recording. Check the artifact's version/date against [VALIDATION.md](VALIDATION.md).
+
+## UI preview without the native app
+
+```powershell
+npx vite build --config dev/vite.preview.ts
+npx vite preview --config dev/vite.preview.ts
+powershell -File dev/cdp-probe.ps1 -Url "http://127.0.0.1:1430/dev/preview.html?state=replay#home" -Screenshot home.png
+```
+
+The preview uses Tauri's `mockIPC` with fixture data (`?state=replay|rec|off|empty`). It renders headlessly, so no window opens.
 
 ## Hardware commands
 

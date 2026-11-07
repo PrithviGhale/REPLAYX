@@ -1,34 +1,49 @@
 # REPLAYX
 
-A local Windows desktop recorder and disk-backed Instant Replay application. This is an alpha undergoing beta validation. Physical gameplay, stretched-resolution capture, usable microphone capture, editor multitrack playback, and installed-app recording are not yet verified for the current changes. See [VALIDATION.md](VALIDATION.md).
+**Capture everything. Miss nothing.**
 
-## Instant Replay: save what just happened
+REPLAYX is a free, open-source Instant Replay and screen recorder for Windows. It keeps the last moments of your desktop or game on disk, so you can save them with a hotkey. It works with no game running, records apps' audio on separate tracks, and handles stretched-resolution gameplay.
 
-1. Open **Instant Replay**. Choose a duration, for example **1 min**, and save settings if changed.
-2. Click **Enable replay** before playing. The available time starts at zero and grows as you play.
-3. After something happens, click **Save replay** or press your configured shortcut (initially **Ctrl+Shift+F10**).
-4. Open **Clips** to play the saved MKV or open its folder. Saving keeps the buffer running. Click **Stop replay** when finished.
+- **No account, no ads, no telemetry.** Everything stays on your PC.
+- **Instant Replay** for the last 30 seconds up to 30 minutes, saved with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd>. Buffering continues after a save, and overlapping saves are fine.
+- **GPU capture path:** it picks the most efficient working route on your hardware (zero-copy D3D11 or Intel Quick Sync, then a GPU-scaled transfer to NVENC/AMF, then the CPU) and tells you which one it used.
+- **Stretched 4:3 gameplay:** *Stretch to fill* records a 1440×1080 game as full-frame 1920×1080, the way it looks on your screen. You can also preserve the aspect ratio, crop to fill, or keep the native shape.
+- **Separate audio tracks:** game, Discord, browser/music and microphone each get their own track, plus a mix on track 1 for normal players.
+- **Honest status:** a health checklist and a Performance page show real measurements, and saved clips are fully decoded before they count as saved.
 
-Replay cannot save anything from before it was enabled. You can save a shorter clip before the buffer fills. Saves use completed two-second segments, so the very latest moment can be missing by about two seconds. Wait a few seconds after the event before saving. Default clips: `%USERPROFILE%\Videos\REPLAYX`.
+> **Status: alpha (0.2.0-alpha.1).** Core capture is measured and tested on real hardware (see [VALIDATION.md](VALIDATION.md)), but the redesigned app, the installer and stretched Valorant are still awaiting hands-on testing. Read [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) before relying on it.
 
-The old Alt+F10 default conflicts with NVIDIA on some systems. The complete legacy default shortcut set now migrates to Ctrl+Shift combinations. Custom shortcuts are preserved. A conflicting shortcut is reported individually; other available shortcuts and buttons continue working.
+## Quick start
 
-## Recording and sound
+1. Open **REPLAYX** and click **Enable replay** (top right, or on Home). The ring fills as history builds up.
+2. Play or work normally. When something happens, press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> or click **Save replay**.
+3. Open **Clips** to play, rename, export to MP4, or delete it (deleted clips go to the Recycle Bin).
 
-**Start recording** records forward until **Stop & save recording**. It is separate from saving the preceding replay buffer, but both can share a capture pipeline. Stopping recording briefly restarts an enabled replay buffer.
+Click **Record** to record from now on; stop it with the same button or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd>. Clips are saved to `Videos\REPLAYX` as MKV files, which survive crashes and keep every audio track.
 
-In **Audio Mixer**, choose system output and/or microphone devices, enable the desired sources, then save settings before starting. Track 1 is the playback mix; with independent tracks enabled, subsequent tracks contain individual sources. A normal player usually plays one selected track. Editor import compatibility requires separate verification; MP4 export preserves tracks but cannot guarantee an editor supports them.
+### Stretched resolution (e.g. Valorant 1440×1080)
 
-For separate game and Discord audio, use two Application sources and a microphone; disable the full System source to avoid duplicate audio. Select each running process and refresh/reselect after it restarts. Windows process loopback requires build 20348 or newer. Device changes require stopping, refreshing devices, choosing the device, saving settings and restarting; automatic device switching is not implemented.
+Go to **Video**, then choose **1080p** and **Stretch to fill**. When the game switches the display mode, REPLAYX detects it, restarts capture on the new mode, and checks that the encoded frame is exactly 1920×1080. The desktop can't leak into the frame.
 
-## Stretched 4:3 capture
+### Game, Discord and microphone on separate tracks
 
-In **Recorder**, select Desktop Duplication, the intended display, **1080p**, and **Stretch to 16:9**. The intended output is 1920 x 1080 with square pixels. The engine validates the Windows/DXGI source dimensions and probes GPU scaling. A failed GPU probe uses CPU scaling with the chosen encoder and reports that path in Performance.
+In **Audio**, turn off **System output**, then add **Application…** for the game, again for Discord, and add your **Microphone**. Use **Test** to check each source. In a video editor, each source appears as its own track.
 
-If a game occupies only a subregion while Windows still reports the full desktop, an explicit **Manual source region** can select it in local physical pixels. The application does not infer game boundaries or override NVIDIA scaling settings. This is not evidence that all NVIDIA GPU/display scaling combinations work. See the test matrix in [VALIDATION.md](VALIDATION.md).
+## Building from source
 
-On a detected display change, capture pauses, potentially affected tail footage is quarantined, and the same display is retried at most three times after checking for a stable mode. Full recordings split into parts; replay starts fresh. Use **Cancel recovery and stop capture** to cancel. Retained data can be recovered from Instant Replay after capture stops.
+Windows 10/11 x64, Node 24, Rust 1.98 (MSVC) and WebView2. Full details are in [BUILDING.md](BUILDING.md).
 
-## Development
+```powershell
+npm ci
+powershell -ExecutionPolicy Bypass -File scripts/setup-media.ps1   # pinned, checksum-verified FFmpeg (LGPL)
+powershell -ExecutionPolicy Bypass -File scripts/check.ps1         # format, tests, Clippy, frontend
+npm run desktop                                                    # run in development
+```
 
-See [BUILDING.md](BUILDING.md), [ARCHITECTURE.md](ARCHITECTURE.md), [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md), [PRIVACY.md](PRIVACY.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). No account or cloud upload is required. Nothing in this repository automatically publishes a release.
+## Documentation
+
+[ARCHITECTURE.md](ARCHITECTURE.md) · [VALIDATION.md](VALIDATION.md) · [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) · [PERFORMANCE.md](PERFORMANCE.md) · [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [CHANGELOG.md](CHANGELOG.md)
+
+## License
+
+REPLAYX is MIT licensed. It runs FFmpeg (LGPL-3.0-or-later build) as a separate program; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
