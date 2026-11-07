@@ -35,6 +35,8 @@ pub struct Status {
     pub frames: u64,
     pub dropped_frames: u64,
     pub duplicated_frames: u64,
+    /// Game in the foreground right now while capturing (None = desktop/app).
+    pub detected_game: Option<String>,
     pub last_save_timings: Vec<media::StageTiming>,
     pub fps: f64,
     pub elapsed: f64,
@@ -104,6 +106,7 @@ struct Recording {
     dir: PathBuf,
     segments: Vec<Segment>,
     after: f64,
+    started: Instant,
 }
 pub struct Inner {
     pub settings: Settings,
@@ -119,6 +122,11 @@ pub struct Inner {
     video_path_cache: Option<(String, Scaler, String)>,
     /// GPU paths that passed a probe but failed before their first valid segment.
     denied_paths: Vec<(String, String)>,
+    /// Foreground game timeline used to name and file clips.
+    activity: crate::games::Activity,
+    last_activity_sample: Option<Instant>,
+    /// Clip paths handed to in-flight saves (not yet on disk).
+    reserved: std::collections::HashSet<PathBuf>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -130,6 +138,7 @@ pub struct SaveJob {
     expected_audio: usize,
     dir: PathBuf,
     requested: Instant,
+    tags: Vec<(String, String)>,
 }
 impl SaveJob {
     pub fn run(self) -> Result<(PathBuf, Probe)> {
@@ -142,6 +151,7 @@ impl SaveJob {
             &self.path,
             self.expected_audio,
             false,
+            &self.tags,
             &mut progress,
         )?;
         for t in &mut probe.save_timings {
@@ -205,6 +215,9 @@ impl Engine {
             ring_audio_tracks: 0,
             video_path_cache: None,
             denied_paths: Vec::new(),
+            activity: Default::default(),
+            last_activity_sample: None,
+            reserved: Default::default(),
             _instance_lock: instance_lock,
         })));
         let weak = Arc::downgrade(&e.0);
@@ -280,6 +293,7 @@ impl Engine {
                 dir,
                 segments: Vec::new(),
                 after,
+                started: Instant::now(),
             });
             i.status.recording = true;
         } else {
@@ -314,13 +328,15 @@ impl Engine {
         let rec = i.recording.take().unwrap();
         i.status.recording = false;
         let expected = i.expected_audio();
+        let clip = i.clip_path("Recording", rec.started, requested);
         let job = SaveJob {
             media: i.media.clone(),
             segments: rec.segments,
-            path: i.clip_path("Recording"),
+            path: clip.0,
             expected_audio: expected,
             dir: rec.dir,
             requested,
+            tags: clip.1,
         };
         i.status.saving += 1;
         if restart {
@@ -346,13 +362,24 @@ impl Engine {
             bail!("No finalized footage yet. Wait at least two seconds.")
         }
         i.status.saving += 1;
+        // Attribute the game over the footage actually saved, which ends at the
+        // last finalized segment, not at the moment save was pressed.
+        let covered: f64 = segments.iter().map(|s| s.end - s.start).sum();
+        let end = requested
+            .checked_sub(Duration::from_millis(i.status.segment_age_ms))
+            .unwrap_or(requested);
+        let start = end
+            .checked_sub(Duration::from_secs_f64(covered))
+            .unwrap_or(end);
+        let (path, tags) = i.clip_path("Replay", start, end);
         Ok(SaveJob {
             media: i.media.clone(),
             segments,
-            path: i.clip_path("Replay"),
+            path,
             expected_audio: i.expected_audio(),
             dir,
             requested,
+            tags,
         })
     }
     pub fn complete_save(&self, result: &Result<(PathBuf, Probe)>) {
@@ -456,7 +483,7 @@ impl Engine {
                     .join("recovery")
                     .join(uuid::Uuid::new_v4().to_string());
                 let pinned = snapshot(&segments, &snapshot_dir)?;
-                let destination = i.clip_path("Recovered");
+                let destination = i.clip_path_flat("Recovered");
                 i.media.concat(&pinned, &destination, tracks)?;
                 fs::remove_dir_all(snapshot_dir)?;
                 // Remove only recovered media; unreadable/torn files remain for inspection.
@@ -515,12 +542,66 @@ impl Inner {
         }
         self.ring_audio_tracks
     }
-    fn clip_path(&self, prefix: &str) -> PathBuf {
+    /// Legacy flat path, used for recovered sessions of unknown content.
+    fn clip_path_flat(&self, prefix: &str) -> PathBuf {
         self.settings.output_dir.join(format!(
             "{prefix}-{}-{}.mkv",
             chrono::Local::now().format("%Y%m%d-%H%M%S"),
             &uuid::Uuid::new_v4().to_string()[..8]
         ))
+    }
+    /// Path and metadata for a new clip covering [from, to]: the game is
+    /// attributed over that interval; the name is collision-safe.
+    fn clip_path(
+        &mut self,
+        kind: &str,
+        from: Instant,
+        to: Instant,
+    ) -> (PathBuf, Vec<(String, String)>) {
+        let game = self.activity.attribute(from, to);
+        let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+        let (dir, label) = if self.settings.organize_by_game {
+            let folder = crate::library::sanitize_component(&game);
+            (self.settings.output_dir.join(&folder), folder)
+        } else {
+            (
+                self.settings.output_dir.clone(),
+                crate::library::sanitize_component(kind),
+            )
+        };
+        let _ = fs::create_dir_all(&dir);
+        self.reserved.retain(|p| !p.exists());
+        let stem = format!("{label}_{stamp}");
+        let mut path = crate::library::unique_path(&dir, &stem, "mkv");
+        let mut n = 2;
+        while self.reserved.contains(&path) {
+            path = crate::library::unique_path(&dir, &format!("{stem}_{n}"), "mkv");
+            n += 1;
+        }
+        self.reserved.insert(path.clone());
+        let tags = vec![
+            ("REPLAYX_GAME".to_string(), game),
+            ("REPLAYX_KIND".to_string(), kind.to_string()),
+            ("title".to_string(), format!("REPLAYX {kind}")),
+        ];
+        (path, tags)
+    }
+    fn sample_activity(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_activity_sample
+            .is_some_and(|t| now - t < Duration::from_secs(1))
+        {
+            return;
+        }
+        self.last_activity_sample = Some(now);
+        let what = crate::games::sample(&self.settings.game_mappings);
+        if let crate::games::Foreground::Game(g) = &what {
+            self.status.detected_game = Some(g.clone());
+        } else if what == crate::games::Foreground::App {
+            self.status.detected_game = None;
+        }
+        self.activity.record(now, what);
     }
     /// Pick the most efficient scaler/encoder chain whose real probe succeeds.
     /// Returns the scaler, encoder and a summary of rejected faster paths.
@@ -1030,6 +1111,9 @@ impl Inner {
             self.status.free_bytes,
             false,
         )?;
+        if !self.pipeline.as_ref().is_some_and(|p| p.synthetic) {
+            self.sample_activity();
+        }
         let p = self.pipeline.as_mut().unwrap();
         if !p.synthetic
             && p.geometry.is_some()
@@ -1187,18 +1271,19 @@ impl Inner {
         }
         self.status.buffer_seconds = self.ring.duration();
         self.status.buffer_bytes = self.ring.total_bytes;
-        let job = self
-            .recording
-            .take()
-            .filter(|r| !r.segments.is_empty())
-            .map(|r| SaveJob {
+        let finished = self.recording.take().filter(|r| !r.segments.is_empty());
+        let job = finished.map(|r| {
+            let part = self.clip_path("Recording", r.started, Instant::now());
+            SaveJob {
                 media: self.media.clone(),
                 segments: r.segments,
-                path: self.clip_path("Recording-part"),
+                path: part.0,
                 expected_audio: expected,
                 dir: r.dir,
                 requested: Instant::now(),
-            });
+                tags: part.1,
+            }
+        });
         if job.is_some() {
             self.status.saving += 1;
         }
@@ -1253,6 +1338,7 @@ impl Inner {
                                 dir,
                                 segments: Vec::new(),
                                 after: 0.,
+                                started: Instant::now(),
                             });
                             self.status.recording = true;
                         }

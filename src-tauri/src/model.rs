@@ -62,6 +62,10 @@ pub struct Settings {
     pub audio_bitrate_kbps: u32,
     /// Start REPLAYX in the tray at Windows sign-in. Capture never auto-starts.
     pub launch_at_startup: bool,
+    /// Save clips into a folder per detected game (`Fortnite/Fortnite_….mkv`).
+    pub organize_by_game: bool,
+    /// User corrections for game detection (executable → game name).
+    pub game_mappings: Vec<crate::games::GameMapping>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -92,6 +96,8 @@ impl Default for Settings {
             gpu_scaling: true,
             audio_bitrate_kbps: 192,
             launch_at_startup: false,
+            organize_by_game: true,
+            game_mappings: Vec::new(),
         }
     }
 }
@@ -143,6 +149,16 @@ impl Settings {
         }
         if self.window_title.contains(['\n', '\r']) || self.window_title.len() > 512 {
             bail!("Invalid window title")
+        }
+        if self.game_mappings.len() > 200
+            || self.game_mappings.iter().any(|m| {
+                m.exe.is_empty()
+                    || m.exe.len() > 260
+                    || m.exe.contains(['\\', '/'])
+                    || m.name.len() > 64
+            })
+        {
+            bail!("Invalid game mapping: use an executable file name such as game.exe")
         }
         if self.audio.len() > 5 {
             bail!("At most five audio sources are supported")

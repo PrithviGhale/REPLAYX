@@ -41,6 +41,12 @@ pub struct Probe {
     pub height: u64,
     #[serde(default)]
     pub save_timings: Vec<StageTiming>,
+    /// Game attributed when the clip was saved (REPLAYX_GAME tag), if any.
+    #[serde(default)]
+    pub game: Option<String>,
+    /// "Replay" or "Recording" (REPLAYX_KIND tag), if any.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageTiming {
@@ -152,6 +158,8 @@ impl Media {
             width: video["width"].as_u64().unwrap_or(0),
             height: video["height"].as_u64().unwrap_or(0),
             save_timings: Vec::new(),
+            game: format_tag(&json, "REPLAYX_GAME"),
+            kind: format_tag(&json, "REPLAYX_KIND"),
         })
     }
     pub fn verify(&self, path: &Path, expected_audio: usize) -> Result<Probe> {
@@ -309,7 +317,14 @@ impl Media {
         destination: &Path,
         expected_audio: usize,
     ) -> Result<Probe> {
-        self.concat_progress(segments, destination, expected_audio, true, &mut |_| {})
+        self.concat_progress(
+            segments,
+            destination,
+            expected_audio,
+            true,
+            &[],
+            &mut |_| {},
+        )
     }
     pub fn concat_progress(
         &self,
@@ -317,6 +332,7 @@ impl Media {
         destination: &Path,
         expected_audio: usize,
         full_decode: bool,
+        tags: &[(String, String)],
         progress: &mut impl FnMut(&str),
     ) -> Result<Probe> {
         let started = Instant::now();
@@ -377,15 +393,12 @@ impl Media {
                 "-i",
             ])
             .arg(&list)
-            .args([
-                "-map",
-                "0",
-                "-c",
-                "copy",
-                "-avoid_negative_ts",
-                "make_zero",
-                "-n",
-            ])
+            .args(["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"])
+            .args(
+                tags.iter()
+                    .flat_map(|(k, v)| ["-metadata".to_string(), format!("{k}={v}")]),
+            )
+            .arg("-n")
             .arg(&part)
             .output()?;
         if !output.status.success() {
@@ -721,6 +734,17 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
         "-ar",
         "48000",
     ]);
+}
+
+/// Container-level tag, matched case-insensitively (Matroska may uppercase).
+fn format_tag(json: &serde_json::Value, key: &str) -> Option<String> {
+    json["format"]["tags"]
+        .as_object()?
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .and_then(|(_, v)| v.as_str())
+        .map(str::to_owned)
+        .filter(|v| !v.is_empty())
 }
 
 /// Concat-list durations that keep segment seams gapless. The concat demuxer
