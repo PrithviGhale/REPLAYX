@@ -54,8 +54,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const subscription = listen<SaveEvent>('clip-save', ({ payload: event }) => {
       if (closed) return;
       setPendingSaves(p => applySaveEvent(p, event));
+      if (event.stage === 'Failed') toast('error', `Save failed: ${event.error ?? 'unknown error'}. The footage was kept for recovery.`);
       if (event.stage === 'Ready' && event.clip) {
         // Ready means validated and playable; it is never sent earlier.
+        const c = event.clip;
+        toast('success', `${c.category === 'Unsorted' ? c.kind : `${c.category} ${c.kind.toLowerCase()}`} saved · ready in ${(event.elapsed_ms / 1000).toFixed(1)} s`);
         libraryRevision.current++;
         setClips(c => upsertClip(c, event.clip!));
         refreshNow();
@@ -72,7 +75,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void subscription.then(unlisten => unlisten());
       void indexed.then(unlisten => unlisten());
     };
-  }, []);
+  }, [toast]);
   const dropClip = useCallback((id: string) => { libraryRevision.current++; setClips(c => removeClip(c, id)); }, []);
   const putClip = useCallback((clip: Clip) => { libraryRevision.current++; setClips(c => upsertClip(c, clip)); }, []);
 

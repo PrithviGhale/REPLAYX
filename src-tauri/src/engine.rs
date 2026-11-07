@@ -68,6 +68,8 @@ pub struct Status {
 }
 #[derive(Default)]
 struct Progress {
+    /// Encoder output time in microseconds (FFmpeg progress out_time_us).
+    out_us: AtomicU64,
     frames: AtomicU64,
     dropped: AtomicU64,
     duplicated: AtomicU64,
@@ -107,6 +109,8 @@ struct Recording {
     segments: Vec<Segment>,
     after: f64,
     started: Instant,
+    /// Output time (s) at which Stop was pressed; footage after it is not added.
+    stop_at: Option<f64>,
 }
 pub struct Inner {
     pub settings: Settings,
@@ -127,6 +131,9 @@ pub struct Inner {
     last_activity_sample: Option<Instant>,
     /// Clip paths handed to in-flight saves (not yet on disk).
     reserved: std::collections::HashSet<PathBuf>,
+    /// Background-probed container start times, keyed by buffer file.
+    segment_starts: Arc<Mutex<std::collections::HashMap<PathBuf, f64>>>,
+    segment_probe_tx: std::sync::mpsc::Sender<PathBuf>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -188,6 +195,23 @@ impl Engine {
         Self::with_media(data_dir, settings, Media::discover()?)
     }
     fn with_media(data_dir: PathBuf, settings: Settings, media: Media) -> Result<Self> {
+        let segment_starts: Arc<Mutex<std::collections::HashMap<PathBuf, f64>>> =
+            Default::default();
+        let (segment_probe_tx, probe_rx) = std::sync::mpsc::channel::<PathBuf>();
+        {
+            let (starts, media) = (segment_starts.clone(), media.clone());
+            thread::spawn(move || {
+                for path in probe_rx {
+                    if let Ok(info) = media.segment_info_low_priority(&path) {
+                        let mut map = starts.lock().unwrap();
+                        map.insert(path, info.start_time);
+                        if map.len() > 4096 {
+                            map.retain(|p, _| p.exists());
+                        }
+                    }
+                }
+            });
+        }
         settings.validate()?;
         fs::create_dir_all(&data_dir)?;
         let instance_lock = fs::OpenOptions::new()
@@ -218,6 +242,8 @@ impl Engine {
             activity: Default::default(),
             last_activity_sample: None,
             reserved: Default::default(),
+            segment_starts: segment_starts.clone(),
+            segment_probe_tx,
             _instance_lock: instance_lock,
         })));
         let weak = Arc::downgrade(&e.0);
@@ -294,6 +320,7 @@ impl Engine {
                 segments: Vec::new(),
                 after,
                 started: Instant::now(),
+                stop_at: None,
             });
             i.status.recording = true;
         } else {
@@ -316,18 +343,74 @@ impl Engine {
         }
         Ok(())
     }
+    /// Stop recording without stopping capture: the recording ends with the
+    /// segment containing the moment Stop was pressed, which the running
+    /// encoder finalizes within about two seconds. Replay keeps buffering and
+    /// nothing is restarted. Falls back to finalizing by stopping the encoder.
     pub fn stop_recording(&self) -> Result<SaveJob> {
         let requested = Instant::now();
-        let mut i = self.0.lock().unwrap();
-        if i.recording.is_none() {
-            bail!("No active recording")
+        let stop_at = {
+            let mut i = self.0.lock().unwrap();
+            if i.recording.is_none() {
+                bail!("No active recording")
+            }
+            let out = i
+                .pipeline
+                .as_ref()
+                .map(|p| p.progress.out_us.load(Ordering::Relaxed) as f64 / 1e6)
+                .filter(|t| *t > 0.);
+            if let (Some(rec), Some(t)) = (i.recording.as_mut(), out) {
+                rec.stop_at = Some(t);
+            }
+            i.status.recording = false;
+            i.status.saving += 1;
+            out
+        };
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut finalized = false;
+        while let Some(stop) = stop_at {
+            {
+                let i = self.0.lock().unwrap();
+                if i.pipeline.is_none() || i.recording.is_none() {
+                    break;
+                }
+                if i.recording
+                    .as_ref()
+                    .is_some_and(|r| r.segments.last().is_some_and(|s| s.end >= stop))
+                    || i.ring.segments.back().is_some_and(|s| s.end >= stop)
+                {
+                    finalized = true;
+                    break;
+                }
+            }
+            if Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
         }
-        // Finalize current segment without changing codecs mid-recording. Replay is restarted explicitly below.
-        let restart = i.status.replay;
-        i.stop_pipeline()?;
-        let rec = i.recording.take().unwrap();
-        i.status.recording = false;
+        let mut i = self.0.lock().unwrap();
+        if !finalized && i.recording.is_some() && i.pipeline.is_some() {
+            // Fallback: finalize the in-flight segment by stopping the encoder.
+            let restart = i.status.replay;
+            i.stop_pipeline()?;
+            if restart {
+                if let Err(e) = i.start_pipeline(false) {
+                    i.fail(format!(
+                        "Recording finalized, but replay restart failed: {e}"
+                    ));
+                }
+            }
+        }
+        let Some(mut rec) = i.recording.take() else {
+            i.status.saving = i.status.saving.saturating_sub(1);
+            bail!("The recording ended unexpectedly; recover its segments from Instant Replay")
+        };
+        if rec.segments.is_empty() {
+            i.status.saving = i.status.saving.saturating_sub(1);
+            bail!("The recording has no finished footage yet. Record for at least two seconds.")
+        }
         let expected = i.expected_audio();
+        i.fill_start_times(&mut rec.segments);
         let clip = i.clip_path("Recording", rec.started, requested);
         let job = SaveJob {
             media: i.media.clone(),
@@ -338,13 +421,9 @@ impl Engine {
             requested,
             tags: clip.1,
         };
-        i.status.saving += 1;
-        if restart {
-            if let Err(e) = i.start_pipeline(false) {
-                i.fail(format!(
-                    "Recording finalized, but replay restart failed: {e}"
-                ));
-            }
+        if !i.status.replay && i.pipeline.is_some() {
+            // Recording only: capture is no longer needed.
+            i.stop_pipeline()?;
         }
         Ok(job)
     }
@@ -356,7 +435,8 @@ impl Engine {
             .data_dir
             .join("saves")
             .join(uuid::Uuid::new_v4().to_string());
-        let segments = i.ring.snapshot(i.settings.replay_seconds as f64, &dir)?;
+        let mut segments = i.ring.snapshot(i.settings.replay_seconds as f64, &dir)?;
+        i.fill_start_times(&mut segments);
         if segments.is_empty() {
             let _ = fs::remove_dir(&dir);
             bail!("No finalized footage yet. Wait at least two seconds.")
@@ -472,6 +552,8 @@ impl Engine {
                             start,
                             end,
                             bytes: probe.bytes,
+                            origin: None,
+                            start_time: Some(probe.start_time),
                         });
                     }
                 }
@@ -585,6 +667,13 @@ impl Inner {
             ("title".to_string(), format!("REPLAYX {kind}")),
         ];
         (path, tags)
+    }
+    fn fill_start_times(&self, segments: &mut [Segment]) {
+        let map = self.segment_starts.lock().unwrap();
+        for s in segments.iter_mut().filter(|s| s.start_time.is_none()) {
+            let key = s.origin.as_ref().unwrap_or(&s.path);
+            s.start_time = map.get(key).copied();
+        }
     }
     fn sample_activity(&mut self) {
         let now = Instant::now();
@@ -869,6 +958,11 @@ impl Inner {
                             p.duplicated
                                 .store(value.parse().unwrap_or(0), Ordering::Relaxed);
                         }
+                        "out_time_us" => {
+                            if let Ok(us) = value.trim().parse::<u64>() {
+                                p.out_us.store(us, Ordering::Relaxed);
+                            }
+                        }
                         "fps" => {
                             p.fps.store(
                                 value.parse::<f64>().unwrap_or(0.).to_bits(),
@@ -986,14 +1080,19 @@ impl Inner {
                 }
                 p.validated = true;
             }
+            // Probe the container start time now, in the background at low
+            // priority, so saves need not probe every segment.
+            let _ = self.segment_probe_tx.send(path.clone());
             let segment = Segment {
+                origin: Some(path.clone()),
                 path,
                 start,
                 end,
                 bytes,
+                start_time: None,
             };
             if let Some(r) = &mut self.recording {
-                if segment.end > r.after {
+                if segment.end > r.after && r.stop_at.is_none_or(|stop| segment.start < stop) {
                     let destination = r.dir.join(format!("{:08}.mkv", r.segments.len()));
                     if fs::hard_link(&segment.path, &destination).is_err() {
                         fs::copy(&segment.path, &destination)?;
@@ -1339,6 +1438,7 @@ impl Inner {
                                 segments: Vec::new(),
                                 after: 0.,
                                 started: Instant::now(),
+                                stop_at: None,
                             });
                             self.status.recording = true;
                         }
@@ -1384,6 +1484,8 @@ mod tests {
                 start: 0.,
                 end: 2.,
                 bytes: 8,
+                origin: None,
+                start_time: None,
             }],
         )
         .unwrap();

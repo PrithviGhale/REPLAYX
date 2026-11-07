@@ -12,6 +12,12 @@ pub struct Segment {
     pub start: f64,
     pub end: f64,
     pub bytes: u64,
+    /// Original buffer file this segment (or its hard link) came from.
+    #[serde(default)]
+    pub origin: Option<PathBuf>,
+    /// Container start time, if already probed in the background.
+    #[serde(default)]
+    pub start_time: Option<f64>,
 }
 #[derive(Default)]
 pub struct Ring {
@@ -75,7 +81,11 @@ pub fn snapshot(segments: &[Segment], dir: &Path) -> Result<Vec<Segment>> {
                 return Err(error.into());
             }
         }
-        result.push(Segment { path, ..s.clone() });
+        result.push(Segment {
+            path,
+            origin: s.origin.clone().or_else(|| Some(s.path.clone())),
+            ..s.clone()
+        });
     }
     Ok(result)
 }
@@ -92,6 +102,8 @@ mod tests {
                 start: i as f64 * 2.,
                 end: (i + 1) as f64 * 2.,
                 bytes: 10,
+                origin: None,
+                start_time: None,
             });
         }
         r
@@ -158,6 +170,8 @@ mod tests {
                 start: n as f64 * 2.,
                 end: (n + 1) as f64 * 2.,
                 bytes: 32,
+                origin: None,
+                start_time: None,
             });
             r.prune(60., 960).unwrap();
             assert!(r.total_bytes <= 960);

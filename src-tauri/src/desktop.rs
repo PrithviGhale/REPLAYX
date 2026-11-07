@@ -78,12 +78,28 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
         "stop_replay" => engine.stop_replay(),
         "start_recording" => engine.start_recording(),
         "save_replay" | "stop_recording" => {
+            // Acknowledge at once: progress and the finished clip arrive as
+            // clip-save events, so saves never block the UI or each other.
             let id = uuid::Uuid::new_v4().to_string();
             let began = std::time::Instant::now();
-            let emit = |stage: &str, clip: Option<library::Clip>, error: Option<String>| {
-                let _ = state.app.emit("clip-save", serde_json::json!({"id":id,"stage":stage,"clip":clip,"error":error,"elapsed_ms":began.elapsed().as_millis() as u64}));
+            let emitter = state.clone();
+            let save_id = id.clone();
+            let emit = move |stage: &str, clip: Option<library::Clip>, error: Option<String>| {
+                let _ = emitter.app.emit(
+                    "clip-save",
+                    serde_json::json!({"id":save_id,"stage":stage,"clip":clip,"error":error,"elapsed_ms":began.elapsed().as_millis() as u64}),
+                );
             };
-            emit("Saving", None, None);
+            emit(
+                if name == "save_replay" {
+                    "Saving"
+                } else {
+                    "Finishing recording"
+                },
+                None,
+                None,
+            );
+            drop(updating);
             let job = if name == "save_replay" {
                 engine.save_replay()
             } else {
@@ -96,29 +112,30 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
                     return Err(err(e));
                 }
             };
-            drop(updating);
-            let result = job.run_progress(|stage| {
-                if stage != "Ready" {
-                    emit(stage, None, None);
+            let worker = state.clone();
+            thread::spawn(move || {
+                let result = job.run_progress(|stage| {
+                    if stage != "Ready" {
+                        emit(stage, None, None);
+                    }
+                });
+                worker.engine.complete_save(&result);
+                match &result {
+                    Ok((path, probe)) => {
+                        let root = worker.engine.settings().output_dir;
+                        let clip = library::id_for(&root, path).and_then(|id| {
+                            let meta = fs::metadata(path).ok()?;
+                            let mut lib = worker.library.lock().unwrap();
+                            lib.index.insert(&id, &meta, probe.clone());
+                            let _ = lib.save();
+                            lib.index.clip(&root, &id)
+                        });
+                        emit("Ready", clip, None);
+                    }
+                    Err(e) => emit("Failed", None, Some(format!("{e:#}"))),
                 }
             });
-            engine.complete_save(&result);
-            match &result {
-                Ok((path, probe)) => {
-                    let root = engine.settings().output_dir;
-                    let id = library::id_for(&root, path);
-                    let clip = id.as_deref().and_then(|id| {
-                        let meta = fs::metadata(path).ok()?;
-                        let mut lib = state.library.lock().unwrap();
-                        lib.index.insert(id, &meta, probe.clone());
-                        let _ = lib.save();
-                        lib.index.clip(&root, id)
-                    });
-                    emit("Ready", clip, None);
-                }
-                Err(e) => emit("Failed", None, Some(e.to_string())),
-            }
-            return result.map(|(p,probe)|serde_json::json!({"file":p.file_name().unwrap().to_string_lossy(),"probe":probe})).map_err(err);
+            return Ok(serde_json::json!({"id": id, "accepted": true}));
         }
         "stop_all" => engine.shutdown(),
         "recover" => return engine.recover().map(|v| serde_json::json!(v)).map_err(err),

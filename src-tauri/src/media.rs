@@ -48,6 +48,12 @@ pub struct Probe {
     #[serde(default)]
     pub kind: Option<String>,
 }
+/// Facts needed to concatenate a segment: stream layout and start time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SegmentInfo {
+    pub start_time: f64,
+    pub layout: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageTiming {
     pub stage: String,
@@ -348,35 +354,36 @@ impl Media {
         if segments.is_empty() {
             bail!("No finalized footage yet. Wait for the first 2-second segment.")
         }
-        let first = self.probe(&segments[0].path)?;
-        let mut starts = vec![first.start_time];
-        for s in segments.iter().skip(1) {
-            let p = self.probe(&s.path)?;
-            starts.push(p.start_time);
-            if p.width != first.width
-                || p.height != first.height
-                || p.video_codec != first.video_codec
-                || p.audio_tracks != first.audio_tracks
-            {
+        // Every segment is still checked (format and container start time),
+        // with a minimal probe on up to 8 threads instead of full sequential
+        // probes, which dominated save time (about 60 ms per 2 s segment).
+        let unknown: Vec<Segment> = segments
+            .iter()
+            .filter(|s| s.start_time.is_none())
+            .cloned()
+            .collect();
+        let infos = self.segment_infos(&unknown)?;
+        if let Some(first) = infos.first() {
+            if infos.iter().any(|i| i.layout != first.layout) {
                 bail!("Capture format changed between segments. Recover the separate sessions instead of merging incompatible media.")
             }
         }
+        let mut probed = infos.into_iter();
+        let starts: Vec<f64> = segments
+            .iter()
+            .map(|s| {
+                s.start_time
+                    .unwrap_or_else(|| probed.next().map(|i| i.start_time).unwrap_or(0.))
+            })
+            .collect();
         let parent = segments[0].path.parent().context("No snapshot directory")?;
         let list = parent.join("concat.txt");
         // Snapshot names are generated locally; user-controlled paths never enter concat syntax.
         let spans: Vec<f64> = segments.iter().map(|s| s.end - s.start).collect();
-        let lines = segments
-            .iter()
-            .zip(concat_durations(&spans, &starts))
-            .map(|(s, duration)| {
-                format!(
-                    "file '{}'\nduration {:.6}\n",
-                    s.path.file_name().unwrap().to_string_lossy(),
-                    duration
-                )
-            })
-            .collect::<String>();
-        fs::write(&list, lines)?;
+        fs::write(
+            &list,
+            concat_list(segments, &concat_durations(&spans, &starts))?,
+        )?;
         mark("Remuxing");
         let part = destination.with_extension("partial.mkv");
         let output = command(&self.ffmpeg)
@@ -388,8 +395,10 @@ impl Media {
                 "-xerror",
                 "-f",
                 "concat",
+                // Per-file probe options need safe=0; concat_list only writes
+                // bare generated names from the snapshot directory.
                 "-safe",
-                "1",
+                "0",
                 "-i",
             ])
             .arg(&list)
@@ -424,6 +433,80 @@ impl Media {
         mark("Ready");
         verified.save_timings = timings;
         Ok(verified)
+    }
+    /// Minimal per-segment facts for concatenation, probed in parallel.
+    pub fn segment_infos(&self, segments: &[Segment]) -> Result<Vec<SegmentInfo>> {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let results = std::sync::Mutex::new((0..segments.len()).map(|_| None).collect::<Vec<_>>());
+        std::thread::scope(|scope| {
+            for _ in 0..segments.len().clamp(1, 8) {
+                scope.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(segment) = segments.get(i) else {
+                        break;
+                    };
+                    let info = self.segment_info(&segment.path);
+                    results.lock().unwrap()[i] = Some(info);
+                });
+            }
+        });
+        results
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.unwrap_or_else(|| Err(anyhow::anyhow!("Segment was not probed"))))
+            .collect()
+    }
+    /// Same probe as a below-normal-priority process, for background use
+    /// while capture runs.
+    pub fn segment_info_low_priority(&self, path: &Path) -> Result<SegmentInfo> {
+        self.segment_info_with(path, 0x0800_0000 | 0x0000_4000)
+    }
+    fn segment_info(&self, path: &Path) -> Result<SegmentInfo> {
+        self.segment_info_with(path, 0x0800_0000)
+    }
+    fn segment_info_with(&self, path: &Path, flags: u32) -> Result<SegmentInfo> {
+        let mut c = Command::new(&self.ffprobe);
+        c.creation_flags(flags);
+        let out = c
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=start_time:stream=codec_type,codec_name,width,height",
+                "-of",
+                "json",
+            ])
+            .arg(path)
+            .output()?;
+        if !out.status.success() {
+            bail!("A replay segment could not be read: {}", path.display())
+        }
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+        let streams = json["streams"]
+            .as_array()
+            .context("No streams in segment")?;
+        let layout = streams
+            .iter()
+            .map(|s| {
+                format!(
+                    "{}:{}:{}x{}",
+                    s["codec_type"].as_str().unwrap_or(""),
+                    s["codec_name"].as_str().unwrap_or(""),
+                    s["width"].as_u64().unwrap_or(0),
+                    s["height"].as_u64().unwrap_or(0)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(SegmentInfo {
+            start_time: json["format"]["start_time"]
+                .as_str()
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.),
+            layout,
+        })
     }
     /// The remux has already read every packet. Validate stream layout, duration
     /// and decode both ends before publication. Full decode remains available
@@ -747,6 +830,28 @@ fn format_tag(json: &serde_json::Value, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Concat script for segments in one directory. Each file gets minimal
+/// probing: the concat demuxer otherwise runs full stream detection on every
+/// 2 s segment (about 30 ms each), which dominated long saves (10 min: 10.0 s
+/// -> 3.9 s remux, identical packets).
+pub fn concat_list(segments: &[Segment], durations: &[f64]) -> Result<String> {
+    let mut out = String::new();
+    for (s, duration) in segments.iter().zip(durations) {
+        let name = s
+            .path
+            .file_name()
+            .context("Segment has no file name")?
+            .to_string_lossy();
+        if name.contains(['\'', '\\', '/', ':', '\n', '\r']) || name.starts_with('.') {
+            bail!("Unexpected segment file name")
+        }
+        out += &format!(
+            "file '{name}'\noption probesize 32\noption analyzeduration 0\nduration {duration:.6}\n"
+        );
+    }
+    Ok(out)
+}
+
 /// Concat-list durations that keep segment seams gapless. The concat demuxer
 /// shifts each file by its own container start time, so a segment whose start
 /// is not zero (the first segment of a session starts after AAC priming) must
@@ -877,6 +982,32 @@ mod tests {
         assert!(f.contains("vpp_qsv=w=1920:h=1080") && !f.contains("hwdownload"));
         assert!(video_filter(&stretch, Scaler::Cpu)
             .starts_with("hwdownload,format=bgra,scale=1920:1080"));
+    }
+
+    #[test]
+    fn concat_list_uses_only_bare_generated_names() {
+        let seg = |p: &str| Segment {
+            path: PathBuf::from(p),
+            start: 0.,
+            end: 2.,
+            bytes: 1,
+            origin: None,
+            start_time: Some(0.),
+        };
+        let list = concat_list(
+            &[
+                seg(r"C:\saves\x\00000000.mkv"),
+                seg(r"C:\saves\x\00000001.mkv"),
+            ],
+            &[2.0, 2.0],
+        )
+        .unwrap();
+        assert_eq!(list.matches("file '").count(), 2);
+        assert!(list.contains(
+            "file '00000000.mkv'\noption probesize 32\noption analyzeduration 0\nduration 2.000000\n"
+        ));
+        assert!(!list.contains("saves"));
+        assert!(concat_list(&[seg(r"C:\x\a'b.mkv")], &[2.0]).is_err());
     }
 
     #[test]

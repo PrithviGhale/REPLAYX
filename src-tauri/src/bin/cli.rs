@@ -133,6 +133,146 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if action == "save-bench" {
+        // Test B/C offline: save-path timing on synthetic 2 s segments written
+        // by the engine's segment muxer settings. No screen or audio capture.
+        let seconds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
+        let media = Media::discover()?;
+        let base = std::env::current_dir()?
+            .join("test-output")
+            .join("save-bench")
+            .join(format!("{seconds}s"));
+        if !base.join("segments.csv").exists() {
+            std::fs::create_dir_all(&base)?;
+            let ok = std::process::Command::new(&media.ffmpeg)
+                .current_dir(&base)
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("testsrc2=s=1920x1080:r=60:d={seconds}"),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("sine=f=440:r=48000:d={seconds}"),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("sine=f=660:r=48000:d={seconds}"),
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-map",
+                    "2:a",
+                    "-c:v",
+                    "h264_qsv",
+                    "-b:v",
+                    "12M",
+                    "-g",
+                    "120",
+                    "-bf",
+                    "0",
+                    "-forced_idr",
+                    "1",
+                    "-force_key_frames",
+                    "expr:gte(t,n_forced*2)",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-f",
+                    "segment",
+                    "-segment_time",
+                    "2",
+                    "-segment_format",
+                    "matroska",
+                    "-segment_list",
+                    "segments.csv",
+                    "-segment_list_type",
+                    "csv",
+                    "-reset_timestamps",
+                    "1",
+                    "segment-%08d.mkv",
+                ])
+                .status()?
+                .success();
+            if !ok {
+                bail!("Could not create fixture segments")
+            }
+        }
+        let csv = std::fs::read_to_string(base.join("segments.csv"))?;
+        let segments: Vec<replayx_core::buffer::Segment> = csv
+            .lines()
+            .filter_map(|l| {
+                let mut f = l.split(',');
+                let name = f.next()?;
+                let start: f64 = f.next()?.parse().ok()?;
+                let end: f64 = f.next()?.parse().ok()?;
+                let path = base.join(name);
+                let bytes = std::fs::metadata(&path).ok()?.len();
+                Some(replayx_core::buffer::Segment {
+                    path,
+                    start,
+                    end,
+                    bytes,
+                    origin: None,
+                    start_time: None,
+                })
+            })
+            .collect();
+        let out = base.join("out");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out)?;
+        // Old (0.2.0): sequential full probe of every segment, remux, full decode.
+        let t = std::time::Instant::now();
+        for s in &segments {
+            media.probe(&s.path)?;
+        }
+        let probe_old = t.elapsed().as_millis();
+        let old = media.concat(&segments, &out.join("old.mkv"), 2)?;
+        let old_total = t.elapsed().as_millis();
+        // New: parallel minimal probes, remux, boundary decode; stage timings.
+        let t = std::time::Instant::now();
+        let new =
+            media.concat_progress(&segments, &out.join("new.mkv"), 2, false, &[], &mut |_| {})?;
+        let new_total = t.elapsed().as_millis();
+        println!(
+            "{seconds} s replay, {} segments, {:.0} MB",
+            segments.len(),
+            old.bytes as f64 / 1e6
+        );
+        println!("  0.2.0 path: {old_total} ms total (sequential segment probes alone {probe_old} ms; concat() itself probes again and fully decodes)");
+        print!("  new path:   {new_total} ms total |");
+        for st in &new.save_timings {
+            print!(" {} @{} ms |", st.stage, st.elapsed_ms);
+        }
+        println!();
+        println!(
+            "  durations: old {:.3} s, new {:.3} s",
+            old.duration, new.duration
+        );
+        // With background probing done (normal during capture): no save-time probes.
+        let mut known = segments.clone();
+        for (s, info) in known.iter_mut().zip(media.segment_infos(&segments)?) {
+            s.start_time = Some(info.start_time);
+        }
+        let t = std::time::Instant::now();
+        let warm =
+            media.concat_progress(&known, &out.join("warm.mkv"), 2, false, &[], &mut |_| {})?;
+        print!(
+            "  new path, start times known from capture: {} ms |",
+            t.elapsed().as_millis()
+        );
+        for st in &warm.save_timings {
+            print!(" {} @{} ms |", st.stage, st.elapsed_ms);
+        }
+        println!(" duration {:.3} s", warm.duration);
+        return Ok(());
+    }
     if action == "detect" {
         // Read-only: prints the foreground process classification once a second.
         let seconds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(10);
@@ -164,7 +304,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if !["self-test", "capture-test", "record-test", "recover"].contains(&action) {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
