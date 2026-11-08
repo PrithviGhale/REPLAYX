@@ -49,6 +49,10 @@ struct AppState {
     monitor_stop: Arc<std::sync::atomic::AtomicBool>,
     /// Live monitoring gain (f32 bits), adjustable while listening.
     monitor_gain: Arc<std::sync::atomic::AtomicU32>,
+    /// Meter of the running live monitor (Voice Enhancer updates, A/B).
+    monitor_meter: Arc<Mutex<Option<Arc<audio::Meter>>>>,
+    /// Raw microphone sample for the original/enhanced comparison (memory only).
+    voice_sample: Arc<Mutex<Option<Vec<f32>>>>,
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
@@ -375,62 +379,120 @@ fn prune_cache(dir: &std::path::Path, keep: usize) {
         let _ = fs::remove_file(path);
     }
 }
-/// Record a few seconds from one source through the real capture path,
-/// emitting `audio-test-level` events, and keep the result as a WAV file.
+/// Voice comparison: record a short sample of the raw microphone (only on
+/// an explicit click), kept in memory only, never written to disk.
 #[tauri::command]
-async fn audio_test(
+async fn voice_sample_record(
     source: AudioSource,
     seconds: u64,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Reply<audio::TestCapture> {
+) -> Reply<f32> {
     {
         let mut busy = state.testing_audio.lock().unwrap();
         if *busy {
-            return Err("An audio test is already running".into());
+            return Err("A microphone test is already running".into());
         }
         *busy = true;
     }
-    let dir = state.data_dir().join("tests");
-    let file = dir.join("audio-test.wav");
     let flag = state.testing_audio.clone();
     let stop = state.test_stop.clone();
+    let slot = state.voice_sample.clone();
     stop.store(false, std::sync::atomic::Ordering::Relaxed);
-    let ffmpeg = Media::discover().ok().map(|m| m.ffmpeg);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        // The same processing the recording will use (boost, filters, limiter),
-        // so what the user hears is what gets recorded.
-        let chain = crate::media::source_chain(&source);
-        let capture = audio::record_test(source, seconds.clamp(2, 15), &stop, |peak, elapsed| {
-            let _ = app.emit("audio-test-level", (peak, elapsed));
+        // Raw capture: the comparison processes it afterwards, so original and
+        // enhanced are the same performance.
+        let raw = AudioSource {
+            voice: crate::voice::preset("raw").unwrap(),
+            boost_db: 0.0,
+            volume: 1.0,
+            muted: false,
+            enabled: true,
+            ..source
+        };
+        let capture = audio::record_test(raw, seconds.clamp(3, 15), &stop, |peak, elapsed| {
+            let _ = app.emit("voice-sample-level", (peak, elapsed));
         })
         .map_err(err)?;
-        fs::create_dir_all(&dir).map_err(err)?;
-        let raw = dir.join("audio-test-raw.wav");
-        audio::write_wav16(&raw, &capture.pcm).map_err(err)?;
-        let _ = fs::remove_file(&file);
-        match (&ffmpeg, chain.is_empty()) {
-            (Some(ffmpeg), false) => {
-                let status = command(ffmpeg)
-                    .args(["-hide_banner", "-v", "error", "-y", "-i"])
-                    .arg(&raw)
-                    .args(["-af", &chain, "-c:a", "pcm_s16le"])
-                    .arg(&file)
-                    .status()
-                    .map_err(err)?;
-                let _ = fs::remove_file(&raw);
-                if !status.success() {
-                    return Err("Could not apply the microphone processing to the test".into());
-                }
-            }
-            _ => fs::rename(&raw, &file).map_err(err)?,
-        }
-        Ok(capture)
+        let mono: Vec<f32> = capture.pcm.chunks(2).map(|f| (f[0] + f[1]) * 0.5).collect();
+        *slot.lock().unwrap() = Some(mono);
+        Ok(capture.peak)
     })
     .await
     .map_err(err);
     *flag.lock().unwrap() = false;
     result?
+}
+/// Original and enhanced versions of the recorded sample, level-matched,
+/// as WAV (base64) for in-app playback, with peak and noise statistics.
+#[tauri::command]
+async fn voice_sample_render(
+    voice: crate::voice::VoiceConfig,
+    boost_db: f32,
+    state: State<'_, AppState>,
+) -> Reply<serde_json::Value> {
+    voice.validate().map_err(err)?;
+    let sample = state.voice_sample.lock().unwrap().clone();
+    let Some(raw) = sample else {
+        return Err("Record a sample first".into());
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let (enhanced, matched) = crate::voice::process_buffer(&voice, boost_db, &raw);
+        let original: Vec<f32> = raw
+            .iter()
+            .map(|v| (v * matched).clamp(-0.99, 0.99))
+            .collect();
+        let peak = |x: &[f32]| 20.0 * x.iter().fold(0f32, |m, v| m.max(v.abs())).max(1e-9).log10();
+        // Noise floor: the quietest 10% of 10 ms frames.
+        let floor = |x: &[f32]| {
+            let mut f: Vec<f32> = x
+                .chunks(480)
+                .map(|c| {
+                    10.0 * (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32)
+                        .max(1e-12)
+                        .log10()
+                })
+                .collect();
+            f.sort_by(|a, b| a.total_cmp(b));
+            f.get(f.len() / 10).copied().unwrap_or(-120.0)
+        };
+        let stereo = |x: &[f32]| x.iter().flat_map(|v| [*v, *v]).collect::<Vec<f32>>();
+        Ok(serde_json::json!({
+            "original": winutil::base64(&audio::wav16_bytes(&stereo(&original))),
+            "enhanced": winutil::base64(&audio::wav16_bytes(&stereo(&enhanced))),
+            "input_peak_db": peak(&raw),
+            "enhanced_peak_db": peak(&enhanced),
+            "input_clipped": raw.iter().any(|v| v.abs() >= 0.99),
+            "noise_floor_db": floor(&original),
+            "enhanced_noise_floor_db": floor(&enhanced),
+            "match_db": 20.0 * matched.log10(),
+            "seconds": raw.len() as f32 / 48_000.0,
+        }))
+    })
+    .await
+    .map_err(err)?
+}
+/// Forget the comparison sample (closing the panel).
+#[tauri::command]
+fn voice_sample_discard(state: State<AppState>) {
+    *state.voice_sample.lock().unwrap() = None;
+}
+/// End a running sample recording early.
+#[tauri::command]
+fn audio_test_stop(state: State<AppState>) {
+    state
+        .test_stop
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+/// Open Windows' sound settings (where the microphone's hardware input level
+/// lives). REPLAYX never changes it itself.
+#[tauri::command]
+fn open_sound_settings() -> Reply<()> {
+    command("explorer.exe")
+        .arg("ms-settings:sound")
+        .spawn()
+        .map_err(err)?;
+    Ok(())
 }
 /// Audio devices right now (cheap; no encoder probes).
 #[tauri::command]
@@ -440,8 +502,9 @@ async fn audio_devices() -> Reply<Vec<audio::AudioDevice>> {
         .map_err(err)?
 }
 /// Start "hear yourself": the microphone played live on `output` ("" = the
-/// Windows default). Emits `mic-monitor-level` and, when it ends,
-/// `mic-monitor-ended` (with the error, if any). Nothing is recorded.
+/// Windows default) through the Voice Enhancer, exactly as recorded. Emits
+/// `mic-monitor-level` and, when it ends, `mic-monitor-ended`. Nothing is
+/// recorded.
 #[tauri::command]
 fn mic_monitor_start(
     source: AudioSource,
@@ -453,6 +516,7 @@ fn mic_monitor_start(
     if (status.replay || status.recording) && audio::monitor_leaks(&state.engine.settings().audio) {
         return Err("While capture records System audio, hearing yourself would end up in the clip. Turn off Instant Replay to test your mic.".into());
     }
+    source.voice.validate().map_err(err)?;
     {
         let mut busy = state.testing_audio.lock().unwrap();
         if *busy {
@@ -465,12 +529,13 @@ fn mic_monitor_start(
     stop.store(false, std::sync::atomic::Ordering::Relaxed);
     let gain = state.monitor_gain.clone();
     gain.store(
-        audio::monitor_level(source.volume, source.boost_db).to_bits(),
+        audio::monitor_level(source.volume).to_bits(),
         std::sync::atomic::Ordering::Relaxed,
     );
+    let slot = state.monitor_meter.clone();
     thread::spawn(move || {
         let level_app = app.clone();
-        let result = audio::monitor(source, &output, &stop, &gain, |peak| {
+        let result = audio::monitor(source, &output, &stop, &gain, &slot, |peak| {
             let _ = level_app.emit("mic-monitor-level", peak);
         });
         *flag.lock().unwrap() = false;
@@ -481,13 +546,28 @@ fn mic_monitor_start(
     });
     Ok(())
 }
-/// Change volume/boost while listening.
+/// Change volume, Voice Enhancer settings or original/enhanced while
+/// listening; applied on the next 10 ms chunk.
 #[tauri::command]
-fn mic_monitor_set(volume: f32, boost_db: f32, state: State<AppState>) {
+fn mic_monitor_set(
+    volume: f32,
+    voice: crate::voice::VoiceConfig,
+    boost_db: f32,
+    original: bool,
+    state: State<AppState>,
+) -> Reply<()> {
+    voice.validate().map_err(err)?;
     state.monitor_gain.store(
-        audio::monitor_level(volume, boost_db).to_bits(),
+        audio::monitor_level(volume).to_bits(),
         std::sync::atomic::Ordering::Relaxed,
     );
+    if let Some(meter) = state.monitor_meter.lock().unwrap().as_ref() {
+        *meter.voice_update.lock().unwrap() = Some((voice, boost_db.clamp(0.0, 24.0)));
+        meter
+            .bypass
+            .store(original, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
 }
 #[tauri::command]
 fn mic_monitor_stop(state: State<AppState>) {
@@ -495,30 +575,7 @@ fn mic_monitor_stop(state: State<AppState>) {
         .monitor_stop
         .store(true, std::sync::atomic::Ordering::Relaxed);
 }
-/// End a running audio test early ("Stop test").
-#[tauri::command]
-fn audio_test_stop(state: State<AppState>) {
-    state
-        .test_stop
-        .store(true, std::sync::atomic::Ordering::Relaxed);
-}
-/// The last test recording as a WAV data URL for in-app playback.
-#[tauri::command]
-async fn audio_test_data(state: State<'_, AppState>) -> Reply<String> {
-    let file = state.data_dir().join("tests").join("audio-test.wav");
-    tauri::async_runtime::spawn_blocking(move || {
-        let bytes = fs::read(&file).map_err(|_| "Run a test recording first".to_string())?;
-        Ok(format!("data:audio/wav;base64,{}", winutil::base64(&bytes)))
-    })
-    .await
-    .map_err(err)?
-}
-/// Delete test recordings (closing the test, and at start-up): microphone
-/// tests are never kept.
-#[tauri::command]
-fn audio_test_discard(state: State<AppState>) {
-    discard_audio_tests(&state.data_dir());
-}
+/// Remove test recordings left by older versions (they wrote WAV files).
 fn discard_audio_tests(data: &std::path::Path) {
     for name in ["audio-test.wav", "audio-test-raw.wav"] {
         let _ = fs::remove_file(data.join("tests").join(name));
@@ -944,6 +1001,8 @@ pub fn run() {
                 test_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 monitor_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 monitor_gain: Arc::new(std::sync::atomic::AtomicU32::new(1f32.to_bits())),
+                monitor_meter: Arc::new(Mutex::new(None)),
+                voice_sample: Arc::new(Mutex::new(None)),
                 app: app.handle().clone(),
                 library: Arc::new(Mutex::new(Library {
                     index: library::Index::load(&data.join("library-index.json")),
@@ -1208,14 +1267,15 @@ pub fn run() {
             audio_sessions,
             app_icon,
             clip_thumbnail,
-            audio_test,
             audio_test_stop,
-            audio_test_data,
+            voice_sample_record,
+            voice_sample_render,
+            voice_sample_discard,
+            open_sound_settings,
             audio_devices,
             mic_monitor_start,
             mic_monitor_set,
             mic_monitor_stop,
-            audio_test_discard,
             open_folder
         ])
         .run(tauri::generate_context!())

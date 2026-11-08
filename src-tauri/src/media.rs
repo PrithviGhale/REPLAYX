@@ -850,27 +850,14 @@ pub fn filter_graphs(
 /// louder than unity (boost, or volume above 100%) and keeps peaks under
 /// -0.5 dBFS instead of clipping. Measured cost: ~0.4% of one core.
 pub fn source_chain(source: &crate::model::AudioSource) -> String {
-    let mut f: Vec<String> = Vec::new();
-    if source.high_pass {
-        f.push("highpass=f=80".into());
+    // Microphone processing (filters, noise suppression, gain, limiter) runs
+    // natively in the Voice Enhancer (crate::voice) before samples reach
+    // FFmpeg. FFmpeg only limits a source turned above 100% volume.
+    if source.volume > 1.0 {
+        "alimiter=limit=0.944:attack=4:release=60:level=0".into()
+    } else {
+        String::new()
     }
-    if source.noise_suppression {
-        f.push("afftdn=nr=10:nf=-50:tn=1".into());
-    }
-    if source.noise_gate {
-        // Expander, not a hard gate: lowers by at most ~10 dB between words.
-        f.push("agate=threshold=0.008:ratio=2:attack=5:release=200:range=0.3".into());
-    }
-    if source.compressor {
-        f.push("acompressor=threshold=0.125:ratio=3:attack=10:release=150:makeup=1.5".into());
-    }
-    if source.boost_db > 0.05 {
-        f.push(format!("volume={:.1}dB", source.boost_db));
-    }
-    if source.boost_db > 0.05 || source.volume > 1.0 || source.compressor {
-        f.push("alimiter=limit=0.944:attack=4:release=60:level=0".into());
-    }
-    f.join(",")
 }
 /// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
 /// the defaults for benchmarking only (see scripts/overhead-bench.py).
@@ -1801,24 +1788,17 @@ mod tests {
             .any(|w| w[0] == "-rc-lookahead" && w[1] == "20"));
     }
     #[test]
-    fn microphone_chain_is_optional_ordered_and_always_limited_when_loud() {
+    fn ffmpeg_only_limits_loud_sources_voice_processing_is_native() {
         use crate::model::AudioSource;
         let mic = AudioSource {
             kind: "microphone".into(),
+            boost_db: 12.0,
             ..Default::default()
         };
         assert_eq!(
             source_chain(&mic),
             "",
-            "raw capture unless the user enables something"
-        );
-        let loud = AudioSource {
-            boost_db: 12.0,
-            ..mic.clone()
-        };
-        assert_eq!(
-            source_chain(&loud),
-            "volume=12.0dB,alimiter=limit=0.944:attack=4:release=60:level=0"
+            "boost and processing run in crate::voice"
         );
         let over = AudioSource {
             volume: 1.5,
@@ -1828,23 +1808,6 @@ mod tests {
             source_chain(&over).starts_with("alimiter"),
             "above 100% is limited, not clipped"
         );
-        let all = AudioSource {
-            high_pass: true,
-            noise_suppression: true,
-            noise_gate: true,
-            compressor: true,
-            boost_db: 6.0,
-            ..mic.clone()
-        };
-        let c = source_chain(&all);
-        let at = |f: &str| c.find(f).unwrap();
-        assert!(
-            at("highpass") < at("afftdn")
-                && at("afftdn") < at("agate")
-                && at("agate") < at("acompressor")
-                && at("acompressor") < at("volume")
-                && at("volume") < at("alimiter")
-        );
         let bad = crate::model::Settings {
             audio: vec![AudioSource {
                 boost_db: 30.0,
@@ -1853,38 +1816,5 @@ mod tests {
             ..Default::default()
         };
         assert!(bad.validate().is_err());
-    }
-    #[test]
-    fn boosted_microphone_never_clips() {
-        // +24 dB on a near-full-scale tone through the real chain: the output
-        // stays below 0 dBFS (limiter), no hard clipping.
-        let Ok(media) = Media::discover() else { return };
-        let mic = crate::model::AudioSource {
-            kind: "microphone".into(),
-            boost_db: 24.0,
-            compressor: true,
-            high_pass: true,
-            ..Default::default()
-        };
-        let out = command(&media.ffmpeg)
-            .args([
-                "-hide_banner",
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=f=220:r=48000:d=2,volume=0.9",
-                "-af",
-            ])
-            .arg(format!("{},astats=metadata=0", source_chain(&mic)))
-            .args(["-f", "null", "-"])
-            .output()
-            .unwrap();
-        let text = String::from_utf8_lossy(&out.stderr);
-        let peak: f64 = text
-            .lines()
-            .filter_map(|l| l.split("Peak level dB:").nth(1))
-            .filter_map(|v| v.trim().parse().ok())
-            .fold(f64::MIN, f64::max);
-        assert!(peak < -0.3 && peak > -12.0, "peak {peak} dBFS");
     }
 }

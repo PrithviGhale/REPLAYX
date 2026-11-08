@@ -16,18 +16,21 @@ pub struct AudioSource {
     pub enabled: bool,
     pub volume: f32,
     pub muted: bool,
-    /// Extra gain for this source in dB (0-24), applied in FFmpeg and always
-    /// followed by a limiter, so a quiet microphone can be made louder without
-    /// harsh clipping. Windows' own microphone level is never changed.
+    /// Recording gain for a microphone in dB (0-24), applied by the Voice
+    /// Enhancer before its limiter, so a quiet microphone can be made louder
+    /// without clipping. Windows' own microphone level is never changed.
     pub boost_db: f32,
-    /// Remove rumble and handling noise below ~80 Hz (voice is unaffected).
-    pub high_pass: bool,
-    /// Light FFT noise reduction for steady background noise (fans, hum).
-    pub noise_suppression: bool,
-    /// Gentle expander that lowers the level between words.
-    pub noise_gate: bool,
-    /// Gentle compressor that evens out loud and quiet speech.
-    pub compressor: bool,
+    /// Voice Enhancer settings (microphones only). Older files' separate
+    /// high_pass/noise_suppression/noise_gate/compressor keys are ignored.
+    pub voice: crate::voice::VoiceConfig,
+}
+/// A user-saved Voice Enhancer preset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SavedVoice {
+    pub name: String,
+    pub voice: crate::voice::VoiceConfig,
+    pub boost_db: f32,
 }
 impl AudioSource {
     /// The Windows default microphone with the rumble filter on.
@@ -35,7 +38,6 @@ impl AudioSource {
         Self {
             kind: "microphone".into(),
             name: "Microphone".into(),
-            high_pass: true,
             ..Default::default()
         }
     }
@@ -52,10 +54,7 @@ impl Default for AudioSource {
             volume: 1.0,
             muted: false,
             boost_db: 0.0,
-            high_pass: false,
-            noise_suppression: false,
-            noise_gate: false,
-            compressor: false,
+            voice: Default::default(),
         }
     }
 }
@@ -112,6 +111,10 @@ pub struct Settings {
     pub overlay: crate::status_overlay::OverlaySettings,
     /// Close-to-tray explanation already shown once.
     pub tray_hint_shown: bool,
+    /// First-run tour finished or skipped.
+    pub tour_done: bool,
+    /// Voice Enhancer presets saved by the user.
+    pub voice_presets: Vec<SavedVoice>,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -156,6 +159,8 @@ impl Default for Settings {
             scale_policy: "smooth".into(),
             overlay: Default::default(),
             tray_hint_shown: false,
+            tour_done: false,
+            voice_presets: Vec::new(),
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -240,6 +245,19 @@ impl Settings {
             || !(30..=100).contains(&self.overlay.opacity)
         {
             bail!("Invalid overlay position or opacity")
+        }
+        for a in &self.audio {
+            a.voice.validate()?;
+        }
+        if self.voice_presets.len() > 20
+            || self.voice_presets.iter().any(|p| {
+                p.name.trim().is_empty() || p.name.len() > 40 || !(0.0..=24.0).contains(&p.boost_db)
+            })
+        {
+            bail!("Invalid saved voice preset")
+        }
+        for p in &self.voice_presets {
+            p.voice.validate()?;
         }
         if !["auto", "h264", "hevc", "av1"].contains(&self.codec.as_str()) {
             bail!("Unsupported video codec")
@@ -468,7 +486,7 @@ mod tests {
         assert!(s.migrate());
         assert_eq!(s.output_width(), 2560);
         assert_eq!(s.audio.iter().filter(|a| a.kind == "microphone").count(), 1);
-        assert!(s.audio[1].high_pass && s.audio[1].device.is_empty());
+        assert!(s.audio[1].voice.preset == "clear" && s.audio[1].device.is_empty());
         s.validate().unwrap();
         assert!(!s.migrate(), "runs once");
         // An existing microphone is not duplicated.

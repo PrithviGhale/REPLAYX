@@ -75,6 +75,12 @@ pub struct Meter {
     pub clock_ppm: AtomicU32,
     /// Windows endpoint mix format before conversion to 48kHz stereo float.
     pub format: Mutex<Option<String>>,
+    /// New Voice Enhancer settings to apply on the next chunk (live tests).
+    pub voice_update: Mutex<Option<(crate::voice::VoiceConfig, f32)>>,
+    /// Play the unprocessed microphone, level-matched (live A/B only).
+    pub bypass: AtomicBool,
+    /// Frames the Voice Enhancer could not process (raw audio was used).
+    pub dsp_faults: AtomicU64,
 }
 
 /// Largest device channel count opened natively (microphone arrays).
@@ -509,24 +515,10 @@ pub fn record_test(
     })
 }
 
-/// Gain for live monitoring: the source's boost, then a soft limiter that
-/// leaves normal speech untouched and rounds peaks off below full scale.
-pub fn monitor_gain(samples: &mut [f32], boost_db: f32) {
-    let gain = 10f32.powf(boost_db.clamp(0.0, 24.0) / 20.0);
-    const KNEE: f32 = 0.85;
-    for s in samples.iter_mut() {
-        let v = *s * gain;
-        let a = v.abs();
-        *s = if a <= KNEE {
-            v
-        } else {
-            v.signum() * (KNEE + (1.0 - KNEE) * ((a - KNEE) / (1.0 - KNEE)).tanh()) * 0.98
-        };
-    }
-}
-/// Linear monitoring gain for a volume (0-2) and boost (dB).
-pub fn monitor_level(volume: f32, boost_db: f32) -> f32 {
-    volume.clamp(0.0, 2.0) * 10f32.powf(boost_db.clamp(0.0, 24.0) / 20.0)
+/// Linear monitoring gain for a volume (0-2); boost is applied by the
+/// Voice Enhancer in the feed.
+pub fn monitor_level(volume: f32) -> f32 {
+    volume.clamp(0.0, 2.0)
 }
 /// Whether listening would leak into capture: an enabled System or
 /// "everything except" source records what plays on the speakers.
@@ -546,15 +538,18 @@ pub fn monitor(
     output: &str,
     stop: &AtomicBool,
     gain: &AtomicU32,
+    meter_slot: &Mutex<Option<Arc<Meter>>>,
     mut on_level: impl FnMut(f32),
 ) -> Result<()> {
     use std::io::Read;
-    // Volume and boost come from `gain` (changeable while listening).
+    // Volume comes from `gain`; boost and the Voice Enhancer run in the feed
+    // exactly as when recording, and can be changed through the meter.
     let feed = spawn(AudioSource {
         volume: 1.0,
         muted: false,
         ..source
     })?;
+    *meter_slot.lock().unwrap() = Some(feed.meter.clone());
     let mut socket = std::net::TcpStream::connect(feed.url.trim_start_matches("tcp://"))?;
     socket.set_read_timeout(Some(Duration::from_millis(10)))?;
     wasapi::initialize_mta().ok()?;
@@ -611,9 +606,8 @@ pub fn monitor(
             pending.drain(..whole);
             let g = f32::from_bits(gain.load(Ordering::Relaxed));
             for s in samples.iter_mut() {
-                *s *= g;
+                *s = (*s * g).clamp(-1.0, 1.0);
             }
-            monitor_gain(&mut samples, 0.0);
             peak = samples.iter().fold(peak, |p, v| p.max(v.abs()));
             queue.extend(samples.iter().flat_map(|v| v.to_le_bytes()));
             if queue.len() > max_queue {
@@ -633,11 +627,17 @@ pub fn monitor(
         }
     }
     let _ = client.stop_stream();
+    *meter_slot.lock().unwrap() = None;
     Ok(())
 }
 
 /// Write interleaved stereo 48kHz samples as a 16-bit PCM WAV file.
 pub fn write_wav16(path: &std::path::Path, pcm: &[f32]) -> Result<()> {
+    std::fs::write(path, wav16_bytes(pcm))?;
+    Ok(())
+}
+/// Interleaved stereo 48kHz samples as 16-bit PCM WAV bytes.
+pub fn wav16_bytes(pcm: &[f32]) -> Vec<u8> {
     let data: Vec<u8> = pcm
         .iter()
         .flat_map(|v| ((v.clamp(-1., 1.) * 32767.) as i16).to_le_bytes())
@@ -656,8 +656,7 @@ pub fn write_wav16(path: &std::path::Path, pcm: &[f32]) -> Result<()> {
     wav.extend_from_slice(b"data");
     wav.extend((data.len() as u32).to_le_bytes());
     wav.extend(data);
-    std::fs::write(path, wav)?;
-    Ok(())
+    wav
 }
 
 /// Endpoint mix formats (what Windows converts from), read without starting a stream.
@@ -821,6 +820,12 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 thread::sleep(Duration::from_millis(5));
             }
             let mut timeline = Timeline::new(qpc_hns());
+            // Voice Enhancer for microphones (see crate::voice): runs here, on
+            // each paced 10 ms chunk, never on the video path.
+            let mut voice = (source.kind == "microphone"
+                && (source.voice.active() || source.boost_db > 0.05))
+                .then(|| crate::voice::Processor::new(&source.voice, source.boost_db));
+            let mut mono = vec![0f32; CHUNK];
             client.start_stream()?;
             let mut clock_base: Option<(u64, u64)> = None;
             let mut last_process_check = Instant::now();
@@ -901,6 +906,31 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 }
                 // Idle loopback (no packets) is valid silence and is paced out as zeros.
                 while let Some(mut chunk) = timeline.pull(qpc_hns()) {
+                    if let Some((cfg, boost)) = mt.voice_update.lock().unwrap().take() {
+                        match voice.as_mut() {
+                            Some(p) => p.configure(&cfg, boost),
+                            None => voice = Some(crate::voice::Processor::new(&cfg, boost)),
+                        }
+                    }
+                    if let Some(p) = voice.as_mut().filter(|_| chunk.len() == CHUNK * CHANNELS) {
+                        for (m, f) in mono.iter_mut().zip(chunk.chunks(CHANNELS)) {
+                            *m = (f[0] + f[1]) * 0.5;
+                        }
+                        let raw = mono.clone();
+                        p.process(&mut mono);
+                        if mt.bypass.load(Ordering::Relaxed) {
+                            // Original, as loud as the enhanced voice (fair A/B).
+                            let g = p.match_gain();
+                            for (m, r) in mono.iter_mut().zip(&raw) {
+                                *m = (r * g).clamp(-0.99, 0.99);
+                            }
+                        }
+                        for (f, m) in chunk.chunks_mut(CHANNELS).zip(&mono) {
+                            f[0] = *m;
+                            f[1] = *m;
+                        }
+                        mt.dsp_faults.store(p.faults, Ordering::Relaxed);
+                    }
                     let gain = if mt.muted.load(Ordering::Relaxed) {
                         0.
                     } else {
@@ -1326,22 +1356,6 @@ mod tests {
         assert_eq!(to_stereo(vec![0.1; 6], 4).len(), 2);
     }
 
-    #[test]
-    fn monitor_gain_boosts_and_never_clips() {
-        let mut quiet = vec![0.05f32, -0.05];
-        monitor_gain(&mut quiet, 6.0);
-        assert!(
-            (quiet[0] - 0.05 * 10f32.powf(0.3)).abs() < 1e-4,
-            "{quiet:?}"
-        );
-        let mut loud = vec![0.9f32, -1.0, 0.5];
-        monitor_gain(&mut loud, 24.0);
-        assert!(loud.iter().all(|v| v.abs() < 1.0), "{loud:?}");
-        assert!(loud[0] > 0.9 && loud[1] < -0.9);
-        let mut speech = vec![0.3f32];
-        monitor_gain(&mut speech, 0.0);
-        assert_eq!(speech[0], 0.3);
-    }
     #[test]
     fn unconsumed_queue_is_bounded() {
         let mut timeline = Timeline::new(ORIGIN);

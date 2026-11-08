@@ -7,6 +7,9 @@ fn main() -> Result<()> {
     if action == "audio-test" {
         return audio_test(&args);
     }
+    if action == "voice-eval" {
+        return voice_eval(&args);
+    }
     if action == "overlay-render" {
         return overlay_render(&args);
     }
@@ -998,5 +1001,116 @@ fn overlay_render(args: &[String]) -> Result<()> {
         bail!("could not write {}", out.display());
     }
     println!("{}", out.display());
+    Ok(())
+}
+
+/// Evaluate the Voice Enhancer on a recording (any format FFmpeg reads):
+/// `voice-eval input.wav [out-dir] [clean.wav]`. Writes one processed WAV per
+/// preset and suppression strength, and prints level, noise floor, peak and
+/// CPU cost. With the clean (noise-free) version of the same speech it also
+/// reports how much speech changed versus how much noise was removed.
+fn voice_eval(args: &[String]) -> Result<()> {
+    use replayx_core::voice::{preset, process_buffer, VoiceConfig, PRESETS};
+    let input = PathBuf::from(
+        args.get(2)
+            .ok_or_else(|| anyhow::anyhow!("voice-eval input.wav [out-dir] [clean.wav]"))?,
+    );
+    let out = PathBuf::from(
+        args.get(3)
+            .map(String::as_str)
+            .unwrap_or("test-output/voice"),
+    );
+    std::fs::create_dir_all(&out)?;
+    let media = Media::discover()?;
+    let read = |p: &std::path::Path| -> Result<Vec<f32>> {
+        let o = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-i"])
+            .arg(p)
+            .args(["-ac", "1", "-ar", "48000", "-f", "f32le", "-"])
+            .output()?;
+        if !o.status.success() {
+            bail!("could not read {}", p.display());
+        }
+        Ok(o.stdout
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect())
+    };
+    let x = read(&input)?;
+    let clean = args
+        .get(4)
+        .map(|p| read(std::path::Path::new(p)))
+        .transpose()?;
+    let frame_db = |s: &[f32]| -> Vec<f32> {
+        s.chunks(480)
+            .map(|c| {
+                10.0 * ((c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).max(1e-12)).log10()
+            })
+            .collect()
+    };
+    let stats = |s: &[f32]| {
+        let mut f = frame_db(s);
+        f.sort_by(|a, b| a.total_cmp(b));
+        let pct = |p: f32| f[((f.len() - 1) as f32 * p) as usize];
+        let peak = s.iter().fold(0f32, |m, v| m.max(v.abs()));
+        (pct(0.10), pct(0.90), 20.0 * peak.max(1e-9).log10())
+    };
+    let (n0, s0, p0) = stats(&x);
+    println!(
+        "{:<22} floor {:>6.1} dB  speech {:>6.1} dB  peak {:>6.1} dBFS",
+        "input", n0, s0, p0
+    );
+    let mut configs: Vec<(String, VoiceConfig)> = PRESETS
+        .iter()
+        .map(|p| (p.to_string(), preset(p).unwrap()))
+        .collect();
+    for s in ["light", "balanced", "strong"] {
+        configs.push((
+            format!("suppression-{s}"),
+            VoiceConfig {
+                suppression: s.into(),
+                ..preset("raw").unwrap()
+            },
+        ));
+    }
+    for (name, cfg) in configs {
+        let t = std::time::Instant::now();
+        let (y, matched) = process_buffer(&cfg, 0.0, &x);
+        let cpu = t.elapsed().as_secs_f64() / (x.len() as f64 / 48_000.0) * 100.0;
+        let (n, s, p) = stats(&y);
+        let mut line = format!(
+            "{name:<22} floor {n:>6.1} dB  speech {s:>6.1} dB  peak {p:>6.1} dBFS  noise -{:>4.1} dB  cpu {cpu:.2}% of a core  match {:+.1} dB",
+            (n0 - n) - (s0 - s), 20.0 * matched.log10()
+        );
+        if let Some(c) = &clean {
+            // Speech distortion: error vs the clean speech after level match
+            // (lower is better); computed on frames where the clean speech is active.
+            // Reference: the clean speech through the same processing, so EQ,
+            // filtering and compression are not counted as errors; what is
+            // left is remaining noise plus suppression artefacts.
+            let (cy, _) = process_buffer(&cfg, 0.0, c);
+            let act: Vec<usize> = frame_db(c)
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| **d > -45.0)
+                .map(|(i, _)| i)
+                .collect();
+            let (mut e, mut sig) = (0f64, 0f64);
+            for i in act {
+                for k in i * 480..((i + 1) * 480).min(c.len()).min(y.len()) {
+                    let target = cy[k] as f64;
+                    e += (y[k] as f64 - target).powi(2);
+                    sig += target.powi(2);
+                }
+            }
+            line += &format!("  SDR {:>5.1} dB", 10.0 * (sig / e.max(1e-12)).log10());
+        }
+        println!("{line}");
+        let wav = out.join(format!("{name}.wav"));
+        let stereo: Vec<f32> = y.iter().flat_map(|v| [*v, *v]).collect();
+        replayx_core::audio::write_wav16(&wav, &stereo)?;
+    }
     Ok(())
 }
