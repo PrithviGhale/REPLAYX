@@ -12,6 +12,7 @@ export function PerformancePage() {
     fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, start: x.start_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
     buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, detail: x.scaling_detail,
     ow: x.output_width, oh: x.output_height, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, state: x.state,
+    speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label,
     geo: x.geometry ? `${x.geometry.active_width}×${x.geometry.active_height} @ ${x.geometry.refresh_hz} Hz` : '',
   }));
   const ui = useUiStart();
@@ -23,6 +24,9 @@ export function PerformancePage() {
   return (
     <Section>
       {!active && <div className="banner info">Start Instant Replay or a recording to see live measurements. Nothing here is estimated.</div>}
+      {active && s.speed > 0 && (s.speed < 0.97 || s.lag > 2000) && (
+        <div className="banner warn" role="alert">The encoder is not keeping up ({s.speed.toFixed(2)}× real time, video {(s.lag / 1000).toFixed(1)} s behind). Expect stutter; capture stops if it falls 8 s behind. Lower the frame rate or resolution, or choose the Performance preset.</div>
+      )}
       <div className="stat-grid">
         <Card className="metric"><Stat label="Encoded rate" value={active ? `${s.fps.toFixed(1)} fps` : '—'} detail={`Target ${draft.fps} fps`} tone={active && s.fps < draft.fps * 0.9 ? 'warn' : undefined} /><Sparkline values={history.map(h => h.fps)} max={draft.fps} label="Capture rate history" /></Card>
         <Card className="metric"><Stat label="Dropped frames" value={active ? String(s.dropped) : '—'} detail={active ? `${dropPct.toFixed(2)}% of ${s.frames.toLocaleString()} frames` : 'Frames skipped to keep a constant frame rate'} tone={active && dropPct > 1 ? 'warn' : undefined} /><Sparkline values={history.map(h => h.dropped)} label="Dropped frames history" /></Card>
@@ -35,17 +39,19 @@ export function PerformancePage() {
       <div className="grid-2">
         <Card title="Video pipeline">
           <dl className="facts">
-            <div><dt>Encoder</dt><dd>{active ? encoderName(s.encoder) : '—'}</dd></div>
+            <div><dt>Encoder</dt><dd>{active ? `${encoderName(s.encoder)}${s.label ? ` — ${s.label}` : ''}` : '—'}</dd></div>
+            <div><dt>Encoder speed</dt><dd>{active && s.speed > 0 ? <>{s.speed.toFixed(2)}× real time {s.speed >= 0.99 ? <Badge tone="ok">keeping up</Badge> : <Badge tone="warn">falling behind</Badge>}</> : '—'}</dd></div>
+            <div><dt>Video behind real time</dt><dd>{active ? `${(s.lag / 1000).toFixed(1)} s` : '—'}</dd></div>
             <div><dt>Scaling path</dt><dd>{active ? s.scaling || '—' : '—'} {active && s.scaling.startsWith('GPU zero-copy') && <Badge tone="ok">no CPU copy</Badge>}{active && s.scaling === 'CPU fallback' && <Badge tone="warn">higher CPU</Badge>}</dd></div>
             <div><dt>Display mode</dt><dd>{s.geo || '—'}</dd></div>
             <div><dt>Encoded size</dt><dd>{active && s.ow ? `${s.ow}×${s.oh}` : '—'}</dd></div>
-            <div><dt>Bitrate</dt><dd>{draft.bitrate_mbps} Mbps video · {draft.audio_bitrate_kbps} kbps per audio track</dd></div>
+            <div><dt>Bitrate</dt><dd>{active && s.mbps ? `${s.mbps} Mb/s target video (${draft.preset === 'custom' ? 'custom' : `${draft.preset} preset`})` : '—'} · {draft.audio_bitrate_kbps} kb/s per audio track</dd></div>
             <div><dt>Last frame / last segment</dt><dd>{active ? `${s.frameAge} ms / ${(s.segAge / 1000).toFixed(1)} s ago` : '—'}</dd></div>
             <div><dt>Encode latency</dt><dd className="muted">Not measured yet</dd></div>
-            <div><dt>CFR repeated frames</dt><dd>{s.duplicated ?? 0} (excludes capture-source repeats)</dd></div>
+            <div><dt>Repeated / dropped by the frame-rate grid</dt><dd>{active ? `${s.duplicated ?? 0} / ${s.dropped}` : '—'} <span className="muted small">(frames FFmpeg repeated or skipped to hold {draft.fps} fps)</span></dd></div>
             <div><dt>Source FPS / capture drops / queue depth</dt><dd className="muted">Not measured</dd></div>
             <div><dt>Per-frame latency / jitter / GPU copy load</dt><dd className="muted">Not measured live; use the offline pacing report</dd></div>
-            <div><dt>GPU encoder load</dt><dd className="muted">Not measured yet</dd></div>
+            <div><dt>GPU encoder load / adapter</dt><dd className="muted">Not measured in the app (Task Manager → Performance → GPU shows engine load)</dd></div>
           </dl>
           {active && s.detail && <details className="small"><summary>Faster paths that were not usable</summary><p className="mono">{s.detail}</p></details>}
         </Card>

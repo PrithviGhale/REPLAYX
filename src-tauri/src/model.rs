@@ -37,6 +37,9 @@ pub struct Settings {
     pub capture: String,
     pub display: u32,
     pub window_title: String,
+    /// Encoded frame width. Independent of the display: 1920 with height 1080
+    /// is always a 1920×1080 file. Ignored by `native` (display shape).
+    pub width: u32,
     pub height: u32,
     pub canvas_mode: String,
     pub source_rect: Option<crate::geometry::CaptureRect>,
@@ -66,17 +69,25 @@ pub struct Settings {
     pub organize_by_game: bool,
     /// User corrections for game detection (executable → game name).
     pub game_mappings: Vec<crate::games::GameMapping>,
+    /// Show a small "<game> detected" notice when a game comes to the front.
+    pub game_notifications: bool,
+    /// Settings file layout version (see `migrate`); absent in older files.
+    #[serde(default)]
+    pub settings_version: u32,
 }
+/// Current settings layout. 2: explicit output width (0.2.1-alpha.3).
+pub const SETTINGS_VERSION: u32 = 2;
 impl Default for Settings {
     fn default() -> Self {
         Self {
             capture: "desktop-duplication".into(),
             display: 0,
             window_title: String::new(),
+            width: 1920,
             height: 1080,
-            canvas_mode: "native".into(),
+            canvas_mode: "stretch".into(),
             source_rect: None,
-            fps: 30,
+            fps: 60,
             encoder: "auto".into(),
             preset: "balanced".into(),
             bitrate_mbps: 12,
@@ -98,10 +109,36 @@ impl Default for Settings {
             launch_at_startup: false,
             organize_by_game: true,
             game_mappings: Vec::new(),
+            game_notifications: true,
+            settings_version: SETTINGS_VERSION,
         }
     }
 }
 impl Settings {
+    /// Output width for the selected mode (`native` derives it at plan time).
+    pub fn output_width(&self) -> u32 {
+        if self.width == 0 {
+            crate::geometry::canvas(self.height).0
+        } else {
+            self.width
+        }
+    }
+    /// Bring an older settings file to the current layout. Version 1 had no
+    /// width: the frame was the 16:9 canvas for the height, and the default
+    /// mode `native` kept the display's shape, so "1080p" on a 2560×1600
+    /// display recorded 1728×1080. Users asked for 1080p get 1920×1080: native
+    /// becomes Stretch to fill (the full-GPU path); fit and crop keep their mode.
+    pub fn migrate(&mut self) -> bool {
+        if self.settings_version >= SETTINGS_VERSION {
+            return false;
+        }
+        self.width = crate::geometry::canvas(self.height).0;
+        if self.canvas_mode == "native" {
+            self.canvas_mode = "stretch".into();
+        }
+        self.settings_version = SETTINGS_VERSION;
+        true
+    }
     pub fn validate(&self) -> Result<()> {
         if !crate::geometry::CANVAS_MODES.contains(&self.canvas_mode.as_str()) {
             bail!("Unknown canvas mode")
@@ -112,7 +149,11 @@ impl Settings {
             };
             rect.validate(32768, 32768)?;
         }
-        if ![480, 720, 1080, 1440, 2160].contains(&self.height)
+        // H.264 hardware encoders accept up to 4096×2304; sizes must be even.
+        if !(240..=2304).contains(&self.height)
+            || !(320..=4096).contains(&self.output_width())
+            || !self.height.is_multiple_of(2)
+            || !self.output_width().is_multiple_of(2)
             || ![30, 60, 120, 144].contains(&self.fps)
         {
             bail!("Unsupported resolution or frame rate")
@@ -120,7 +161,7 @@ impl Settings {
         if ![30, 60, 180, 300, 600, 900, 1800].contains(&self.replay_seconds) {
             bail!("Invalid replay duration")
         }
-        if !(128..=102400).contains(&self.buffer_mb) || !(1..=100).contains(&self.bitrate_mbps) {
+        if !(128..=102400).contains(&self.buffer_mb) || !(1..=150).contains(&self.bitrate_mbps) {
             bail!("Invalid disk budget or bitrate")
         }
         if !["desktop-duplication", "desktop", "window"].contains(&self.capture.as_str()) {
@@ -141,7 +182,7 @@ impl Settings {
         if ![128, 160, 192, 256, 320].contains(&self.audio_bitrate_kbps) {
             bail!("Unsupported audio bitrate")
         }
-        if !["balanced", "quality", "performance"].contains(&self.preset.as_str()) {
+        if !["balanced", "quality", "performance", "custom"].contains(&self.preset.as_str()) {
             bail!("Invalid preset")
         }
         if !self.output_dir.is_absolute() {
@@ -204,7 +245,8 @@ impl Settings {
         let mut s: Self = serde_json::from_slice(&fs::read(path)?)
             .context("Settings are corrupt; restore or remove settings.json")?;
         // Migrate only the complete legacy default set, preserving custom keys.
-        if s.migrate_legacy_hotkeys() {
+        let layout = s.migrate();
+        if s.migrate_legacy_hotkeys() || layout {
             s.save(path)?;
         }
         s.validate()?;
@@ -328,12 +370,49 @@ mod tests {
         assert!(!settings.migrate_legacy_hotkeys());
     }
     #[test]
-    fn alpha_settings_preserve_aspect_ratio() {
-        let old = serde_json::json!({"height":1080,"fps":30});
-        let settings: Settings = serde_json::from_value(old).unwrap();
-        assert_eq!(settings.canvas_mode, "native");
-        assert!(settings.source_rect.is_none());
-        settings.validate().unwrap();
+    fn older_settings_get_a_real_16_9_output_size() {
+        // 0.2.1-alpha.2 and earlier: no width, "native" = display shape
+        // (1728x1080 on a 2560x1600 display). 1080p now means 1920x1080.
+        let old = serde_json::json!({"height":1080,"fps":120,"canvas_mode":"native"});
+        let mut s: Settings = serde_json::from_value(old).unwrap();
+        assert_eq!(s.settings_version, 0);
+        assert!(s.migrate());
+        assert_eq!(
+            (s.output_width(), s.height, s.canvas_mode.as_str()),
+            (1920, 1080, "stretch")
+        );
+        assert_eq!(s.fps, 120, "frame rate is kept");
+        s.validate().unwrap();
+        assert!(!s.migrate(), "runs once");
+        let old = serde_json::json!({"height":720,"canvas_mode":"fit"});
+        let mut s: Settings = serde_json::from_value(old).unwrap();
+        s.migrate();
+        assert_eq!(
+            (s.output_width(), s.height, s.canvas_mode.as_str()),
+            (1280, 720, "fit")
+        );
+        // A current file with a custom size is left alone.
+        let new = serde_json::json!({"width":2560,"height":1080,"canvas_mode":"crop","settings_version":2});
+        let mut s: Settings = serde_json::from_value(new).unwrap();
+        assert!(!s.migrate());
+        assert_eq!(s.output_width(), 2560);
+        s.validate().unwrap();
+    }
+    #[test]
+    fn output_size_is_validated_for_hardware_encoders() {
+        let ok = |w: u32, h: u32| {
+            Settings {
+                width: w,
+                height: h,
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        };
+        assert!(ok(1920, 1080) && ok(1280, 720) && ok(3840, 2160) && ok(1440, 1080));
+        assert!(!ok(1921, 1080), "odd width");
+        assert!(!ok(5120, 2880), "beyond H.264 hardware limits");
+        assert!(!ok(200, 100), "too small");
     }
     #[test]
     fn recovery_only_accepts_owned_session_directories() {
@@ -359,7 +438,7 @@ mod tests {
         let s = Settings::default();
         s.save(&p).unwrap();
         s.save(&p).unwrap();
-        assert_eq!(Settings::load(&p).unwrap().fps, 30);
+        assert_eq!(Settings::load(&p).unwrap().fps, 60);
     }
     #[test]
     fn reject_bad_settings() {

@@ -71,6 +71,16 @@ pub struct Status {
     pub recording_elapsed: f64,
     /// Time from the start request to each startup stage of the last start.
     pub start_timings: Vec<media::StageTiming>,
+    /// Encoder throughput in multiples of real time (1.0 = keeping up).
+    pub encoder_speed: f64,
+    /// How far encoded video trails the wall clock since the first frame.
+    pub video_lag_ms: u64,
+    /// Video bitrate the encoder targets (Mb/s).
+    pub target_bitrate_mbps: u32,
+    /// Encoder in use, as a readable name (e.g. "h264_qsv (low-power VDEnc)").
+    pub encoder_label: String,
+    /// Game in front right now, also while not capturing (for the notice).
+    pub foreground_game: Option<String>,
 }
 /// Snapshot readable without the engine lock, so no caller (in particular the
 /// UI thread) ever waits for capture startup, saves or recovery.
@@ -107,6 +117,18 @@ struct Prepared {
     cache: Option<(String, Scaler, String)>,
     timings: Vec<media::StageTiming>,
 }
+/// Encoded video may trail the wall clock this much before capture stops with
+/// an overload error (a few seconds of lag are absorbed by FFmpeg's queues).
+const VIDEO_LAG_LIMIT_MS: u64 = 8000;
+fn overload_message(lag_ms: u64, speed: f64, fps: u32) -> String {
+    format!(
+        "The video encoder fell {:.1} s behind real time (running at {:.2}x), so capture stopped. \
+The GPU could not keep up with {fps} fps alongside the game: choose 60 fps, a lower output \
+resolution or the Performance preset in Video settings. Footage recorded so far is saved.",
+        lag_ms as f64 / 1000.0,
+        speed
+    )
+}
 /// Longest a start may take before it is abandoned with an error.
 const START_WATCHDOG: Duration = Duration::from_secs(60);
 #[derive(Default)]
@@ -115,6 +137,8 @@ struct Progress {
     out_us: AtomicU64,
     /// Milliseconds from the start request to the first encoded frame (0 = none yet).
     first_frame_ms: AtomicU64,
+    /// FFmpeg's `speed` (x real time, f64 bits).
+    speed: AtomicU64,
     frames: AtomicU64,
     dropped: AtomicU64,
     duplicated: AtomicU64,
@@ -183,6 +207,8 @@ pub struct Inner {
     segment_starts: Arc<Mutex<std::collections::HashMap<PathBuf, f64>>>,
     segment_probe_tx: std::sync::mpsc::Sender<PathBuf>,
     starting: Option<Starting>,
+    /// Saves of recordings cut short by an error, started by the tick loop.
+    orphaned: Vec<SaveJob>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -304,6 +330,7 @@ impl Engine {
                 segment_starts: segment_starts.clone(),
                 segment_probe_tx,
                 starting: None,
+                orphaned: Vec::new(),
                 _instance_lock: instance_lock,
             })),
             published.clone(),
@@ -330,6 +357,13 @@ impl Engine {
                 }
                 Ok(None) => {}
                 Err(e) => i.fail(format!("{e:#}")),
+            }
+            for job in std::mem::take(&mut i.orphaned) {
+                let engine = Engine(arc.clone(), published.clone());
+                thread::spawn(move || {
+                    let result = job.run();
+                    engine.complete_save(&result);
+                });
             }
             *published.status.lock().unwrap() = i.status.clone();
         });
@@ -868,7 +902,7 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v1|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}",
+        "v2|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}",
         g.device,
         g.desktop_width,
         g.desktop_height,
@@ -1049,6 +1083,7 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     let plan = match &geometry {
         Some(g) => Some(geometry::plan(
             g.region(s.source_rect)?,
+            s.output_width(),
             s.height,
             &s.canvas_mode,
         )?),
@@ -1172,7 +1207,10 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                 }
             }
         }
-        media::encoding_args(&mut c, s, &encoder);
+        let size = plan
+            .map(|p| (p.width, p.height))
+            .unwrap_or((s.output_width(), s.height));
+        media::encoding_args(&mut c, s, &encoder, size, media::converts_bt709(scaler));
         c.args([
             "-fps_mode",
             "cfr",
@@ -1257,6 +1295,11 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                             value.parse::<f64>().unwrap_or(0.).to_bits(),
                             Ordering::Relaxed,
                         );
+                    }
+                    "speed" => {
+                        if let Ok(x) = value.trim().trim_end_matches('x').parse::<f64>() {
+                            p.speed.store(x.to_bits(), Ordering::Relaxed);
+                        }
                     }
                     _ => {}
                 }
@@ -1506,7 +1549,8 @@ impl Inner {
     pub fn activity_due(&mut self) -> Option<Vec<crate::games::GameMapping>> {
         let now = Instant::now();
         let capturing = self.pipeline.as_ref().is_some_and(|p| !p.synthetic);
-        if !capturing
+        let idle_watch = self.pipeline.is_none() && self.settings.game_notifications;
+        if !(capturing || idle_watch)
             || self
                 .last_activity_sample
                 .is_some_and(|t| now - t < Duration::from_secs(1))
@@ -1517,15 +1561,18 @@ impl Inner {
         Some(self.settings.game_mappings.clone())
     }
     pub fn record_activity(&mut self, at: Instant, what: crate::games::Foreground) {
-        if self.pipeline.is_none() {
-            return;
-        }
         if let crate::games::Foreground::Game(g) = &what {
-            self.status.detected_game = Some(g.clone());
+            self.status.foreground_game = Some(g.clone());
         } else if what == crate::games::Foreground::App {
+            self.status.foreground_game = None;
+        }
+        // Clip attribution only uses time spent capturing.
+        if self.pipeline.as_ref().is_some_and(|p| !p.synthetic) {
+            self.status.detected_game = self.status.foreground_game.clone();
+            self.activity.record(at, what);
+        } else {
             self.status.detected_game = None;
         }
-        self.activity.record(at, what);
     }
     /// Record what a pending start should do once the encoder runs.
     fn set_intent(&mut self, recording: bool) {
@@ -1637,6 +1684,7 @@ impl Inner {
         if let Some(cache) = p.cache {
             self.video_path_cache = Some(cache);
         }
+        self.status.encoder_label = media::encoder_label(&p.encoder);
         self.status.encoder = p.encoder;
         self.status.capture = self.settings.capture.clone();
         self.status.frames = 0;
@@ -1650,6 +1698,19 @@ impl Inner {
         self.status.scaling_detail = p.scaling_detail;
         (self.status.output_width, self.status.output_height) =
             p.plan.map(|p| (p.width, p.height)).unwrap_or_default();
+        self.status.target_bitrate_mbps = media::target_bitrate_mbps(
+            &self.settings,
+            if self.status.output_width > 0 {
+                self.status.output_width
+            } else {
+                self.settings.output_width()
+            },
+            if self.status.output_height > 0 {
+                self.status.output_height
+            } else {
+                self.settings.height
+            },
+        );
         self.status.buffer_bytes = 0;
         self.status.buffer_seconds = 0.;
         self.status.start_timings = p.timings;
@@ -1817,6 +1878,28 @@ impl Inner {
     fn fail_final(&mut self, error: String) {
         self.recovery = None;
         let _ = self.stop_pipeline();
+        // 0.2.1-alpha.2 left the recording attached after a failure: the UI
+        // said "Capture is off" while Record answered "Recording is already
+        // active" until a restart. Save what was recorded and clear it.
+        if let Some(mut rec) = self.recording.take() {
+            if rec.segments.is_empty() {
+                let _ = fs::remove_dir(&rec.dir);
+            } else {
+                self.fill_start_times(&mut rec.segments);
+                let (path, tags) = self.clip_path("Recording", rec.started, Instant::now());
+                self.orphaned.push(SaveJob {
+                    media: self.media.clone(),
+                    segments: rec.segments,
+                    path,
+                    expected_audio: self.expected_audio(),
+                    dir: rec.dir,
+                    requested: Instant::now(),
+                    tags,
+                });
+                self.status.saving += 1;
+            }
+        }
+        self.status.pending_recording = false;
         self.status.replay = false;
         self.status.recording = false;
         self.status.state = "Error".into();
@@ -1999,6 +2082,41 @@ impl Inner {
                 )
             })
             .collect();
+        self.status.encoder_speed = f64::from_bits(p.progress.speed.load(Ordering::Relaxed));
+        let first_frame = p.progress.first_frame_ms.load(Ordering::Relaxed);
+        self.status.video_lag_ms = if first_frame > 0 {
+            let since_first = (p.began.elapsed().as_millis() as u64).saturating_sub(first_frame);
+            since_first.saturating_sub(p.progress.out_us.load(Ordering::Relaxed) / 1000)
+        } else {
+            0
+        };
+        // The real cause behind "FFmpeg stopped reading audio": the video side
+        // fell behind real time (encoder or capture overloaded), and FFmpeg
+        // pauses inputs that are ahead of the slowest output.
+        if self.status.video_lag_ms > VIDEO_LAG_LIMIT_MS {
+            bail!(
+                "{}",
+                overload_message(
+                    self.status.video_lag_ms,
+                    self.status.encoder_speed,
+                    self.settings.fps
+                )
+            )
+        }
+        for f in &p.feeds {
+            if let Some(e) = f.meter.error.lock().unwrap().clone() {
+                if e.contains("backpressure") {
+                    bail!(
+                        "{e}. {}",
+                        overload_message(
+                            self.status.video_lag_ms,
+                            self.status.encoder_speed,
+                            self.settings.fps
+                        )
+                    )
+                }
+            }
+        }
         health::stream_health(elapsed, last, p.last_segment_ms, &audio_writes)?;
         // "Recording" only once the encoder is writing frames to the output; the
         // first finished segment is still validated (stream layout and size)
@@ -2587,5 +2705,56 @@ mod tests {
         fs::write(dir.join(DISCARDED), b"").unwrap();
         remove_empty_sessions(&data);
         assert!(!dir.exists());
+    }
+    #[test]
+    fn failed_recording_is_saved_and_never_blocks_the_next_one() {
+        // 0.2.1-alpha.2: after an audio/encoder failure the UI showed "Capture is
+        // off" while Record answered "Recording is already active".
+        let root = tempfile::tempdir().unwrap();
+        let engine = isolated(
+            root.path().join("data"),
+            Settings {
+                output_dir: root.path().join("clips"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        {
+            let mut i = engine.0.lock().unwrap();
+            let dir = root.path().join("data/recordings/x");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("00000000.mkv"), b"part").unwrap();
+            i.recording = Some(Recording {
+                dir: dir.clone(),
+                segments: vec![Segment {
+                    path: dir.join("00000000.mkv"),
+                    start: 0.,
+                    end: 2.,
+                    bytes: 4,
+                    origin: None,
+                    start_time: Some(0.),
+                }],
+                after: 0.,
+                started: Instant::now(),
+                stop_at: None,
+            });
+            i.status.recording = true;
+            i.fail_final("Audio capture stopped: test".into());
+            assert!(i.recording.is_none());
+            assert_eq!(i.orphaned.len(), 1, "the footage goes to a save, not lost");
+            assert_eq!(i.status.saving, 1);
+            assert!(!i.status.recording && i.status.state == "Error");
+            i.orphaned.clear();
+            i.status.saving = 0;
+        }
+        let error = engine.start_recording().unwrap_err().to_string();
+        assert!(!error.contains("already active"), "{error}");
+        assert!(!error.contains("Recover the interrupted"), "{error}");
+    }
+    #[test]
+    fn overload_message_names_the_cause_and_a_fix() {
+        let m = overload_message(9200, 0.83, 120);
+        assert!(m.contains("9.2 s behind") && m.contains("0.83x") && m.contains("120 fps"));
+        assert!(m.contains("60 fps") && m.contains("Performance"));
     }
 }

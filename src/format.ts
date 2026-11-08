@@ -14,15 +14,25 @@ export const bytes = (n: number) => {
 };
 export const db = (peak: number) => (peak <= 0.00001 ? '−∞ dB' : `${(20 * Math.log10(peak)).toFixed(1)} dB`);
 export const encoderName = (n: string) => ({
-  h264_nvenc: 'NVIDIA NVENC', h264_amf: 'AMD AMF', h264_qsv: 'Intel Quick Sync', libopenh264: 'OpenH264 (CPU)',
+  h264_nvenc: 'NVIDIA NVENC', h264_amf: 'AMD AMF', h264_qsv: 'Intel Quick Sync', h264_qsv_lp: 'Intel Quick Sync (low-power)', libopenh264: 'OpenH264 (CPU)',
   mpeg4: 'MPEG-4 (CPU)', auto: 'Automatic',
 } as Record<string, string>)[n] ?? (n || '—');
 export const hotkeyLabel = (k: string) => k.split('+').map(p => (p === 'Control' ? 'Ctrl' : p)).join(' + ');
 export const canvasWidth = (h: number) => ({ 480: 854, 720: 1280, 1080: 1920, 1440: 2560, 2160: 3840 } as Record<number, number>)[h] ?? 0;
 
+/** Mirror of media::target_bitrate_mbps: preset bitrate at an output size and fps. */
+export function targetBitrate(preset: string, custom: number, fps: number, width: number, height: number) {
+  if (preset === 'custom') return custom;
+  const base = preset === 'performance' ? 16 : preset === 'quality' ? 45 : 28;
+  const pixels = (width * height) / (1920 * 1080);
+  return Math.min(150, Math.max(4, Math.round(base * pixels ** 0.9 * (fps / 60) ** 0.75)));
+}
+/** Output width for settings (0 = 16:9 canvas for the height, as in older files). */
+export const outputWidth = (width: number, height: number) => width || canvasWidth(height);
+
 /** Mirror of geometry::plan for previews (the engine validates the real plan). */
-export function plan(source: Rect, height: number, mode: CanvasMode) {
-  const cw = canvasWidth(height), ch = height;
+export function plan(source: Rect, width: number, height: number, mode: CanvasMode) {
+  const cw = width, ch = height;
   const even = (v: number) => Math.max(2, Math.floor(v) & ~1);
   const scaled = (v: number, num: number, den: number) => even(Math.round((v * num) / den));
   const { width: sw, height: sh } = source;

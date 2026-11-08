@@ -449,3 +449,47 @@ details p { margin-top: 8px; }
   color: #b9b0ff; background: var(--accent-soft); border: 1px solid var(--accent-line); }
 .mappings { display: grid; gap: 8px; }
 .mapping { display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(160px, 1.4fr) auto; gap: 8px; align-items: center; }
+
+/* Instant Replay switch: real engine state, short transitions only (no idle animation). */
+.replay-switch { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-2); background: var(--surface-2);
+  color: var(--text-2); border-radius: 999px; padding: 4px 4px 4px 12px; font: 600 13px var(--font); cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s; }
+.replay-switch:not(:has(.replay-switch-label)) { padding-left: 4px; }
+.replay-switch:hover:not(:disabled) { border-color: var(--accent-line); }
+.replay-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.replay-switch:disabled { cursor: default; }
+.replay-switch-track { position: relative; display: inline-flex; align-items: center; width: 76px; height: 26px; border-radius: 999px;
+  background: var(--line-2); transition: background 0.2s; }
+.replay-switch-state { position: absolute; right: 10px; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); transition: color 0.2s; }
+.replay-switch-knob { position: absolute; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #d9dbe5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.2s; }
+.replay-switch.on, .replay-switch.starting { border-color: var(--accent-line); color: var(--text); }
+.replay-switch.on { box-shadow: 0 0 0 3px var(--accent-soft); }
+.replay-switch.on .replay-switch-track { background: var(--accent-strong); }
+.replay-switch.on .replay-switch-state, .replay-switch.starting .replay-switch-state { left: 10px; right: auto; color: #fff; }
+.replay-switch.on .replay-switch-knob, .replay-switch.starting .replay-switch-knob { transform: translateX(50px); background: #fff; }
+.replay-switch.starting .replay-switch-track { background: color-mix(in srgb, var(--accent-strong) 55%, var(--line-2)); }
+.replay-switch.stopping .replay-switch-track { background: color-mix(in srgb, var(--accent-strong) 30%, var(--line-2)); }
+.replay-switch.error { border-color: rgba(255, 93, 110, 0.5); }
+.replay-switch.error .replay-switch-state { color: var(--bad); }
+.replay-switch.lg .replay-switch-track { width: 88px; height: 32px; }
+.replay-switch.lg .replay-switch-knob { width: 26px; height: 26px; }
+.replay-switch.lg.on .replay-switch-knob, .replay-switch.lg.starting .replay-switch-knob { transform: translateX(56px); }
+.replay-hero-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.replay-hero h2 { margin: 0 0 4px; font: 600 18px var(--font-display); }
+.replay-hero p { margin: 0; }
+
+/* Output size: source and saved video side by side, size cards, preset summary. */
+.size-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+.size-flow > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; }
+.size-flow dt { color: var(--muted); font-size: 12px; }
+.size-flow dd { margin: 2px 0 0; font-weight: 600; }
+.size-flow em { font-style: normal; color: var(--muted); font-weight: 400; margin-left: 4px; }
+.size-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.size-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--text); cursor: pointer; font: inherit; text-align: left; }
+.size-card span { color: var(--muted); font-size: 12px; }
+.size-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.size-card:disabled { opacity: 0.55; cursor: not-allowed; }
+.rect-grid.two { grid-template-columns: repeat(2, minmax(0, 160px)); }
+.preset-note { margin: 4px 0 12px; font-size: 13px; color: var(--text-2); }

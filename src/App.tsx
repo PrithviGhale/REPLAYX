@@ -3,6 +3,7 @@ import { AudioLines, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, Rotat
 import { native, VERSION } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
+import { ReplaySwitch } from './ReplaySwitch';
 import { activeOf, startPolling, usePollError, useStatus } from './store';
 import { duration, hotkeyLabel } from './format';
 import { Button, PageBoundary } from './ui';
@@ -56,9 +57,7 @@ function CaptureDock() {
   if (recovering) return <div className="dock"><Button variant="danger" icon={X} disabled={!!busy} onClick={() => go('stop_all')}>Cancel recovery</Button></div>;
   return (
     <div className="dock">
-      <Button icon={RotateCcw} className={s.replay ? 'on' : ''} disabled={!!busy || !native} aria-pressed={s.replay}
-        title={`${s.replay ? 'Stop' : 'Start'} Instant Replay (${hotkeyLabel(draft.pause_hotkey)})`}
-        onClick={() => go(s.replay ? 'stop_replay' : 'start_replay')}>{s.replay ? 'Replay on' : 'Enable replay'}</Button>
+      <ReplaySwitch />
       <Button variant="primary" icon={Save} disabled={!!busy || !native || !s.replay || s.buffer <= 0}
         title={`Save the last ${duration(draft.replay_seconds)} (${hotkeyLabel(draft.replay_hotkey)})`}
         onClick={async () => { const r = await go('save_replay'); const m = saved(r); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>

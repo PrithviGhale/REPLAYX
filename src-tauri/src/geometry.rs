@@ -204,10 +204,12 @@ fn even(v: u32) -> u32 {
 fn scaled(v: u32, num: u32, den: u32) -> u32 {
     even(((v as u64 * num as u64 + den as u64 / 2) / den as u64) as u32)
 }
-pub fn plan(source: CaptureRect, height: u32, mode: &str) -> Result<VideoPlan> {
-    let (cw, ch) = canvas(height);
-    if cw == 0 {
-        bail!("Unsupported output height {height}")
+/// Plan the encoded frame. `width`×`height` is the output size for
+/// stretch/fit/crop; `native` keeps the display's shape at `height`.
+pub fn plan(source: CaptureRect, width: u32, height: u32, mode: &str) -> Result<VideoPlan> {
+    let (cw, ch) = (width, height);
+    if cw < 2 || ch < 2 || !cw.is_multiple_of(2) || !ch.is_multiple_of(2) {
+        bail!("Unsupported output size {width}x{height}")
     }
     let (sw, sh) = (source.width, source.height);
     let fixed = |source: CaptureRect, iw: u32, ih: u32| VideoPlan {
@@ -299,7 +301,13 @@ mod tests {
                     height: h
                 }
             );
-            let p = plan(geom(w, h).region(None).unwrap(), 1080, "stretch").unwrap();
+            let p = plan(
+                geom(w, h).region(None).unwrap(),
+                canvas(1080).0,
+                1080,
+                "stretch",
+            )
+            .unwrap();
             assert_eq!((p.width, p.height), (1920, 1080));
             assert_eq!((p.image_width, p.image_height), (1920, 1080));
             assert_eq!((p.source.width, p.source.height), (w, h));
@@ -380,7 +388,7 @@ mod tests {
     #[test]
     fn fit_letterboxes_or_pillarboxes_without_distortion() {
         // 4:3 game into 16:9: pillarbox 1440x1080 centred.
-        let p = plan(full(1440, 1080), 1080, "fit").unwrap();
+        let p = plan(full(1440, 1080), canvas(1080).0, 1080, "fit").unwrap();
         assert_eq!(
             (p.width, p.height, p.image_width, p.image_height),
             (1920, 1080, 1440, 1080)
@@ -388,7 +396,7 @@ mod tests {
         assert_eq!(p.pad_filter().unwrap(), "pad=1920:1080:240:0:black");
         // Offsets are even and the image always fits inside the frame.
         for (w, h) in [(1440, 1080), (3440, 1440), (1366, 768), (1280, 1024)] {
-            let p = plan(full(w, h), 720, "fit").unwrap();
+            let p = plan(full(w, h), canvas(720).0, 720, "fit").unwrap();
             let pad = p.pad_filter().unwrap_or_default();
             if let [_, _, x, y] = pad
                 .trim_start_matches("pad=")
@@ -402,17 +410,19 @@ mod tests {
             }
         }
         // 16:10 laptop panel into 16:9: pillarbox 1728x1080.
-        let p = plan(full(2560, 1600), 1080, "fit").unwrap();
+        let p = plan(full(2560, 1600), canvas(1080).0, 1080, "fit").unwrap();
         assert_eq!((p.image_width, p.image_height), (1728, 1080));
         // Ultrawide 21:9: letterbox.
-        let p = plan(full(3440, 1440), 1080, "fit").unwrap();
+        let p = plan(full(3440, 1440), canvas(1080).0, 1080, "fit").unwrap();
         assert_eq!((p.image_width, p.image_height), (1920, 804));
         // 16:9 source: no bars.
-        assert!(!plan(full(2560, 1440), 1080, "fit").unwrap().padded());
+        assert!(!plan(full(2560, 1440), canvas(1080).0, 1080, "fit")
+            .unwrap()
+            .padded());
     }
     #[test]
     fn crop_fills_canvas_by_cropping_source_centre_at_capture() {
-        let p = plan(full(2560, 1600), 1080, "crop").unwrap();
+        let p = plan(full(2560, 1600), canvas(1080).0, 1080, "crop").unwrap();
         assert_eq!(
             p.source,
             CaptureRect {
@@ -424,7 +434,7 @@ mod tests {
         );
         assert_eq!((p.width, p.height), (1920, 1080));
         assert!(!p.padded());
-        let p = plan(full(1440, 1080), 1080, "crop").unwrap();
+        let p = plan(full(1440, 1080), canvas(1080).0, 1080, "crop").unwrap();
         assert_eq!(
             p.source,
             CaptureRect {
@@ -441,15 +451,18 @@ mod tests {
             width: 1440,
             height: 1080,
         };
-        assert_eq!(plan(r, 720, "crop").unwrap().source.y, 50 + 135);
+        assert_eq!(
+            plan(r, canvas(720).0, 720, "crop").unwrap().source.y,
+            50 + 135
+        );
     }
     #[test]
     fn native_keeps_source_aspect_at_selected_height() {
-        let p = plan(full(1440, 1080), 1080, "native").unwrap();
+        let p = plan(full(1440, 1080), canvas(1080).0, 1080, "native").unwrap();
         assert_eq!((p.width, p.height), (1440, 1080));
-        let p = plan(full(2560, 1600), 1080, "native").unwrap();
+        let p = plan(full(2560, 1600), canvas(1080).0, 1080, "native").unwrap();
         assert_eq!((p.width, p.height), (1728, 1080));
-        let p = plan(full(1280, 960), 720, "native").unwrap();
+        let p = plan(full(1280, 960), canvas(720).0, 720, "native").unwrap();
         assert_eq!((p.width, p.height), (960, 720));
     }
     #[test]
@@ -463,7 +476,7 @@ mod tests {
                 (3840, 2160),
             ] {
                 for height in [480, 720, 1080, 1440] {
-                    let p = plan(full(w, h), height, mode).unwrap();
+                    let p = plan(full(w, h), canvas(height).0, height, mode).unwrap();
                     for v in [p.width, p.height, p.image_width, p.image_height] {
                         assert_eq!(v % 2, 0, "{mode} {w}x{h}@{height}");
                     }
@@ -472,6 +485,33 @@ mod tests {
                 }
             }
         }
-        assert!(plan(full(1920, 1080), 1080, "zoom").is_err());
+        assert!(plan(full(1920, 1080), canvas(1080).0, 1080, "zoom").is_err());
+    }
+    #[test]
+    fn a_16_10_display_records_a_true_1920x1080() {
+        let src = full(2560, 1600);
+        for mode in ["stretch", "fit", "crop"] {
+            let p = plan(src, 1920, 1080, mode).unwrap();
+            assert_eq!((p.width, p.height), (1920, 1080), "{mode}");
+        }
+        let fit = plan(src, 1920, 1080, "fit").unwrap();
+        assert_eq!(
+            (fit.image_width, fit.image_height),
+            (1728, 1080),
+            "bars left and right"
+        );
+        let crop = plan(src, 1920, 1080, "crop").unwrap();
+        assert_eq!((crop.source.width, crop.source.height), (2560, 1440));
+        assert_eq!(crop.source.y, 80, "centre crop, never an offset region");
+        let native = plan(src, 1920, 1080, "native").unwrap();
+        assert_eq!(
+            (native.width, native.height),
+            (1728, 1080),
+            "native keeps the display shape"
+        );
+        // Stretched 4:3 gameplay fills a 16:9 frame without bars.
+        let s43 = plan(full(1440, 1080), 1920, 1080, "stretch").unwrap();
+        assert!(!s43.padded());
+        assert!(plan(src, 1921, 1080, "stretch").is_err());
     }
 }

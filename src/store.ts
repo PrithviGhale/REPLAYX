@@ -36,11 +36,16 @@ async function poll() {
     pollError = String(e);
   }
   listeners.forEach(l => l());
-  timer = window.setTimeout(poll, isActive(status) ? 250 : 1000);
+  // While REPLAYX is hidden (a game in front, minimised, in the tray) nothing is
+  // drawn, so poll every 2 s: the window should cost the game nothing.
+  const hidden = document.visibilityState === 'hidden';
+  timer = window.setTimeout(poll, hidden ? 2000 : isActive(status) ? 250 : 1000);
 }
 
 export function startPolling() {
   if (!native || timer !== undefined) return;
+  // Back to fast polling as soon as the window is visible again.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshNow(); });
   void poll();
 }
 export const refreshNow = () => { if (native) { window.clearTimeout(timer); void poll(); } };

@@ -328,6 +328,7 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&run)?;
     let mut settings = Settings {
         output_dir: run.join("clips"),
+        width: 854,
         height: 480,
         bitrate_mbps: 3,
         ..Default::default()
@@ -363,13 +364,21 @@ fn main() -> Result<()> {
             Some(("fps", v)) => settings.fps = v.parse()?,
             Some(("mode", v)) => settings.canvas_mode = v.into(),
             Some(("height", v)) => settings.height = v.parse()?,
+            Some(("width", v)) => settings.width = v.parse()?,
+            Some(("preset", v)) => settings.preset = v.into(),
             Some(("encoder", v)) => settings.encoder = v.into(),
-            Some(("bitrate", v)) => settings.bitrate_mbps = v.parse()?,
+            Some(("bitrate", v)) => {
+                settings.bitrate_mbps = v.parse()?;
+                settings.preset = "custom".into();
+            }
             Some(("gpu", v)) => settings.gpu_scaling = v != "0",
             Some(("replay", v)) => settings.replay_seconds = v.parse()?,
             Some(("buffer", v)) => settings.buffer_mb = v.parse()?,
             _ => {}
         }
+    }
+    if !args.iter().any(|a| a.starts_with("width=")) {
+        settings.width = replayx_core::geometry::canvas(settings.height).0;
     }
     let data = if action == "recover" {
         PathBuf::from(args.get(2).expect("data directory required"))

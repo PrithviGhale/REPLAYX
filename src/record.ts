@@ -14,3 +14,12 @@ export function recordMode(s: { recording: boolean; pending_recording: boolean }
 export function isStarting(s: { recording: boolean; pending_recording: boolean; state: string }): boolean {
   return s.pending_recording || s.state === 'Starting';
 }
+
+/** Instant Replay switch state from the engine status (not UI state). */
+export type ReplayState = 'off' | 'starting' | 'on' | 'stopping' | 'error';
+export function replayState(s: { replay: boolean; state: string }): ReplayState {
+  if (s.state === 'Stopping') return 'stopping';
+  if (s.replay && s.state === 'Starting') return 'starting';
+  if (s.replay && s.state !== 'Error') return 'on';
+  return s.state === 'Error' ? 'error' : 'off';
+}

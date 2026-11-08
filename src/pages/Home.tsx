@@ -2,8 +2,9 @@ import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, Rotat
 import { native } from '../api';
 import { useApp } from '../context';
 import { useCapture, useRecordButton } from '../capture';
+import { ReplaySwitch } from '../ReplaySwitch';
 import { activeOf, useStatus } from '../store';
-import { bytes, canvasWidth, duration, encoderName, plan, sourceRect } from '../format';
+import { bytes, duration, encoderName, outputWidth, plan, sourceRect } from '../format';
 import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
 import { SourceIcon, Section, Thumb, feedIndex } from './shared';
 import type { Page } from '../App';
@@ -57,8 +58,8 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const peaks = useStatus(x => x.audio_peaks);
   const active = useStatus(activeOf);
   const display = caps?.displays.find(d => d.index === draft.display);
-  const p = plan(sourceRect(display, draft.source_rect), draft.height, draft.canvas_mode);
-  const out = active && s.ow ? `${s.ow} × ${s.oh}` : canvasWidth(draft.height) ? `${p.width} × ${p.height}` : `${draft.height}p`;
+  const p = plan(sourceRect(display, draft.source_rect), outputWidth(draft.width, draft.height), draft.height, draft.canvas_mode);
+  const out = active && s.ow ? `${s.ow} × ${s.oh}` : `${p.width} × ${p.height}`;
   const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
   const rec = useRecordButton('Stop & save');
   const starting = s.pending || s.state === 'Starting';
@@ -87,14 +88,13 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
               <h2>{headline}</h2>
               <p>{sub}</p>
               <div className="hero-actions">
-                {!s.replay
-                  ? <Button size="lg" variant="primary" icon={RotateCcw} disabled={!!busy || !native} onClick={() => go('start_replay')}>Enable replay</Button>
-                  : <Button size="lg" variant="primary" icon={Save} disabled={!!busy || s.buffer <= 0} onClick={async () => { const m = saved(await go('save_replay')); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>}
+                <ReplaySwitch size="lg" />
+                <Button size="lg" variant="primary" icon={Save} disabled={!!busy || !s.replay || s.buffer <= 0} title={s.replay ? 'Save the last moments now' : 'Turn on Instant Replay first'}
+                  onClick={async () => { const m = saved(await go('save_replay')); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>
                 <Button size="lg" variant="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native}
                   onClick={rec.onClick}>
                   {rec.label}
                 </Button>
-                {s.replay && <Button size="lg" variant="ghost" disabled={!!busy} onClick={() => go('stop_replay')}>Turn off</Button>}
               </div>
               <div className="hotkeys-inline">
                 <span>Save replay <Kbd combo={draft.replay_hotkey} /></span>

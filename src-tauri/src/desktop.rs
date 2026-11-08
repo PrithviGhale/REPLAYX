@@ -850,12 +850,43 @@ pub fn run() {
                 let own = sysinfo::Pid::from_u32(std::process::id());
                 let mut family = vec![own];
                 let mut tick = 0u64;
+                let notices = crate::overlay::Overlay::spawn();
+                let mut announcer = crate::overlay::Announcer::default();
                 loop {
                     thread::sleep(std::time::Duration::from_secs(1));
                     let state = handle.state::<AppState>();
                     let status = state.engine.status();
                     if let Some(tray) = handle.tray_by_id("main-tray") {
                         let _ = tray.set_tooltip(Some(format!("REPLAYX — {}", status.state)));
+                    }
+                    // "Game detected" notice, from the same detector that files
+                    // clips (sampled by the engine without its lock).
+                    let settings = state.engine.settings();
+                    let news = announcer.observe(
+                        status
+                            .foreground_game
+                            .as_deref()
+                            .filter(|_| settings.game_notifications),
+                        std::time::Instant::now(),
+                    );
+                    if let Some(game) = news {
+                        // The process in front is the game just classified; its icon
+                        // decorates the notice. Never queries REPLAYX's own windows.
+                        let icon_exe = crate::games::foreground_process()
+                            .map(|(_, path, _)| PathBuf::from(path));
+                        notices.show(crate::overlay::Notice {
+                            title: format!("{game} detected"),
+                            subtitle: crate::overlay::capture_line(
+                                status.replay,
+                                status.recording,
+                                &status.state,
+                                &settings.replay_hotkey,
+                            ),
+                            active: (status.replay && status.state == "Buffering")
+                                || (status.recording && status.state == "Recording"),
+                            icon_exe,
+                        });
+                        let _ = handle.emit("game-detected", serde_json::json!({"game": game}));
                     }
                     // Rediscover child processes (encoder, WebView) every 5s; refresh
                     // only REPLAYX's own processes every second.

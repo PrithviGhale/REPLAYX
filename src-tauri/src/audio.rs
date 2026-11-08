@@ -49,7 +49,7 @@ const MAX_RATIO_DEVIATION: f64 = 0.005;
 /// Queue bound beyond the holdback before backpressure becomes an error.
 const MAX_BACKLOG_FRAMES: usize = RATE as usize / 4;
 /// Paced chunks buffered between capture and the FFmpeg socket writer.
-pub const OUTPUT_CHANNEL_CHUNKS: usize = 300;
+pub const OUTPUT_CHANNEL_CHUNKS: usize = 1000;
 
 #[derive(Default)]
 pub struct Meter {
@@ -789,7 +789,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                         Ok(()) => {}
                         Err(mpsc::TrySendError::Full(_)) => {
                             mt.gaps.fetch_add(1, Ordering::Relaxed);
-                            bail!("Audio output backpressure exceeded 3s; the encoder stopped reading audio")
+                            bail!("Audio output backpressure exceeded 10 s: FFmpeg stopped reading audio")
                         }
                         Err(_) => return Ok(()),
                     }

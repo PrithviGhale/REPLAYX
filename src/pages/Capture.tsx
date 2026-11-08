@@ -3,19 +3,33 @@ import { ChevronDown, Monitor, RefreshCw } from 'lucide-react';
 import type { CanvasMode, Rect } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { aspect, canvasWidth, encoderName, plan, sourceRect } from '../format';
+import { aspect, encoderName, outputWidth, plan, sourceRect, targetBitrate } from '../format';
 import { Badge, Button, Card, Field, Segmented, Toggle } from '../ui';
 import { Section } from './shared';
 
 const MODES: { id: CanvasMode; title: string; text: string }[] = [
-  { id: 'stretch', title: 'Stretch to fill', text: 'Fills 16:9 exactly. Use for stretched 4:3 gameplay — the video looks like your screen.' },
-  { id: 'fit', title: 'Preserve aspect', text: 'Whole picture, no distortion. Black bars where the shape differs from 16:9.' },
-  { id: 'crop', title: 'Crop to fill', text: 'Fills 16:9 without distortion by trimming the edges. Cropped at capture, so it costs nothing.' },
-  { id: 'native', title: 'Native shape', text: 'Keeps the source shape at the chosen height. Output width follows your display.' },
+  { id: 'stretch', title: 'Stretch to fill', text: 'Fills the whole frame; the picture is stretched if the shapes differ. Matches stretched 4:3 gameplay. Fastest: stays on the GPU.' },
+  { id: 'fit', title: 'Preserve aspect', text: 'Whole picture, no distortion, black bars where the shapes differ. Costs an extra frame copy through the CPU.' },
+  { id: 'crop', title: 'Crop to fill', text: 'Fills the frame without distortion by trimming the edges (centre kept). Fast, but edge UI can be cut off.' },
 ];
 
-function ModeDiagram({ mode, source, height }: { mode: CanvasMode; source: Rect; height: number }) {
-  const p = plan(source, height, mode);
+/** Output sizes offered; "Display shape" keeps the display's own proportions. */
+const SIZES = [
+  { key: '1280x720', label: '1280 × 720', note: '720p' },
+  { key: '1920x1080', label: '1920 × 1080', note: '1080p' },
+  { key: '2560x1440', label: '2560 × 1440', note: '1440p' },
+  { key: '3840x2160', label: '3840 × 2160', note: '4K' },
+];
+
+const PRESETS = [
+  { value: 'performance', label: 'Performance', text: 'Least encoder work and smaller files. Pick this if games lose FPS while recording.' },
+  { value: 'balanced', label: 'Balanced', text: 'Sharp 1080p60 at a moderate size. Recommended.' },
+  { value: 'quality', label: 'High quality', text: 'More bits and the higher-quality encoder modes, for fine detail and fast motion.' },
+  { value: 'custom', label: 'Custom', text: 'Choose the bitrate yourself.' },
+];
+
+function ModeDiagram({ mode, source, width, height }: { mode: CanvasMode; source: Rect; width: number; height: number }) {
+  const p = plan(source, width, height, mode);
   // Draw the output frame scaled into a 120x68 box.
   const k = Math.min(120 / p.width, 68 / p.height);
   const fw = p.width * k, fh = p.height * k, fx = (130 - fw) / 2, fy = (78 - fh) / 2;
@@ -41,7 +55,14 @@ export function CapturePage() {
   const displays = caps?.displays ?? [];
   const display = displays.find(d => d.index === draft.display);
   const src = sourceRect(display, draft.source_rect);
-  const p = plan(src, draft.height, draft.canvas_mode);
+  const ow = outputWidth(draft.width, draft.height);
+  const native = draft.canvas_mode === 'native';
+  const p = plan(src, ow, draft.height, draft.canvas_mode);
+  const sizeKey = native ? 'native' : SIZES.some(z => z.key === `${ow}x${draft.height}`) ? `${ow}x${draft.height}` : 'custom';
+  const [customSize, setCustomSize] = useState(sizeKey === 'custom');
+  const mbps = targetBitrate(draft.preset, draft.bitrate_mbps, draft.fps, p.width, p.height);
+  const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
+  const displayHeight = Math.min(2304, src.height & ~1);
   const dda = draft.capture === 'desktop-duplication';
   const stretchX = p.iw / src.width, stretchY = p.ih / src.height;
   const distortion = draft.canvas_mode === 'stretch' && Math.abs(stretchX / stretchY - 1) > 0.01
@@ -78,49 +99,85 @@ export function CapturePage() {
         )}
       </Card>
 
-      <Card title="Output" subtitle={dda ? `${src.width}×${src.height} source → ${p.width}×${p.height} video, ${distortion}` : 'Scaled by the CPU for GDI sources'}>
-        <div className="grid-2 tight">
-          <Field label="Resolution">
-            <Segmented label="Resolution" value={draft.height} disabled={active} onChange={v => patch({ height: v })}
-              options={[480, 720, 1080, 1440, 2160].map(h => ({ value: h, label: h === 2160 ? '4K' : `${h}p`, hint: `${canvasWidth(h)}×${h} canvas` }))} />
-          </Field>
-          <Field label="Frame rate" hint={draft.fps > 60 ? 'Above 60 fps is experimental: encoder and display limits apply.' : undefined}>
-            <Segmented label="Frame rate" value={draft.fps} disabled={active} onChange={v => patch({ fps: v })}
-              options={[30, 60, 120, 144].map(f => ({ value: f, label: `${f}`, hint: f > 60 ? 'Experimental' : undefined }))} />
-          </Field>
-        </div>
-        <div className="mode-grid" role="radiogroup" aria-label="Aspect ratio">
-          {MODES.map(m => (
-            <button key={m.id} role="radio" aria-checked={draft.canvas_mode === m.id} disabled={active}
-              className={`mode-card ${draft.canvas_mode === m.id ? 'on' : ''}`} onClick={() => patch({ canvas_mode: m.id })}>
-              <ModeDiagram mode={m.id} source={src} height={draft.height} />
-              <strong>{m.title}</strong>
-              <span>{m.text}</span>
+      <Card title="Output" subtitle="The video size is independent of your display: 1920 × 1080 always saves a 1920 × 1080 file.">
+        <dl className="size-flow">
+          <div><dt>Display (source)</dt><dd>{src.width} × {src.height} <em>{aspect(src.width, src.height)}</em></dd></div>
+          <div><dt>Saved video</dt><dd>{p.width} × {p.height} <em>{aspect(p.width, p.height)}</em></dd></div>
+          <div><dt>Picture</dt><dd>{native ? 'display proportions kept' : draft.canvas_mode === 'fit' ? `${p.iw} × ${p.ih} between black bars` : draft.canvas_mode === 'crop' ? `centre ${p.crop.width} × ${p.crop.height} of the display` : distortion}</dd></div>
+        </dl>
+        <Field label="Video resolution">
+          <div className="size-grid" role="radiogroup" aria-label="Video resolution">
+            {SIZES.map(z => {
+              const [w, h] = z.key.split('x').map(Number);
+              const on = sizeKey === z.key && !customSize;
+              return (
+                <button key={z.key} role="radio" aria-checked={on} disabled={active} className={`size-card ${on ? 'on' : ''}`}
+                  onClick={() => { setCustomSize(false); patch({ width: w, height: h, canvas_mode: native ? 'stretch' : draft.canvas_mode }); }}>
+                  <strong>{z.label}</strong><span>{z.note}</span>
+                </button>
+              );
+            })}
+            <button role="radio" aria-checked={native} disabled={active} className={`size-card ${native ? 'on' : ''}`}
+              onClick={() => { setCustomSize(false); patch({ canvas_mode: 'native', height: displayHeight }); }}>
+              <strong>Display shape</strong><span>{plan(src, 2, displayHeight, 'native').width} × {displayHeight}</span>
             </button>
-          ))}
-        </div>
+            <button role="radio" aria-checked={customSize && !native} disabled={active} className={`size-card ${customSize && !native ? 'on' : ''}`}
+              onClick={() => { setCustomSize(true); if (native) patch({ canvas_mode: 'stretch', width: ow }); }}>
+              <strong>Custom</strong><span>width × height</span>
+            </button>
+          </div>
+        </Field>
+        {customSize && !native && (
+          <div className="rect-grid two">
+            <Field label="Width"><input type="number" min={320} max={4096} step={2} value={ow} disabled={active} onChange={e => patch({ width: even(Number(e.target.value)) })} /></Field>
+            <Field label="Height"><input type="number" min={240} max={2304} step={2} value={draft.height} disabled={active} onChange={e => patch({ height: even(Number(e.target.value)) })} /></Field>
+          </div>
+        )}
+        {!native && (
+          <div className="mode-grid" role="radiogroup" aria-label="When the shapes differ">
+            {MODES.map(m => (
+              <button key={m.id} role="radio" aria-checked={draft.canvas_mode === m.id} disabled={active}
+                className={`mode-card ${draft.canvas_mode === m.id ? 'on' : ''}`} onClick={() => patch({ canvas_mode: m.id })}>
+                <ModeDiagram mode={m.id} source={src} width={ow} height={draft.height} />
+                <strong>{m.title}</strong>
+                <span>{m.text}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <Field label="Frame rate" hint={draft.fps > 60 ? `${draft.fps} fps doubles capture and encoding work. On laptops whose display runs on the integrated GPU this can lower game FPS; the Performance page shows if the encoder falls behind.` : undefined}>
+          <Segmented label="Frame rate" value={draft.fps} disabled={active} onChange={v => patch({ fps: v })}
+            options={[30, 60, 120, 144].map(f => ({ value: f, label: `${f} fps`, hint: f > 60 ? 'Needs GPU headroom' : undefined }))} />
+        </Field>
         <p className="muted small">Stretched 4:3 games (for example 1440×1080 shown full-screen) change the display mode itself. REPLAYX detects the change, restarts capture on the new mode and validates the encoded size, so the desktop can't leak into the frame.</p>
       </Card>
 
       <Card title="Encoding">
         <div className="grid-2 tight">
-          <Field label="Encoder" hint="Automatic tries the most efficient working GPU path first.">
+          <Field label="Encoder" hint="Automatic prefers fixed-function encoders (Intel low-power Quick Sync, NVIDIA NVENC) so the GPU shader cores stay free for the game.">
             <select value={draft.encoder} disabled={active} onChange={e => patch({ encoder: e.target.value })}>
               <option value="auto">Automatic</option>
               {(caps?.encoders ?? []).map(e => <option key={e.name} value={e.name} disabled={!e.available}>{encoderName(e.name)}{e.available ? '' : ' — not available'}</option>)}
             </select>
           </Field>
-          <Field label="Speed / quality">
-            <Segmented label="Preset" value={draft.preset} disabled={active} onChange={v => patch({ preset: v })}
-              options={[{ value: 'performance', label: 'Fast' }, { value: 'balanced', label: 'Balanced' }, { value: 'quality', label: 'Quality' }]} />
+          <Field label="Quality">
+            <Segmented label="Quality preset" value={draft.preset} disabled={active}
+              onChange={v => patch(v === 'custom' ? { preset: v, bitrate_mbps: mbps } : { preset: v })}
+              options={PRESETS.map(x => ({ value: x.value, label: x.label, hint: x.text }))} />
           </Field>
         </div>
-        <Field label="Video bitrate" hint={`≈ ${(draft.bitrate_mbps * 7.5).toFixed(0)} MB per minute of video.`}>
-          <div className="range-row">
-            <input type="range" min={2} max={60} value={draft.bitrate_mbps} disabled={active} onChange={e => patch({ bitrate_mbps: Number(e.target.value) })} aria-label="Bitrate" />
-            <span className="range-value">{draft.bitrate_mbps} Mbps</span>
-          </div>
-        </Field>
+        <p className="preset-note">
+          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · H.264 · target {mbps} Mb/s, peaks up to {Math.round(mbps * 1.5)} · about {Math.round(mbps * 7.5)} MB per minute
+          <span className="muted"> — {PRESETS.find(x => x.value === draft.preset)?.text}</span>
+        </p>
+        {draft.preset === 'custom' && (
+          <Field label="Video bitrate" hint={`≈ ${(draft.bitrate_mbps * 7.5).toFixed(0)} MB per minute of video.`}>
+            <div className="range-row">
+              <input type="range" min={2} max={150} value={draft.bitrate_mbps} disabled={active} onChange={e => patch({ bitrate_mbps: Number(e.target.value) })} aria-label="Bitrate" />
+              <span className="range-value">{draft.bitrate_mbps} Mb/s</span>
+            </div>
+          </Field>
+        )}
         <Toggle label="GPU scaling" checked={draft.gpu_scaling} disabled={active} onChange={v => patch({ gpu_scaling: v })}
           description="Scale and convert frames on the GPU that owns the display. Turn off only to troubleshoot; the CPU path costs more." />
         <div className="path-box">

@@ -1,8 +1,4 @@
-use crate::{
-    buffer::Segment,
-    geometry::{self, VideoPlan},
-    model::Settings,
-};
+use crate::{buffer::Segment, geometry::VideoPlan, model::Settings};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -273,17 +269,12 @@ impl Media {
         let mut c = command(&self.ffmpeg);
         c.args(["-hide_banner", "-v", "error", "-nostdin"]);
         let filter = video_input(&mut c, s, scaler, false, plan).map_err(|e| e.to_string())?;
-        c.args([
-            "-vf",
-            &filter,
-            "-c:v",
-            encoder,
-            "-frames:v",
-            "5",
-            "-f",
-            "null",
-            "-",
-        ]);
+        let (ffmpeg_encoder, low_power) = ffmpeg_encoder(encoder);
+        c.args(["-vf", &filter, "-c:v", ffmpeg_encoder]);
+        if low_power {
+            c.args(["-low_power", "1"]);
+        }
+        c.args(["-frames:v", "5", "-f", "null", "-"]);
         let mut child = c
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -630,11 +621,30 @@ impl Scaler {
 
 /// Ordered scaler/encoder candidates for a requested encoder. The first chain
 /// whose real probe succeeds is used; the CPU path is always last.
+/// Engine encoder ids map to an FFmpeg encoder plus options. `h264_qsv_lp`
+/// is Quick Sync on Intel's fixed-function VDEnc path (`-low_power 1`): it
+/// leaves the GPU's shader cores (the "3D" engine, which on hybrid laptops
+/// also composites every game frame) free. The default Quick Sync path runs
+/// motion estimation on those cores. It is probed first and falls back.
+pub fn ffmpeg_encoder(id: &str) -> (&str, bool) {
+    match id {
+        "h264_qsv_lp" => ("h264_qsv", true),
+        other => (other, false),
+    }
+}
+/// Human-readable encoder name for status and diagnostics.
+pub fn encoder_label(id: &str) -> String {
+    match id {
+        "h264_qsv_lp" => "h264_qsv (low-power VDEnc)".into(),
+        other => other.into(),
+    }
+}
 pub fn scaling_candidates(requested: &str) -> Vec<(Scaler, &'static str)> {
     match requested {
         "auto" => vec![
             (Scaler::D3d11, "h264_nvenc"),
             (Scaler::D3d11, "h264_amf"),
+            (Scaler::QsvZeroCopy, "h264_qsv_lp"),
             (Scaler::QsvZeroCopy, "h264_qsv"),
             (Scaler::QsvHybrid, "h264_nvenc"),
             (Scaler::QsvHybrid, "h264_amf"),
@@ -644,7 +654,10 @@ pub fn scaling_candidates(requested: &str) -> Vec<(Scaler, &'static str)> {
             (Scaler::QsvHybrid, "h264_nvenc"),
         ],
         "h264_amf" => vec![(Scaler::D3d11, "h264_amf"), (Scaler::QsvHybrid, "h264_amf")],
-        "h264_qsv" => vec![(Scaler::QsvZeroCopy, "h264_qsv")],
+        "h264_qsv" => vec![
+            (Scaler::QsvZeroCopy, "h264_qsv_lp"),
+            (Scaler::QsvZeroCopy, "h264_qsv"),
+        ],
         _ => vec![],
     }
 }
@@ -660,7 +673,55 @@ fn summarize_error(text: &str) -> String {
 }
 
 /// Build the filter chain for a scaler. `plan` is required for Desktop Duplication.
+/// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
+/// the defaults for benchmarking only (see scripts/overhead-bench.py).
+#[derive(Debug, Clone)]
+pub struct Tuning {
+    /// h264_qsv `low_power`: None = FFmpeg default (auto).
+    pub qsv_low_power: Option<bool>,
+    /// vpp_qsv `scale_mode`: None = auto.
+    pub vpp_scale_mode: Option<u8>,
+    pub draw_mouse: bool,
+    pub qsv_async_depth: Option<u32>,
+}
+impl Default for Tuning {
+    fn default() -> Self {
+        Self {
+            qsv_low_power: None,
+            vpp_scale_mode: None,
+            draw_mouse: true,
+            qsv_async_depth: None,
+        }
+    }
+}
+pub fn tuning() -> Tuning {
+    let mut t = Tuning::default();
+    if let Ok(spec) = std::env::var("REPLAYX_VIDEO_TUNING") {
+        for (k, v) in spec.split(',').filter_map(|kv| kv.split_once('=')) {
+            match k.trim() {
+                "qsv_low_power" => t.qsv_low_power = v.parse::<u8>().ok().map(|v| v == 1),
+                "vpp_scale_mode" => t.vpp_scale_mode = v.parse().ok(),
+                "draw_mouse" => t.draw_mouse = v != "0",
+                "qsv_async_depth" => t.qsv_async_depth = v.parse().ok(),
+                _ => {}
+            }
+        }
+    }
+    t
+}
+/// Quick Sync VPP converts RGB to limited-range BT.709 YUV (the matching tags
+/// are written by `encoding_args`), instead of a driver-chosen matrix.
+const QSV_709: &str = ":out_color_matrix=bt709:out_range=1";
+/// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
+pub fn converts_bt709(scaler: Scaler) -> bool {
+    !matches!(scaler, Scaler::D3d11)
+}
 pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
+    let t = tuning();
+    let vpp_mode = t
+        .vpp_scale_mode
+        .map(|m| format!(":scale_mode={m}"))
+        .unwrap_or_default();
     let (iw, ih) = (plan.image_width, plan.image_height);
     let pad = plan
         .pad_filter()
@@ -669,13 +730,13 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     match scaler {
         Scaler::D3d11 => format!("scale_d3d11=width={iw}:height={ih}:format=nv12,setsar=1"),
         Scaler::QsvZeroCopy => {
-            format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12,setsar=1")
+            format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},setsar=1")
         }
         Scaler::QsvHybrid => format!(
-            "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12,hwdownload,format=nv12{pad},setsar=1"
+            "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},hwdownload,format=nv12{pad},setsar=1"
         ),
         Scaler::Cpu => format!(
-            "hwdownload,format=bgra,scale={iw}:{ih}:flags=bilinear{pad},setsar=1,format=yuv420p"
+            "hwdownload,format=bgra,scale={iw}:{ih}:flags=bicubic:out_color_matrix=bt709:out_range=tv{pad},setsar=1,format=yuv420p"
         ),
     }
 }
@@ -689,8 +750,8 @@ pub fn regrid_filter(fps: u32) -> String {
 }
 
 /// CPU filter for sources without a precomputed plan (GDI capture, synthetic).
-pub fn expression_filter(height: u32, mode: &str) -> String {
-    let (w, h) = geometry::canvas(height);
+pub fn expression_filter(width: u32, height: u32, mode: &str) -> String {
+    let (w, h) = (width, height);
     match mode {
         "stretch" => format!("scale={w}:{h}:flags=bilinear,setsar=1,format=yuv420p"),
         "fit" => format!(
@@ -721,7 +782,11 @@ pub fn video_input(
                 s.fps
             ),
         ]);
-        return Ok(expression_filter(s.height, &s.canvas_mode));
+        return Ok(expression_filter(
+            s.output_width(),
+            s.height,
+            &s.canvas_mode,
+        ));
     }
     if s.capture == "desktop-duplication" {
         let plan = plan.context("Missing validated display geometry")?;
@@ -731,8 +796,8 @@ pub fn video_input(
             "lavfi",
             "-i",
             &format!(
-                "ddagrab=output_idx={}:framerate={}:draw_mouse=1:video_size={}x{}:offset_x={}:offset_y={}",
-                s.display, s.fps, rect.width, rect.height, rect.x, rect.y
+                "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
+                s.display, s.fps, u8::from(tuning().draw_mouse), rect.width, rect.height, rect.x, rect.y
             ),
         ]);
         return Ok(format!(
@@ -747,18 +812,50 @@ pub fn video_input(
     } else {
         "desktop".into()
     });
-    Ok(expression_filter(s.height, &s.canvas_mode))
+    Ok(expression_filter(
+        s.output_width(),
+        s.height,
+        &s.canvas_mode,
+    ))
 }
-pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
+/// Video bitrate for a preset at an output size and frame rate. Anchored at
+/// 1080p60: Performance 16, Balanced 28, High Quality 45 Mb/s (NVIDIA's own
+/// recorder defaults to 50 Mb/s for 1080p60 "High"), scaled by pixel count
+/// and sub-linearly by frame rate (more frames per second means each frame
+/// differs less). Custom uses the user's bitrate as is.
+pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
+    if s.preset == "custom" {
+        return s.bitrate_mbps;
+    }
+    let base = match s.preset.as_str() {
+        "performance" => 16.0,
+        "quality" => 45.0,
+        _ => 28.0,
+    };
+    let pixels = (width as f64 * height as f64) / (1920.0 * 1080.0);
+    let rate = (s.fps as f64 / 60.0).powf(0.75);
+    (base * pixels.powf(0.9) * rate).round().clamp(4.0, 150.0) as u32
+}
+/// Encoder arguments. `size` is the encoded frame size; `bt709` says the
+/// scaler converted with BT.709 limited range, so the stream is tagged so.
+pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u32), bt709: bool) {
+    let (ffmpeg_encoder, low_power) = ffmpeg_encoder(encoder);
+    let mbps = target_bitrate_mbps(s, size.0, size.1);
+    // VBR around the target with a 1.5x peak: action scenes get more bits than
+    // menus without unbounded replay-buffer growth.
     c.args([
         "-c:v",
-        encoder,
+        ffmpeg_encoder,
         "-r",
         &s.fps.to_string(),
         "-enc_time_base",
         &format!("1:{}", s.fps),
         "-b:v",
-        &format!("{}M", s.bitrate_mbps),
+        &format!("{mbps}M"),
+        "-maxrate",
+        &format!("{}k", mbps * 1500),
+        "-bufsize",
+        &format!("{}k", mbps * 2000),
         "-g",
         &(s.fps * 2).to_string(),
         "-bf",
@@ -766,7 +863,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
     ]);
     // Segments must start with IDR frames so each 2s file decodes on its own and
     // the segment muxer can split; QSV otherwise emits only one IDR per stream.
-    match encoder {
+    match ffmpeg_encoder {
         "h264_nvenc" => {
             c.args(["-forced-idr", "1"]);
         }
@@ -775,19 +872,23 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
         }
         _ => {}
     }
-    if encoder == "h264_nvenc" {
+    if ffmpeg_encoder == "h264_nvenc" {
+        // NVENC runs on its own engine; presets trade encoder time, not game GPU time.
         c.args([
             "-preset",
             match s.preset.as_str() {
-                "performance" => "p1",
-                "quality" => "p6",
+                "performance" => "p2",
+                "quality" => "p5",
                 _ => "p4",
             },
             "-tune",
-            "ll",
+            if s.preset == "quality" { "hq" } else { "ll" },
         ]);
+        if s.preset == "quality" {
+            c.args(["-spatial-aq", "1"]);
+        }
     }
-    if encoder == "h264_amf" {
+    if ffmpeg_encoder == "h264_amf" {
         c.args([
             "-quality",
             match s.preset.as_str() {
@@ -797,7 +898,20 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
             },
         ]);
     }
-    if encoder == "h264_qsv" {
+    if ffmpeg_encoder == "h264_qsv" {
+        let t = tuning();
+        match t.qsv_low_power {
+            Some(lp) => {
+                c.args(["-low_power", if lp { "1" } else { "0" }]);
+            }
+            None if low_power => {
+                c.args(["-low_power", "1"]);
+            }
+            None => {}
+        }
+        if let Some(d) = t.qsv_async_depth {
+            c.args(["-async_depth", &d.to_string()]);
+        }
         c.args([
             "-preset",
             match s.preset.as_str() {
@@ -805,6 +919,18 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str) {
                 "quality" => "slow",
                 _ => "medium",
             },
+        ]);
+    }
+    if bt709 {
+        c.args([
+            "-colorspace",
+            "bt709",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-color_range",
+            "tv",
         ]);
     }
     c.args([
@@ -871,7 +997,7 @@ mod tests {
 
     fn args_for(encoder: &str) -> Vec<String> {
         let mut c = Command::new("ffmpeg");
-        encoding_args(&mut c, &Settings::default(), encoder);
+        encoding_args(&mut c, &Settings::default(), encoder, (1920, 1080), true);
         c.get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
@@ -904,7 +1030,7 @@ mod tests {
             width: 2560,
             height: 1600,
         };
-        let p = plan(source, 1080, "stretch").unwrap();
+        let p = plan(source, 1920, 1080, "stretch").unwrap();
         let mut c = Command::new("ffmpeg");
         let s = Settings {
             fps: 60,
@@ -971,12 +1097,12 @@ mod tests {
             width: 1440,
             height: 1080,
         };
-        let fit = plan(source, 1080, "fit").unwrap();
+        let fit = plan(source, 1920, 1080, "fit").unwrap();
         assert!(!Scaler::D3d11.supports(&fit) && !Scaler::QsvZeroCopy.supports(&fit));
         assert!(Scaler::QsvHybrid.supports(&fit) && Scaler::Cpu.supports(&fit));
         assert!(video_filter(&fit, Scaler::QsvHybrid).contains("pad=1920:1080:240:0:black"));
         assert!(video_filter(&fit, Scaler::Cpu).contains("pad=1920:1080:240:0:black"));
-        let stretch = plan(source, 1080, "stretch").unwrap();
+        let stretch = plan(source, 1920, 1080, "stretch").unwrap();
         assert!(Scaler::QsvZeroCopy.supports(&stretch));
         let f = video_filter(&stretch, Scaler::QsvZeroCopy);
         assert!(f.contains("vpp_qsv=w=1920:h=1080") && !f.contains("hwdownload"));
@@ -1023,5 +1149,63 @@ mod tests {
         let segment1_audio_start = durations[0] + 0.005 - starts[1];
         assert!((segment0_audio_end - segment1_audio_start).abs() < 1e-9);
         assert_eq!(&durations[1..], &[2.0, 2.0]);
+    }
+    #[test]
+    fn low_power_quick_sync_is_tried_first() {
+        let auto = scaling_candidates("auto");
+        let lp = auto.iter().position(|c| c.1 == "h264_qsv_lp").unwrap();
+        let normal = auto.iter().position(|c| c.1 == "h264_qsv").unwrap();
+        assert!(lp < normal);
+        assert_eq!(ffmpeg_encoder("h264_qsv_lp"), ("h264_qsv", true));
+        assert_eq!(ffmpeg_encoder("h264_nvenc"), ("h264_nvenc", false));
+        let mut c = command(Path::new("ffmpeg"));
+        encoding_args(
+            &mut c,
+            &Settings::default(),
+            "h264_qsv_lp",
+            (1920, 1080),
+            true,
+        );
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+        let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
+        assert!(pair("-c:v", "h264_qsv") && pair("-low_power", "1"));
+        assert!(pair("-colorspace", "bt709") && pair("-color_range", "tv"));
+        assert!(pair("-b:v", "28M") && pair("-maxrate", "42000k"));
+        let mut c = command(Path::new("ffmpeg"));
+        encoding_args(
+            &mut c,
+            &Settings::default(),
+            "h264_qsv",
+            (1920, 1080),
+            false,
+        );
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+        assert!(!args.iter().any(|a| a == "-low_power" || a == "-colorspace"));
+    }
+    #[test]
+    fn preset_bitrates_follow_resolution_and_frame_rate() {
+        let at = |preset: &str, fps: u32, w: u32, h: u32| {
+            target_bitrate_mbps(
+                &Settings {
+                    preset: preset.into(),
+                    fps,
+                    ..Default::default()
+                },
+                w,
+                h,
+            )
+        };
+        assert_eq!(at("performance", 60, 1920, 1080), 16);
+        assert_eq!(at("balanced", 60, 1920, 1080), 28);
+        assert_eq!(at("quality", 60, 1920, 1080), 45);
+        assert!(at("balanced", 120, 1920, 1080) > 28 && at("balanced", 120, 1920, 1080) < 56);
+        assert!(at("balanced", 60, 1280, 720) < 16);
+        assert!(at("quality", 60, 3840, 2160) > 100);
+        let custom = Settings {
+            preset: "custom".into(),
+            bitrate_mbps: 33,
+            ..Default::default()
+        };
+        assert_eq!(target_bitrate_mbps(&custom, 1920, 1080), 33);
     }
 }

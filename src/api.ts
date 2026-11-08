@@ -15,12 +15,13 @@ export type Display = {
 };
 export type CanvasMode = 'stretch' | 'fit' | 'crop' | 'native';
 export type Settings = {
-  capture: string; display: number; window_title: string; height: number; canvas_mode: CanvasMode;
+  capture: string; display: number; window_title: string; width: number; height: number; canvas_mode: CanvasMode;
   source_rect: Rect | null; fps: number; encoder: string; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string;
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
+  game_notifications: boolean; settings_version: number;
 };
 export type Status = {
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
@@ -33,6 +34,7 @@ export type Status = {
   frame_age_ms: number; hotkey_error: string | null;
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
   pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
+  encoder_speed: number; video_lag_ms: number; target_bitrate_mbps: number; encoder_label: string; foreground_game: string | null;
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
@@ -91,16 +93,17 @@ export const emptyStatus: Status = {
   scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],
+  encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null,
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */
 export const previewSettings: Settings = {
-  capture: 'desktop-duplication', display: 0, window_title: '', height: 1080, canvas_mode: 'stretch', source_rect: null,
+  capture: 'desktop-duplication', display: 0, window_title: '', width: 1920, height: 1080, canvas_mode: 'stretch', source_rect: null,
   fps: 60, encoder: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false, organize_by_game: true, game_mappings: [],
+  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2,
 };
 
-export const VERSION = '0.2.1-alpha.2';
+export const VERSION = '0.2.1-alpha.3';

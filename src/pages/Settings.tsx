@@ -81,9 +81,11 @@ export function SettingsPage() {
             </Field>
             <p className="muted small">Saved as Matroska (.mkv), which survives crashes and keeps every audio track. Export any clip to MP4 from the library.</p>
           </Card>
-          <Card title="Game detection" subtitle="REPLAYX looks at which program is in front while it captures (process name only; nothing is read from games).">
+          <Card title="Game detection" subtitle="REPLAYX looks at which program is in front (process name only; nothing is read from games).">
             <Toggle label="Organize clips by game" checked={draft.organize_by_game} disabled={active} onChange={v => patch({ organize_by_game: v })}
               description="Saves into a folder per game, e.g. Fortnite\Fortnite_2026-11-07_15-30-22.mkv. Desktop activity goes to Desktop. Existing clips are not moved." />
+            <Toggle label="Show a notice when a game is detected" checked={draft.game_notifications} disabled={active} onChange={v => patch({ game_notifications: v })}
+              description="A small bar in the top-right corner for about 4 seconds, once per game: for example Roblox detected · Instant Replay ready. Shown over windowed and borderless games; Windows hides it behind exclusive full-screen games. While capture is off, REPLAYX checks the program in front once a second for this notice only." />
             <div className="mappings">
               <span className="field-label">Your corrections</span>
               {draft.game_mappings.length === 0 && <p className="muted small">None. Add one if a game isn't recognised, or to stop an app being treated as a game.</p>}

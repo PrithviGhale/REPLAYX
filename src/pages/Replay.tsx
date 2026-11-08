@@ -6,6 +6,7 @@ import { activeOf, useStatus } from '../store';
 import { bytes, duration, durationLabel } from '../format';
 import { Button, Card, Field, Kbd, Segmented } from '../ui';
 import { Section } from './shared';
+import { ReplaySwitch } from '../ReplaySwitch';
 
 const LENGTHS = [30, 60, 180, 300, 600, 900, 1800];
 
@@ -24,6 +25,15 @@ export function ReplayPage() {
 
   return (
     <Section>
+      <Card className="replay-hero">
+        <div className="replay-hero-row">
+          <div>
+            <h2>Instant Replay</h2>
+            <p className="muted">{s.replay ? `Keeping the last ${durationLabel(draft.replay_seconds)} on disk, ready to save.` : 'Off. Turn it on before you play; nothing before that moment can be saved.'}</p>
+          </div>
+          <ReplaySwitch size="lg" label={false} />
+        </div>
+      </Card>
       <div className="grid-2">
         <Card title="Replay length" subtitle="How much of the past a single save keeps.">
           <Segmented label="Replay length" value={draft.replay_seconds} disabled={active} onChange={v => patch({ replay_seconds: v })}
