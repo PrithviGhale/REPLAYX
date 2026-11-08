@@ -1,75 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { ChevronDown, Headphones, Mic, MicOff, RotateCcw, Square } from 'lucide-react';
-import { api, errorText, native, type AudioSource, type TestCapture } from '../api';
+import { api, errorText, native, type AudioSource } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { db } from '../format';
-import { Badge, Button, Card, IconButton, Meter, Modal } from '../ui';
+import { Badge, Button, Card, IconButton, Meter } from '../ui';
 import { feedIndex } from './shared';
 import { identity, micDefaults, micState } from '../audio';
-
-/** Start/stop test of one audio source with in-app playback of the processed
- * result. Nothing is recorded until the user presses Start; the recording is
- * deleted when the panel closes. */
-export function SourceTest({ source, onClose }: { source: AudioSource; onClose: () => void }) {
-  const [phase, setPhase] = useState<'ready' | 'recording' | 'done'>('ready');
-  const [level, setLevel] = useState({ peak: 0, elapsed: 0, max: 0 });
-  const [result, setResult] = useState<TestCapture | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const seconds = 10;
-  const off = useRef<(() => void) | undefined>(undefined);
-  useEffect(() => () => { off.current?.(); void api.audioTestStop().catch(() => undefined); void api.audioTestDiscard().catch(() => undefined); }, []);
-  const start = async () => {
-    setError(null); setResult(null); setAudioUrl(null); setLevel({ peak: 0, elapsed: 0, max: 0 });
-    setPhase('recording');
-    off.current?.();
-    off.current = await listen<[number, number]>('audio-test-level', e => setLevel(l => ({ peak: e.payload[0], elapsed: e.payload[1], max: Math.max(l.max, e.payload[0]) })));
-    try {
-      const r = await api.audioTest({ ...source, enabled: true, muted: false }, seconds);
-      setResult(r);
-      setAudioUrl(await api.audioTestData());
-      setPhase('done');
-    } catch (e) { setError(errorText(e)); setPhase('ready'); }
-    off.current?.(); off.current = undefined;
-  };
-  const mic = source.kind === 'microphone';
-  const quiet = result && result.peak < 0.003;
-  const limited = level.max >= 0.98;
-  return (
-    <Modal title={`Test — ${source.name}`} onClose={onClose} actions={<>
-      <Button variant="ghost" onClick={onClose}>Close</Button>
-      {phase === 'recording'
-        ? <Button variant="danger" icon={Square} onClick={() => api.audioTestStop()}>Stop test</Button>
-        : <Button variant="primary" icon={phase === 'done' ? RotateCcw : Mic} onClick={start}>{phase === 'done' ? 'Test again' : 'Start test'}</Button>}
-    </>}>
-      {phase === 'ready' && !error && (
-        <p>{mic ? `Press Start test, then speak normally for up to ${seconds} seconds. You'll hear the result with your current volume, boost and processing.` : `Press Start test while this source plays sound (up to ${seconds} seconds).`} Nothing is recorded before you press Start, and the test is deleted when you close this window.</p>
-      )}
-      {phase === 'recording' && (
-        <>
-          <div className="test-live"><span className="rec-dot" /> Recording test · {level.elapsed.toFixed(1)} s of {seconds}</div>
-          <Meter peak={level.peak} active />
-          <div className="progress"><span style={{ width: `${Math.min(100, (level.elapsed / seconds) * 100)}%` }} /></div>
-          {limited && mic && <div className="banner warn small">Very loud peaks: the limiter is catching them. Lower the boost if your voice sounds squashed.</div>}
-        </>
-      )}
-      {error && <div className="banner bad">{error}</div>}
-      {phase === 'done' && result && (
-        <>
-          {quiet ? <div className="banner warn">Almost silent (peak {db(result.peak)}). Check the device, Windows privacy settings (Settings → Privacy → Microphone) and any hardware mute.</div>
-            : <div className="banner ok">Captured {result.seconds.toFixed(1)} s · peak {db(result.peak)} · {result.discontinuities === 0 ? 'no gaps' : `${result.discontinuities} discontinuities`}.</div>}
-          {audioUrl && <audio className="test-player" controls autoPlay src={audioUrl}>Your test recording</audio>}
-          <dl className="facts compact">
-            <div><dt>Device format</dt><dd>{result.endpoint_mix_format ?? 'Converted by Windows (per-app capture)'}</dd></div>
-            <div><dt>Device glitches</dt><dd>{result.device_glitches}</dd></div>
-          </dl>
-        </>
-      )}
-    </Modal>
-  );
-}
 
 const PROCESSING: { key: 'high_pass' | 'noise_suppression' | 'noise_gate' | 'compressor'; label: string; text: string }[] = [
   { key: 'high_pass', label: 'Remove rumble', text: 'Cuts sound below about 80 Hz: desk bumps, fan rumble and breath pops. Voices are unaffected. Recommended.' },

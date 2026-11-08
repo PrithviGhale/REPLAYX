@@ -7,6 +7,9 @@ fn main() -> Result<()> {
     if action == "audio-test" {
         return audio_test(&args);
     }
+    if action == "overlay-render" {
+        return overlay_render(&args);
+    }
     if action == "overlay-test" {
         return overlay_test(&args);
     }
@@ -725,7 +728,7 @@ fn start_bench(args: &[String]) -> Result<()> {
 /// records) into lossless files, with the overlay hidden, shown excluded from
 /// capture, and shown capturable (control: proves the test can see it).
 fn overlay_test(args: &[String]) -> Result<()> {
-    use replayx_core::status_overlay::{Frame, Item, StatusOverlay};
+    use replayx_core::status_overlay::{Frame, Icon, StatusOverlay, Tile};
     use windows::{
         core::w,
         Win32::{Foundation::RECT, UI::WindowsAndMessaging::*},
@@ -739,18 +742,21 @@ fn overlay_test(args: &[String]) -> Result<()> {
     let media = Media::discover()?;
     let overlay = StatusOverlay::spawn();
     let frame = |capturable: bool| Frame {
-        items: vec![
-            Item {
-                color: (255, 74, 90),
-                label: "REC 0:42".into(),
+        tiles: vec![
+            Tile {
+                icon: Icon::Replay,
+                color: (160, 146, 255),
+                slash: false,
             },
-            Item {
-                color: (154, 140, 255),
-                label: "Replay on".into(),
+            Tile {
+                icon: Icon::Mic,
+                color: (62, 214, 160),
+                slash: false,
             },
-            Item {
-                color: (58, 210, 159),
-                label: "Mic live".into(),
+            Tile {
+                icon: Icon::Record,
+                color: (255, 77, 94),
+                slash: false,
             },
         ],
         position: "bottom-right".into(),
@@ -920,4 +926,77 @@ unsafe fn backdrop_window(r: windows::Win32::Foundation::RECT, life: Duration) {
         thread::sleep(Duration::from_millis(30));
     }
     let _ = DestroyWindow(hwnd);
+}
+
+/// Render the overlay's icon tiles (every state) to a PNG, without showing
+/// any window: `overlay-render out.png [scale]`.
+fn overlay_render(args: &[String]) -> Result<()> {
+    use replayx_core::status_overlay::{render, Icon, Tile};
+    let out = PathBuf::from(
+        args.get(2)
+            .map(String::as_str)
+            .unwrap_or("test-output/overlay/icons.png"),
+    );
+    let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(3.0);
+    let all = [
+        Tile {
+            icon: Icon::Replay,
+            color: (160, 146, 255),
+            slash: false,
+        },
+        Tile {
+            icon: Icon::Replay,
+            color: (128, 128, 146),
+            slash: true,
+        },
+        Tile {
+            icon: Icon::Mic,
+            color: (62, 214, 160),
+            slash: false,
+        },
+        Tile {
+            icon: Icon::Mic,
+            color: (160, 146, 255),
+            slash: false,
+        },
+        Tile {
+            icon: Icon::Mic,
+            color: (245, 186, 84),
+            slash: true,
+        },
+        Tile {
+            icon: Icon::Record,
+            color: (255, 77, 94),
+            slash: false,
+        },
+    ];
+    let (w, h, px) = render(&all, scale, false);
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let media = Media::discover()?;
+    let mut child = replayx_core::media::command(&media.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgra",
+            "-s",
+        ])
+        .arg(format!("{w}x{h}"))
+        .args(["-i", "-", "-frames:v", "1"])
+        .arg(&out)
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    use std::io::Write;
+    child.stdin.take().unwrap().write_all(&px)?;
+    if !child.wait()?.success() {
+        bail!("could not write {}", out.display());
+    }
+    println!("{}", out.display());
+    Ok(())
 }

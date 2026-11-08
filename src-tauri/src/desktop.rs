@@ -1086,22 +1086,19 @@ pub fn run() {
                     // clips (sampled by the engine without its lock).
                     let settings = state.engine.settings();
                     // In-game status overlay: only sent when what it shows changes.
-                    let frame = crate::status_overlay::visible(
-                        &settings.overlay,
-                        status.foreground_game.is_some(),
-                    )
-                    .then(|| crate::status_overlay::Frame {
-                        items: crate::status_overlay::items(
-                            &crate::status_overlay::view(&status, &settings),
-                            &settings.overlay,
-                        ),
-                        position: settings.overlay.position.clone(),
-                        opacity: settings.overlay.opacity,
-                        capturable: false,
-                    })
-                    .filter(|f| !f.items.is_empty());
+                    let frame = crate::status_overlay::visible(&settings.overlay)
+                        .then(|| crate::status_overlay::Frame {
+                            tiles: crate::status_overlay::tiles(
+                                &crate::status_overlay::view(&status, &settings),
+                                &settings.overlay,
+                            ),
+                            position: settings.overlay.position.clone(),
+                            opacity: settings.overlay.opacity,
+                            capturable: false,
+                        })
+                        .filter(|f| !f.tiles.is_empty());
                     if frame != overlay_frame || frame.is_some() {
-                        // Re-sent while visible so it follows the game's monitor
+                        // Re-sent while visible so it follows the active monitor
                         // and stays on top; the overlay thread skips repaints.
                         status_overlay.update(frame.clone());
                         overlay_frame = frame;

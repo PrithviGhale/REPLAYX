@@ -166,41 +166,74 @@ const CORNERS: { value: OverlayPosition; label: string }[] = [
   { value: 'bottom-left', label: 'Bottom left' }, { value: 'bottom-right', label: 'Bottom right' },
 ];
 
-/** In-game status overlay preferences, with a live preview of the pill. */
+/** The overlay's icons as SVG (same shapes the native overlay draws). */
+export function OverlayIcon({ icon, color, slash }: { icon: 'replay' | 'mic' | 'rec'; color: string; slash?: boolean }) {
+  return (
+    <svg viewBox="0 0 32 32" className="ov-tile" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="31" height="31" rx="8" className="ov-tile-bg" />
+      <g fill={color} stroke={color}>
+        {icon === 'replay' && <>
+          <path d="M 22.4 10.2 A 8.6 8.6 0 1 1 14.5 7.5" fill="none" strokeWidth="2.2" />
+          <path d="M 25.3 8.2 L 20.0 7.7 L 24.6 12.8 Z" strokeWidth="0.4" transform="rotate(-8 22.4 10.2)" />
+          <path d="M 14 12.6 L 14 19.4 L 19.6 16 Z" strokeWidth="0.4" strokeLinejoin="round" />
+        </>}
+        {icon === 'mic' && <>
+          <rect x="12.7" y="6.9" width="6.6" height="11.6" rx="3.3" stroke="none" />
+          <path d="M 9.9 15.2 A 6.1 6.1 0 0 0 22.1 15.2" fill="none" strokeWidth="1.9" />
+          <path d="M 16 21.3 V 24.2 M 12.6 24.2 H 19.4" fill="none" strokeWidth="1.9" strokeLinecap="round" />
+        </>}
+        {icon === 'rec' && <>
+          <circle cx="16" cy="16" r="6" stroke="none" />
+          <circle cx="16" cy="16" r="9" fill="none" strokeWidth="1.2" opacity="0.45" />
+        </>}
+        {slash && <>
+          <path d="M 9.5 9.5 L 22.5 22.5" stroke="rgb(14,14,21)" strokeWidth="4.6" />
+          <path d="M 9.5 9.5 L 22.5 22.5" strokeWidth="2.1" strokeLinecap="round" />
+        </>}
+      </g>
+    </svg>
+  );
+}
+
+/** Status overlay preferences, with a live preview of the icon stack. */
 function OverlayCard() {
   const { draft, patch } = useApp();
   const active = useStatus(activeOf);
   const o = draft.overlay;
   const set = (p: Partial<OverlaySettings>) => patch({ overlay: { ...o, ...p } });
-  const item = (color: string, text: string) => <span className="ov-item"><i style={{ background: color }} />{o.compact ? null : text}</span>;
+  const stack = [
+    o.show_replay && <OverlayIcon key="r" icon="replay" color="#a092ff" />,
+    o.show_mic && <OverlayIcon key="m" icon="mic" color="#3ed6a0" />,
+    <OverlayIcon key="c" icon="rec" color="#ff4d5e" />,
+  ].filter(Boolean);
+  const bottom = o.position.startsWith('bottom');
   return (
-    <Card title="In-game overlay" subtitle="A small status pill over your game: Instant Replay, recording time and microphone. It is click-through, never takes focus and is excluded from capture, so it never appears in clips.">
+    <Card title="Status overlay" subtitle="Small icons in a corner of your screen, over every app, game and the desktop: Instant Replay, microphone, and a red dot while recording. Click-through, and never in your clips.">
       <Toggle label="Show the status overlay" checked={o.enabled} disabled={active} onChange={v => set({ enabled: v })}
-        description="Shown over windowed and borderless games. Windows hides every desktop window behind exclusive full-screen games." />
+        description="Visible to you while you record, invisible in the saved video. Windows hides desktop windows behind exclusive full-screen games." />
       <div className={`ov-settings ${o.enabled ? '' : 'off'}`}>
         <div className="ov-preview" aria-hidden="true">
           <div className={`ov-screen ${o.position}`}>
-            <div className="ov-pill" style={{ opacity: o.opacity / 100 }}>
-              {o.show_timer ? item('#ff4a5a', 'REC 0:42') : item('#ff4a5a', 'REC')}
-              {o.show_replay && item('#9a8cff', 'Replay on')}
-              {o.show_mic && item('#3ad29f', 'Mic live')}
-            </div>
+            <div className={`ov-stack ${bottom ? 'up' : ''}`} style={{ opacity: o.opacity / 100 }}>{stack}</div>
+          </div>
+          <div className="ov-legend">
+            <span><OverlayIcon icon="replay" color="#a092ff" />Replay on</span>
+            <span><OverlayIcon icon="replay" color="#808092" slash />Replay off</span>
+            <span><OverlayIcon icon="mic" color="#3ed6a0" />Mic live</span>
+            <span><OverlayIcon icon="mic" color="#f5ba54" slash />Muted</span>
+            <span><OverlayIcon icon="rec" color="#ff4d5e" />Recording</span>
           </div>
         </div>
         <div className="ov-options">
-          <Field label="Position">
+          <Field label="Corner">
             <Segmented label="Overlay position" value={o.position} disabled={active || !o.enabled} onChange={v => set({ position: v })} options={CORNERS} />
           </Field>
           <Field label={`Opacity · ${o.opacity}%`}>
             <input type="range" min={30} max={100} step={5} value={o.opacity} disabled={active || !o.enabled} aria-label="Overlay opacity" onChange={e => set({ opacity: Number(e.target.value) })} />
           </Field>
-          <Toggle label="Only while a game is in front" checked={o.games_only} disabled={active || !o.enabled} onChange={v => set({ games_only: v })}
-            description="Off: also on the desktop and in other apps." />
-          <Toggle label="Compact (dots only)" checked={o.compact} disabled={active || !o.enabled} onChange={v => set({ compact: v })} />
-          <Toggle label="Instant Replay state" checked={o.show_replay} disabled={active || !o.enabled} onChange={v => set({ show_replay: v })} />
-          <Toggle label="Microphone state" checked={o.show_mic} disabled={active || !o.enabled} onChange={v => set({ show_mic: v })} />
-          <Toggle label="Recording timer" checked={o.show_timer} disabled={active || !o.enabled} onChange={v => set({ show_timer: v })}
-            description="The red recording dot appears only once video is actually being written." />
+          <Toggle label="Instant Replay icon" checked={o.show_replay} disabled={active || !o.enabled} onChange={v => set({ show_replay: v })} />
+          <Toggle label="Microphone icon" checked={o.show_mic} disabled={active || !o.enabled} onChange={v => set({ show_mic: v })}
+            description="The red recording dot always appears while a recording is being written." />
         </div>
       </div>
     </Card>

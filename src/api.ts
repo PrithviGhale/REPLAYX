@@ -27,8 +27,7 @@ export type Settings = {
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
-  enabled: boolean; position: OverlayPosition; opacity: number; compact: boolean;
-  show_replay: boolean; show_mic: boolean; show_timer: boolean; games_only: boolean;
+  enabled: boolean; position: OverlayPosition; opacity: number; show_replay: boolean; show_mic: boolean;
 };
 export type Status = {
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
@@ -120,8 +119,8 @@ export const previewSettings: Settings = {
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2, scale_policy: 'smooth',
-  overlay: { enabled: true, position: 'bottom-right', opacity: 85, compact: false, show_replay: true, show_mic: true, show_timer: true, games_only: true },
+  overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true },
   tray_hint_shown: false,
 };
 
-export const VERSION = '0.2.2-alpha.1';
+export const VERSION = '0.2.2-alpha.2';
