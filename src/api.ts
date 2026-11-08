@@ -32,6 +32,7 @@ export type Status = {
   scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
+  pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
@@ -52,7 +53,7 @@ export type TestCapture = {
   endpoint_mix_format: string | null;
 };
 export type UpdateInfo = { available: boolean; version?: string; notes?: string };
-export type ActionName = 'start_replay' | 'stop_replay' | 'start_recording' | 'stop_recording' | 'save_replay' | 'stop_all' | 'recover';
+export type ActionName = 'start_replay' | 'stop_replay' | 'start_recording' | 'stop_recording' | 'save_replay' | 'stop_all' | 'recover' | 'discard_sessions';
 
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!native) return Promise.reject(new Error('Open the REPLAYX desktop app to use this control.'));
@@ -89,6 +90,7 @@ export const emptyStatus: Status = {
   audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
   scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
+  pending_recording: false, recording_elapsed: 0, start_timings: [],
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */
@@ -101,4 +103,4 @@ export const previewSettings: Settings = {
   launch_at_startup: false, organize_by_game: true, game_mappings: [],
 };
 
-export const VERSION = '0.2.1-alpha.1';
+export const VERSION = '0.2.1-alpha.2';

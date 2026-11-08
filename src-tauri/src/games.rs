@@ -238,22 +238,33 @@ pub fn attribute(games: &HashMap<String, f64>, app_seconds: f64) -> String {
 
 /// The current foreground window's process image path and title.
 pub fn foreground_process() -> Option<(u32, String, String)> {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    window_process(unsafe { GetForegroundWindow() })
+}
+
+/// Process image path and title of a top-level window, without ever sending
+/// it a message. REPLAYX's own windows are skipped entirely: `GetWindowTextW`
+/// on a window owned by the calling process *sends* `WM_GETTEXT` to the
+/// window's thread, and when that thread (the UI thread) was itself waiting for
+/// the engine lock held by the sampler, the app deadlocked ("Not responding"
+/// right after Record, 0.2.1-alpha.1). For other processes Windows returns the
+/// cached caption without messaging. REPLAYX is never a game, so nothing is lost.
+pub fn window_process(hwnd: windows::Win32::Foundation::HWND) -> Option<(u32, String, String)> {
     use windows::Win32::{
         Foundation::CloseHandle,
         System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
             PROCESS_QUERY_LIMITED_INFORMATION,
         },
-        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
+        UI::WindowsAndMessaging::{GetWindowTextW, GetWindowThreadProcessId},
     };
     unsafe {
-        let hwnd = GetForegroundWindow();
         if hwnd.0.is_null() {
             return None;
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid == 0 {
+        if pid == 0 || pid == std::process::id() {
             return None;
         }
         let mut title = [0u16; 256];
@@ -286,6 +297,86 @@ pub fn sample(overrides: &[GameMapping]) -> Foreground {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and
+    /// proves the sampler no longer takes part in it. A window is owned by a
+    /// thread that blocks on a mutex this test holds (the UI thread waiting for
+    /// the engine lock). `GetWindowTextW` on it from another thread blocks until
+    /// the owner pumps messages again; `window_process` returns at once.
+    #[test]
+    fn sampling_own_window_never_waits_for_its_blocked_owner_thread() {
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::Duration;
+        use windows::{
+            core::w,
+            Win32::{
+                Foundation::HWND,
+                UI::WindowsAndMessaging::{
+                    CreateWindowExW, DestroyWindow, GetWindowTextW, PeekMessageW, MSG, PM_REMOVE,
+                    WINDOW_EX_STYLE, WS_OVERLAPPED,
+                },
+            },
+        };
+        let engine_lock = Arc::new(Mutex::new(()));
+        let held = engine_lock.lock().unwrap();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (hwnd_tx, hwnd_rx) = mpsc::channel::<isize>();
+        let owner = {
+            let (lock, done) = (engine_lock.clone(), done.clone());
+            std::thread::spawn(move || unsafe {
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("REPLAYX test window"),
+                    WS_OVERLAPPED,
+                    0,
+                    0,
+                    10,
+                    10,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                hwnd_tx.send(hwnd.0 as isize).unwrap();
+                // Like the `status` command on the UI thread: wait for the lock.
+                drop(lock.lock().unwrap());
+                let mut msg = MSG::default();
+                while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {}
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let _ = DestroyWindow(hwnd);
+            })
+        };
+        let raw = hwnd_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let hwnd = HWND(raw as *mut _);
+
+        // The fixed sampler returns immediately (own process is never a game).
+        let started = std::time::Instant::now();
+        assert!(window_process(hwnd).is_none());
+        assert!(started.elapsed() < Duration::from_millis(500));
+
+        // The old call blocks while the owner thread is stuck on the lock.
+        let (text_tx, text_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u16; 64];
+            let hwnd = HWND(raw as *mut _);
+            let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
+            let _ = text_tx.send(n);
+        });
+        assert!(
+            text_rx.recv_timeout(Duration::from_millis(800)).is_err(),
+            "GetWindowTextW on an own window should wait for its owner thread"
+        );
+        // Releasing the lock lets the owner pump WM_GETTEXT: the call completes.
+        drop(held);
+        assert!(text_rx.recv_timeout(Duration::from_secs(5)).unwrap() > 0);
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        owner.join().unwrap();
+    }
 
     fn game(n: &str) -> Foreground {
         Foreground::Game(n.into())

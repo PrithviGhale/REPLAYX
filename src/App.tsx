@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AudioLines, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, SquareStack, X } from 'lucide-react';
 import { native, VERSION } from './api';
 import { useApp } from './context';
-import { useCapture } from './capture';
+import { useCapture, useRecordButton } from './capture';
 import { activeOf, startPolling, usePollError, useStatus } from './store';
 import { duration, hotkeyLabel } from './format';
 import { Button, PageBoundary } from './ui';
@@ -31,9 +31,11 @@ const NAV: { group: string; items: { id: Page; label: string; icon: React.Compon
 
 
 function StatePill() {
-  const s = useStatus(x => ({ state: x.state, recording: x.recording, replay: x.replay, elapsed: x.elapsed, saving: x.saving }));
-  const tone = s.state === 'Error' ? 'bad' : s.recording ? 'rec' : s.state === 'Recovering' || s.state === 'Starting' ? 'warn' : s.replay ? 'ok' : 'idle';
-  const text = s.recording ? `Recording · ${duration(s.elapsed)}` : s.state === 'Buffering' ? 'Replay on' : s.saving > 0 && !s.replay ? 'Saving' : s.state;
+  const s = useStatus(x => ({ state: x.state, recording: x.recording, replay: x.replay, elapsed: x.recording_elapsed, saving: x.saving, pending: x.pending_recording }));
+  // "Recording" only once the encoder is writing frames; before that, Starting.
+  const starting = s.pending || s.state === 'Starting';
+  const tone = s.state === 'Error' ? 'bad' : starting || s.state === 'Recovering' || s.state === 'Stopping' ? 'warn' : s.recording ? 'rec' : s.replay ? 'ok' : 'idle';
+  const text = starting ? (s.pending || s.recording ? 'Starting recording…' : 'Starting…') : s.recording ? `Recording · ${duration(s.elapsed)}` : s.state === 'Buffering' ? 'Replay on' : s.saving > 0 && !s.replay ? 'Saving' : s.state;
   return <span className={`state-pill ${tone}`} role="status" aria-live="polite"><i />{text}{s.saving > 0 && (s.replay || s.recording) && <em>· saving</em>}</span>;
 }
 
@@ -48,6 +50,7 @@ function CaptureDock() {
   const { draft } = useApp();
   const { go, busy, saved } = useCapture();
   const { toast } = useApp();
+  const rec = useRecordButton();
   const s = useStatus(x => ({ replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds }));
   const recovering = s.state === 'Recovering';
   if (recovering) return <div className="dock"><Button variant="danger" icon={X} disabled={!!busy} onClick={() => go('stop_all')}>Cancel recovery</Button></div>;
@@ -59,11 +62,11 @@ function CaptureDock() {
       <Button variant="primary" icon={Save} disabled={!!busy || !native || !s.replay || s.buffer <= 0}
         title={`Save the last ${duration(draft.replay_seconds)} (${hotkeyLabel(draft.replay_hotkey)})`}
         onClick={async () => { const r = await go('save_replay'); const m = saved(r); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>
-      <Button variant="record" icon={s.recording ? Square : Circle} disabled={!!busy || !native} aria-pressed={s.recording}
-        title={`${s.recording ? 'Stop and save' : 'Start'} recording (${hotkeyLabel(draft.recording_hotkey)})`}
-        className={s.recording ? 'on' : ''}
-        onClick={async () => { const r = await go(s.recording ? 'stop_recording' : 'start_recording'); const m = saved(r); if (m) toast('success', `Recording saved — ${m}`); }}>
-        {s.recording ? 'Stop' : 'Record'}
+      <Button variant="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native} aria-pressed={rec.mode !== 'record'}
+        title={rec.mode === 'cancel' ? 'Cancel: capture is still starting, nothing has been recorded' : `${rec.mode === 'stop' ? 'Stop and save' : 'Start'} recording (${hotkeyLabel(draft.recording_hotkey)})`}
+        className={rec.mode !== 'record' ? 'on' : ''}
+        onClick={rec.onClick}>
+        {rec.label}
       </Button>
     </div>
   );

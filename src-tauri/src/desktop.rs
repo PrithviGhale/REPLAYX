@@ -46,12 +46,21 @@ struct AppState {
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
+    data_dir: PathBuf,
 }
 impl AppState {
     fn data_dir(&self) -> PathBuf {
-        self.engine.0.lock().unwrap().data_dir.clone()
+        self.data_dir.clone()
+    }
+    /// Record an error for the UI (the engine lock is held only for the assignment).
+    fn report(&self, error: String) {
+        self.engine.update(|i| i.status.error = Some(error));
     }
 }
+// Synchronous Tauri commands run on the window's UI thread. `status` and
+// `settings` never wait for the engine lock (published snapshots), so a busy
+// engine can no longer freeze the window. Every command that may lock the
+// engine is async and runs on a worker thread.
 #[tauri::command]
 fn status(state: State<AppState>) -> Status {
     state.engine.status()
@@ -68,8 +77,9 @@ async fn action(name: String, state: State<'_, AppState>) -> Reply<serde_json::V
         .map_err(err)?
 }
 fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
-    let updating = state.updating.lock().unwrap();
-    if *updating {
+    // Check, don't hold: holding this guard for a whole action serialized every
+    // action, so Stop/Cancel pressed during a slow start waited for the start.
+    if *state.updating.lock().unwrap() {
         return Err("Update installation is in progress".into());
     }
     let engine = &state.engine;
@@ -77,6 +87,10 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
         "start_replay" => engine.start_replay(),
         "stop_replay" => engine.stop_replay(),
         "start_recording" => engine.start_recording(),
+        "stop_recording" if engine.cancel_pending_recording() => {
+            // Stop pressed while capture was still starting: nothing recorded.
+            return Ok(serde_json::json!({"cancelled": true}));
+        }
         "save_replay" | "stop_recording" => {
             // Acknowledge at once: progress and the finished clip arrive as
             // clip-save events, so saves never block the UI or each other.
@@ -99,7 +113,6 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
                 None,
                 None,
             );
-            drop(updating);
             let job = if name == "save_replay" {
                 engine.save_replay()
             } else {
@@ -139,6 +152,12 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
         }
         "stop_all" => engine.shutdown(),
         "recover" => return engine.recover().map(|v| serde_json::json!(v)).map_err(err),
+        "discard_sessions" => {
+            return engine
+                .discard_sessions()
+                .map(|n| serde_json::json!({"moved": n}))
+                .map_err(err)
+        }
         _ => return Err("Unknown action".into()),
     };
     result.map(|_| serde_json::json!({"ok":true})).map_err(err)
@@ -181,7 +200,21 @@ fn bind_hotkeys(app: &tauri::AppHandle, s: &Settings) -> Reply<Option<String>> {
     })
 }
 #[tauri::command]
-fn save_settings(settings: Settings, app: tauri::AppHandle, state: State<AppState>) -> Reply<()> {
+async fn save_settings(
+    settings: Settings,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || save_settings_blocking(settings, &app, &state))
+        .await
+        .map_err(err)?
+}
+fn save_settings_blocking(
+    settings: Settings,
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Reply<()> {
     settings.validate().map_err(err)?;
     let previous = state.engine.settings();
     if state.engine.status().replay
@@ -195,17 +228,21 @@ fn save_settings(settings: Settings, app: tauri::AppHandle, state: State<AppStat
     {
         winutil::set_autostart(settings.launch_at_startup).map_err(err)?;
     }
-    let warning = bind_hotkeys(&app, &settings)?;
+    let warning = bind_hotkeys(app, &settings)?;
     if let Err(e) = state.engine.set_settings(settings) {
-        let _ = bind_hotkeys(&app, &previous);
+        let _ = bind_hotkeys(app, &previous);
         return Err(err(e));
     }
-    state.engine.0.lock().unwrap().status.hotkey_error = warning;
+    state.engine.update(|i| i.status.hotkey_error = warning);
     Ok(())
 }
 #[tauri::command]
-fn set_mix(index: usize, volume: f32, muted: bool, state: State<AppState>) -> Reply<()> {
-    state.engine.set_mix(index, volume, muted).map_err(err)
+async fn set_mix(index: usize, volume: f32, muted: bool, state: State<'_, AppState>) -> Reply<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.engine.set_mix(index, volume, muted))
+        .await
+        .map_err(err)?
+        .map_err(err)
 }
 #[tauri::command]
 async fn capabilities() -> Reply<serde_json::Value> {
@@ -586,7 +623,9 @@ async fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
             || s.replay
             || s.recording
             || s.saving > 0
-            || ["Starting", "Recovering"].contains(&s.state.as_str())
+            || s.pending_recording
+            || ["Starting", "Stopping", "Recovering", "Recovering sessions"]
+                .contains(&s.state.as_str())
         {
             return Err("Stop capture and wait for all saves before installing".into());
         }
@@ -622,21 +661,36 @@ async fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
     result
 }
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle, state: State<AppState>) -> Reply<()> {
-    if state.engine.status().saving > 0 {
-        return Err("Wait for clip verification to finish".into());
-    }
-    state.engine.shutdown().map_err(err)?;
-    app.exit(0);
-    Ok(())
+async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if state.engine.status().saving > 0 {
+            return Err("Wait for clip verification to finish".into());
+        }
+        // Finalizing a recording can take seconds: never on the UI thread.
+        state.engine.shutdown().map_err(err)?;
+        app.exit(0);
+        Ok(())
+    })
+    .await
+    .map_err(err)?
 }
 fn background_action(app: tauri::AppHandle, name: &'static str) {
     thread::spawn(move || {
         let state = app.state::<AppState>();
         if let Err(e) = perform(&state, name) {
-            state.engine.0.lock().unwrap().status.error = Some(e);
+            state.report(e);
         }
     });
+}
+/// Recording toggles treat a recording that is still starting as on, so a
+/// second press cancels it instead of failing with "already active".
+fn recording_toggle(s: &Status) -> &'static str {
+    if s.recording || s.pending_recording {
+        "stop_recording"
+    } else {
+        "start_recording"
+    }
 }
 pub fn run() {
     tauri::Builder::default()
@@ -662,14 +716,7 @@ pub fn run() {
                     if matches(&settings.replay_hotkey) {
                         background_action(app.clone(), "save_replay");
                     } else if matches(&settings.recording_hotkey) {
-                        background_action(
-                            app.clone(),
-                            if state.engine.status().recording {
-                                "stop_recording"
-                            } else {
-                                "start_recording"
-                            },
-                        );
+                        background_action(app.clone(), recording_toggle(&state.engine.status()));
                     } else if matches(&settings.pause_hotkey) {
                         background_action(
                             app.clone(),
@@ -680,16 +727,21 @@ pub fn run() {
                             },
                         );
                     } else if matches(&settings.mute_hotkey) {
-                        for (index, s) in settings
-                            .audio
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, s)| s.kind == "microphone")
-                        {
-                            if let Err(e) = state.engine.set_mix(index, s.volume, !s.muted) {
-                                state.engine.0.lock().unwrap().status.error = Some(err(e));
+                        // This handler runs on the UI thread: change the mix on a worker.
+                        let app = app.clone();
+                        thread::spawn(move || {
+                            let state = app.state::<AppState>();
+                            for (index, s) in settings
+                                .audio
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, s)| s.kind == "microphone")
+                            {
+                                if let Err(e) = state.engine.set_mix(index, s.volume, !s.muted) {
+                                    state.report(err(e));
+                                }
                             }
-                        }
+                        });
                     }
                 })
                 .build(),
@@ -715,6 +767,7 @@ pub fn run() {
                     last_index_ms: 0,
                 })),
                 thumbnail_gate: Arc::new(Mutex::new(())),
+                data_dir: data.clone(),
             });
             // Keep the startup entry pointing at this executable if enabled.
             if settings.launch_at_startup {
@@ -726,16 +779,13 @@ pub fn run() {
                     let _ = w.show();
                 }
             }
-            app.state::<AppState>()
-                .engine
-                .0
-                .lock()
-                .unwrap()
-                .status
-                .hotkey_error = match bind_hotkeys(app.handle(), &settings) {
+            let hotkeys = match bind_hotkeys(app.handle(), &settings) {
                 Ok(warning) => warning,
                 Err(error) => Some(error),
             };
+            app.state::<AppState>()
+                .engine
+                .update(|i| i.status.hotkey_error = hotkeys);
             let show = MenuItem::with_id(app, "show", "Open REPLAYX", true, None::<&str>)?;
             let save = MenuItem::with_id(app, "save", "Save instant replay", true, None::<&str>)?;
             let replay =
@@ -777,11 +827,7 @@ pub fn run() {
                     ),
                     "recording" => background_action(
                         app.clone(),
-                        if app.state::<AppState>().engine.status().recording {
-                            "stop_recording"
-                        } else {
-                            "start_recording"
-                        },
+                        recording_toggle(&app.state::<AppState>().engine.status()),
                     ),
                     "quit" => {
                         let app = app.clone();
@@ -790,9 +836,7 @@ pub fn run() {
                             if state.engine.status().saving == 0 {
                                 match state.engine.shutdown() {
                                     Ok(()) => app.exit(0),
-                                    Err(e) => {
-                                        state.engine.0.lock().unwrap().status.error = Some(err(e))
-                                    }
+                                    Err(e) => state.report(err(e)),
                                 }
                             }
                         });
@@ -843,12 +887,13 @@ pub fn run() {
                             cpu += p.cpu_usage();
                         }
                     }
-                    let mut inner = state.engine.0.lock().unwrap();
-                    inner.status.memory_mb = memory as f64 / 1048576.;
-                    inner.status.cpu_percent = cpu as f64
-                        / std::thread::available_parallelism()
-                            .map(|n| n.get())
-                            .unwrap_or(1) as f64;
+                    let cores = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(1) as f64;
+                    state.engine.update(|inner| {
+                        inner.status.memory_mb = memory as f64 / 1048576.;
+                        inner.status.cpu_percent = cpu as f64 / cores;
+                    });
                 }
             });
             Ok(())
@@ -865,13 +910,12 @@ pub fn run() {
                     thread::spawn(move || {
                         let state = app.state::<AppState>();
                         if state.engine.status().saving > 0 {
-                            state.engine.0.lock().unwrap().status.error =
-                                Some("Wait for saving to finish before exiting".into());
+                            state.report("Wait for saving to finish before exiting".into());
                             return;
                         }
                         match state.engine.shutdown() {
                             Ok(()) => app.exit(0),
-                            Err(e) => state.engine.0.lock().unwrap().status.error = Some(err(e)),
+                            Err(e) => state.report(err(e)),
                         }
                     });
                 }

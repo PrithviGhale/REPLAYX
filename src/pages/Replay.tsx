@@ -1,4 +1,5 @@
-import { HardDrive, LifeBuoy, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { HardDrive, LifeBuoy, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
@@ -10,6 +11,7 @@ const LENGTHS = [30, 60, 180, 300, 600, 900, 1800];
 
 export function ReplayPage() {
   const { draft, patch, run, refreshClips, busy } = useApp();
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const active = useStatus(activeOf);
   const s = useStatus(x => ({ buffer: x.buffer_seconds, bytes: x.buffer_bytes, replay: x.replay, recovery: x.recovery_sessions }));
   const tracks = draft.audio.filter(a => a.enabled).length;
@@ -57,14 +59,24 @@ export function ReplayPage() {
         </ol>
       </Card>
 
-      <Card title="Recover interrupted sessions" subtitle="After a crash or power loss, finished segments stay on disk."
-        actions={<Button icon={LifeBuoy} disabled={active || !!busy || s.recovery === 0}
-          onClick={() => run('Recovering sessions', async () => {
-            const done = await api.action<string[]>('recover');
-            await refreshClips();
-            return done;
-          }, 'Recovery finished. Recovered clips are in your library.')}>Recover{s.recovery ? ` ${s.recovery}` : ''}</Button>}>
-        <p className="muted small">{s.recovery ? `${s.recovery} session${s.recovery > 1 ? 's' : ''} found. Each is verified and saved as a clip; unreadable data is left untouched.` : 'Nothing to recover.'}</p>
+      <Card title="Recover interrupted sessions" subtitle="After a crash, a forced close or power loss, finished segments stay on disk."
+        actions={<>
+          <Button icon={Trash2} variant="ghost" disabled={active || !!busy || s.recovery === 0} onClick={() => setConfirmDiscard(true)}>Discard…</Button>
+          <Button icon={LifeBuoy} disabled={active || !!busy || s.recovery === 0}
+            onClick={() => run('Recovering sessions', async () => {
+              const done = await api.action<string[]>('recover');
+              await refreshClips();
+              return done;
+            }, 'Recovery finished. Recovered clips are in your library.')}>Recover{s.recovery ? ` ${s.recovery}` : ''}</Button>
+        </>}>
+        <p className="muted small">{s.recovery ? `${s.recovery} session${s.recovery > 1 ? 's' : ''} found. Recover saves each as a clip after checking it; unreadable pieces are set aside, not deleted.` : 'Nothing to recover.'}</p>
+        {confirmDiscard && s.recovery > 0 && (
+          <div className="banner warn" role="alertdialog" aria-label="Discard interrupted sessions">
+            <span>Move {s.recovery} interrupted session{s.recovery > 1 ? 's' : ''} to the Recycle Bin without recovering? You can restore them from the Recycle Bin.</span>
+            <Button variant="danger" disabled={!!busy} onClick={() => { setConfirmDiscard(false); void run('Moving sessions to the Recycle Bin', () => api.action<{ moved: number }>('discard_sessions'), 'Sessions moved to the Recycle Bin.'); }}>Move to Recycle Bin</Button>
+            <Button variant="ghost" onClick={() => setConfirmDiscard(false)}>Keep</Button>
+          </div>
+        )}
       </Card>
     </Section>
   );

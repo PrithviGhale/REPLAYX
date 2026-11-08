@@ -10,13 +10,25 @@ let pollError: string | null = null;
 const listeners = new Set<() => void>();
 let timer: number | undefined;
 
-const isActive = (s: Status) => s.replay || s.recording || s.saving > 0 || s.state === 'Starting' || s.state === 'Recovering';
+const isActive = (s: Status) => s.replay || s.recording || s.saving > 0 || s.pending_recording || s.state === 'Starting' || s.state === 'Stopping' || s.state === 'Recovering';
+
+/** Click → "Recording"/"Replay on" as the UI saw it (includes polling delay). */
+let startRequest: { at: number; recording: boolean } | null = null;
+let uiStart: { ms: number; recording: boolean } | null = null;
+export function markStartRequest(recording: boolean) {
+  startRequest = { at: performance.now(), recording };
+}
 
 async function poll() {
   try {
     const next = await api.status();
     status = next;
     pollError = null;
+    if (startRequest) {
+      const live = startRequest.recording ? next.recording && next.state === 'Recording' : next.state === 'Buffering';
+      if (live) { uiStart = { ms: Math.round(performance.now() - startRequest.at), recording: startRequest.recording }; startRequest = null; }
+      else if (next.state === 'Error' || next.state === 'Stopped' && performance.now() - startRequest.at > 2000) startRequest = null;
+    }
     if (isActive(next)) {
       history = [...history.slice(-239), { t: Date.now(), fps: next.fps, cpu: next.cpu_percent, mem: next.memory_mb, dropped: next.dropped_frames }];
     }
@@ -56,4 +68,5 @@ export function useStatus<T>(select: (s: Status) => T): T {
 }
 export const useHistory = () => useSyncExternalStore(subscribe, () => history, () => history);
 export const usePollError = () => useSyncExternalStore(subscribe, () => pollError, () => pollError);
+export const useUiStart = () => useSyncExternalStore(subscribe, () => uiStart, () => uiStart);
 export const activeOf = isActive;

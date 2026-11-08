@@ -1,5 +1,5 @@
 import { useApp } from '../context';
-import { activeOf, useHistory, useStatus } from '../store';
+import { activeOf, useHistory, useStatus, useUiStart } from '../store';
 import { bytes, duration, encoderName } from '../format';
 import { Badge, Card, Empty, Sparkline, Stat } from '../ui';
 import { Section } from './shared';
@@ -9,11 +9,12 @@ export function PerformancePage() {
   const { draft } = useApp();
   const active = useStatus(activeOf);
   const s = useStatus(x => ({
-    fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
+    fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, start: x.start_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
     buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, detail: x.scaling_detail,
     ow: x.output_width, oh: x.output_height, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, state: x.state,
     geo: x.geometry ? `${x.geometry.active_width}×${x.geometry.active_height} @ ${x.geometry.refresh_hz} Hz` : '',
   }));
+  const ui = useUiStart();
   const audio = useStatus(x => ({ packets: x.audio_packets, disc: x.audio_discontinuities, drift: x.audio_drift_ppm, gaps: x.audio_gaps, written: x.audio_written_bytes, peaks: x.audio_peaks }));
   const history = useHistory();
   const names = draft.audio.filter(a => a.enabled).map(a => a.name);
@@ -71,6 +72,11 @@ export function PerformancePage() {
           <p className="muted small">Breaks count late audio after a stall, timing jumps and device-reported glitches. Clock ppm is the drift correction applied to keep audio in sync with video.</p>
         </Card>
       </div>
+      {!!s.start?.length && <Card title="Last capture start · time from request">
+        <dl className="facts">{s.start.map((t, i) => <div key={i}><dt>{t.stage}</dt><dd>{t.elapsed_ms} ms</dd></div>)}
+          {ui && <div><dt>Click → {ui.recording ? 'Recording' : 'Replay on'} shown here</dt><dd>{ui.ms} ms</dd></div>}</dl>
+        <p className="muted small">"First frame encoded" is reported by the encoder every 0.5 s, so it can be up to 500 ms late; the on-screen time also includes up to 250 ms of status polling. The video path is probed on the first start for a display and set of settings, then remembered.</p>
+      </Card>}
       {!!s.timings?.length && <Card title="Last save · cumulative time from request">
         <dl className="facts">{s.timings.map((t, i) => <div key={i}><dt>{t.stage}</dt><dd>{t.elapsed_ms} ms</dd></div>)}</dl>
         <p className="muted small">Ready follows packet remux, stream inspection and start/end decode checks. Thumbnails run separately. Full decode is performed by the acceptance diagnostic.</p>

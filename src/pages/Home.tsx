@@ -1,7 +1,7 @@
-import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, RotateCcw, Save, Square } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { native } from '../api';
 import { useApp } from '../context';
-import { useCapture } from '../capture';
+import { useCapture, useRecordButton } from '../capture';
 import { activeOf, useStatus } from '../store';
 import { bytes, canvasWidth, duration, encoderName, plan, sourceRect } from '../format';
 import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
@@ -51,7 +51,7 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const { toast } = useApp();
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
-    elapsed: x.elapsed, fps: x.fps, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
+    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
     free: x.free_bytes, error: x.error, notice: x.notice, hotkey: x.hotkey_error, recovery: x.recovery_sessions,
   }));
   const peaks = useStatus(x => x.audio_peaks);
@@ -60,8 +60,11 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const p = plan(sourceRect(display, draft.source_rect), draft.height, draft.canvas_mode);
   const out = active && s.ow ? `${s.ow} × ${s.oh}` : canvasWidth(draft.height) ? `${p.width} × ${p.height}` : `${draft.height}p`;
   const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
-  const headline = s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Starting' ? 'Starting capture…' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
-  const sub = s.recording ? `${duration(s.elapsed)} recorded. Replay keeps buffering alongside.`
+  const rec = useRecordButton('Stop & save');
+  const starting = s.pending || s.state === 'Starting';
+  const headline = starting ? (s.pending || s.recording ? 'Starting recording…' : 'Starting capture…') : s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
+  const sub = starting ? 'Opening the display, encoder and audio. Recording begins with the first encoded frame; Cancel stops it without saving.'
+    : s.recording ? `${duration(s.elapsed)} recorded.${s.replay ? ' Replay keeps buffering alongside.' : ''}`
     : s.replay ? `The last ${duration(draft.replay_seconds)} is kept on disk. Save it the moment something happens.`
     : 'Turn on Instant Replay before you play. It works on the desktop too — no game required.';
 
@@ -80,16 +83,16 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
         <Card className="hero">
           <div className="hero-body">
             <div className="hero-text">
-              <Badge tone={s.recording ? 'rec' : s.replay ? 'ok' : s.state === 'Error' ? 'bad' : 'neutral'} dot>{s.recording ? 'REC' : s.replay ? 'BUFFERING' : s.state.toUpperCase()}</Badge>
+              <Badge tone={starting ? 'warn' : s.recording ? 'rec' : s.replay ? 'ok' : s.state === 'Error' ? 'bad' : 'neutral'} dot>{starting ? 'STARTING' : s.recording ? 'REC' : s.replay ? 'BUFFERING' : s.state.toUpperCase()}</Badge>
               <h2>{headline}</h2>
               <p>{sub}</p>
               <div className="hero-actions">
                 {!s.replay
                   ? <Button size="lg" variant="primary" icon={RotateCcw} disabled={!!busy || !native} onClick={() => go('start_replay')}>Enable replay</Button>
                   : <Button size="lg" variant="primary" icon={Save} disabled={!!busy || s.buffer <= 0} onClick={async () => { const m = saved(await go('save_replay')); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>}
-                <Button size="lg" variant="record" icon={s.recording ? Square : Circle} disabled={!!busy || !native}
-                  onClick={async () => { const m = saved(await go(s.recording ? 'stop_recording' : 'start_recording')); if (m) toast('success', `Recording saved — ${m}`); }}>
-                  {s.recording ? 'Stop & save' : 'Record'}
+                <Button size="lg" variant="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native}
+                  onClick={rec.onClick}>
+                  {rec.label}
                 </Button>
                 {s.replay && <Button size="lg" variant="ghost" disabled={!!busy} onClick={() => go('stop_replay')}>Turn off</Button>}
               </div>
