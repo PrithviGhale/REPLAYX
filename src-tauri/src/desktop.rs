@@ -45,6 +45,8 @@ struct AppState {
     testing_audio: Arc<Mutex<bool>>,
     /// Set by "Stop test" to end a microphone/source test early.
     test_stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Set to end live microphone monitoring ("hear yourself").
+    monitor_stop: Arc<std::sync::atomic::AtomicBool>,
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
@@ -427,6 +429,56 @@ async fn audio_test(
     .map_err(err);
     *flag.lock().unwrap() = false;
     result?
+}
+/// Audio devices right now (cheap; no encoder probes).
+#[tauri::command]
+async fn audio_devices() -> Reply<Vec<audio::AudioDevice>> {
+    tauri::async_runtime::spawn_blocking(|| audio::devices().map_err(err))
+        .await
+        .map_err(err)?
+}
+/// Start "hear yourself": the microphone played live on `output` ("" = the
+/// Windows default). Emits `mic-monitor-level` and, when it ends,
+/// `mic-monitor-ended` (with the error, if any). Nothing is recorded.
+#[tauri::command]
+fn mic_monitor_start(
+    source: AudioSource,
+    output: String,
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> Reply<()> {
+    let status = state.engine.status();
+    if status.replay || status.recording {
+        return Err("Turn off Instant Replay and recording to listen to your microphone".into());
+    }
+    {
+        let mut busy = state.testing_audio.lock().unwrap();
+        if *busy {
+            return Err("A microphone test or monitor is already running".into());
+        }
+        *busy = true;
+    }
+    let flag = state.testing_audio.clone();
+    let stop = state.monitor_stop.clone();
+    stop.store(false, std::sync::atomic::Ordering::Relaxed);
+    thread::spawn(move || {
+        let level_app = app.clone();
+        let result = audio::monitor(source, &output, &stop, |peak| {
+            let _ = level_app.emit("mic-monitor-level", peak);
+        });
+        *flag.lock().unwrap() = false;
+        let _ = app.emit(
+            "mic-monitor-ended",
+            serde_json::json!({"error": result.err().map(|e| format!("{e:#}"))}),
+        );
+    });
+    Ok(())
+}
+#[tauri::command]
+fn mic_monitor_stop(state: State<AppState>) {
+    state
+        .monitor_stop
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 }
 /// End a running audio test early ("Stop test").
 #[tauri::command]
@@ -875,6 +927,7 @@ pub fn run() {
                 icons: Arc::new(Mutex::new(HashMap::new())),
                 testing_audio: Arc::new(Mutex::new(false)),
                 test_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                monitor_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 app: app.handle().clone(),
                 library: Arc::new(Mutex::new(Library {
                     index: library::Index::load(&data.join("library-index.json")),
@@ -968,6 +1021,27 @@ pub fn run() {
                 let mut tick = 0u64;
                 let notices = crate::overlay::Overlay::spawn();
                 let status_overlay = crate::status_overlay::StatusOverlay::spawn();
+                // Audio device watcher: an endpoint list check every 2 s (a few
+                // ms of COM calls); the window gets the new list only on change.
+                {
+                    let handle = handle.clone();
+                    thread::spawn(move || {
+                        let mut last: Option<Vec<(String, String, String)>> = None;
+                        loop {
+                            if let Ok(list) = audio::devices() {
+                                let key: Vec<_> = list
+                                    .iter()
+                                    .map(|d| (d.id.clone(), d.name.clone(), d.kind.clone()))
+                                    .collect();
+                                if last.as_ref().is_some_and(|l| *l != key) {
+                                    let _ = handle.emit("audio-devices", &list);
+                                }
+                                last = Some(key);
+                            }
+                            thread::sleep(std::time::Duration::from_secs(2));
+                        }
+                    });
+                }
                 let mut tray_shown = Default::default();
                 let mut overlay_frame: Option<crate::status_overlay::Frame> = None;
                 let mut announcer = crate::overlay::Announcer::default();
@@ -1124,6 +1198,9 @@ pub fn run() {
             audio_test,
             audio_test_stop,
             audio_test_data,
+            audio_devices,
+            mic_monitor_start,
+            mic_monitor_stop,
             audio_test_discard,
             open_folder
         ])

@@ -528,3 +528,13 @@ details p { margin-top: 8px; }
 .ov-item i { width: 7px; height: 7px; border-radius: 50%; display: block; }
 .ov-options { display: grid; gap: 4px; min-width: 0; }
 @media (max-width: 900px) { .ov-settings { grid-template-columns: 1fr; } }
+.add-mic { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.add-mic .field { flex: 1 1 280px; max-width: 420px; }
+.hear { margin-top: 16px; padding: 14px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--line); display: grid; gap: 10px; }
+.hear-head { display: flex; gap: 10px; align-items: flex-start; }
+.hear-head svg { color: var(--accent); margin-top: 2px; flex: none; }
+.hear-head strong { display: block; }
+.hear-head small { color: var(--muted); font-size: 12.5px; }
+.hear-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hear-row select { max-width: 320px; }
+.hear-row .meter { flex: 1 1 160px; }

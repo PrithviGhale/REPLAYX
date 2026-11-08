@@ -64,6 +64,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshNow();
       }
     });
+    // Microphones and outputs plugged in or removed (checked every 2 s).
+    const devices = listen<Caps['devices']>('audio-devices', ({ payload }) => {
+      if (closed) return;
+      setCaps(c => (c ? { ...c, devices: payload } : c));
+    });
     // Background metadata for clips the index had not seen yet.
     const indexed = listen<Clip[]>('library-updated', ({ payload }) => {
       if (closed) return;
@@ -74,6 +79,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       closed = true;
       void subscription.then(unlisten => unlisten());
       void indexed.then(unlisten => unlisten());
+      void devices.then(unlisten => unlisten());
     };
   }, [toast]);
   const dropClip = useCallback((id: string) => { libraryRevision.current++; setClips(c => removeClip(c, id)); }, []);

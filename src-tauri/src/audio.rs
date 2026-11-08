@@ -400,7 +400,7 @@ impl Drop for AudioFeed {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub struct AudioDevice {
     pub id: String,
     pub name: String,
@@ -507,6 +507,113 @@ pub fn record_test(
         endpoint_mix_format: format,
         pcm,
     })
+}
+
+/// Gain for live monitoring: the source's boost, then a soft limiter that
+/// leaves normal speech untouched and rounds peaks off below full scale.
+pub fn monitor_gain(samples: &mut [f32], boost_db: f32) {
+    let gain = 10f32.powf(boost_db.clamp(0.0, 24.0) / 20.0);
+    const KNEE: f32 = 0.85;
+    for s in samples.iter_mut() {
+        let v = *s * gain;
+        let a = v.abs();
+        *s = if a <= KNEE {
+            v
+        } else {
+            v.signum() * (KNEE + (1.0 - KNEE) * ((a - KNEE) / (1.0 - KNEE)).tanh()) * 0.98
+        };
+    }
+}
+/// Longest a monitoring session runs before it stops by itself.
+pub const MONITOR_LIMIT: Duration = Duration::from_secs(600);
+/// "Hear yourself": play `source` (normally the microphone) on an output
+/// device in real time until `stop` is set. Uses the same capture path as
+/// recording (volume included), adds the boost with a soft limiter, keeps
+/// latency bounded (about 0.1-0.15 s) and never records anything.
+pub fn monitor(
+    source: AudioSource,
+    output: &str,
+    stop: &AtomicBool,
+    mut on_level: impl FnMut(f32),
+) -> Result<()> {
+    use std::io::Read;
+    let boost = source.boost_db;
+    let feed = spawn(source)?;
+    let mut socket = std::net::TcpStream::connect(feed.url.trim_start_matches("tcp://"))?;
+    socket.set_read_timeout(Some(Duration::from_millis(10)))?;
+    wasapi::initialize_mta().ok()?;
+    let en = DeviceEnumerator::new()?;
+    let device = if output.is_empty() {
+        en.get_default_device(&Direction::Render)?
+    } else {
+        en.get_device(output)?
+    };
+    let mut client = device.get_iaudioclient()?;
+    let format = WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, CHANNELS, None);
+    client.initialize_client(
+        &format,
+        &Direction::Render,
+        &StreamMode::PollingShared {
+            autoconvert: true,
+            buffer_duration_hns: 400_000,
+        },
+    )?;
+    let render = client.get_audiorenderclient()?;
+    client.start_stream()?;
+    let frame_bytes = CHANNELS * 4;
+    // Keep at most ~60 ms queued: monitoring must stay immediate, so a
+    // backlog (after a stall) is dropped rather than played late.
+    let max_queue = RATE as usize * 60 / 1000 * frame_bytes;
+    let mut queue: VecDeque<u8> = VecDeque::with_capacity(max_queue * 2);
+    let mut input = [0u8; 4096];
+    let mut pending: Vec<u8> = Vec::new();
+    let began = Instant::now();
+    let mut peak = 0f32;
+    let mut last_level = Instant::now();
+    while !stop.load(Ordering::Relaxed) && began.elapsed() < MONITOR_LIMIT {
+        if let Some(error) = feed.meter.error.lock().unwrap().clone() {
+            bail!("Microphone error: {error}")
+        }
+        match socket.read(&mut input) {
+            Ok(0) => bail!("Audio transport closed unexpectedly"),
+            Ok(n) => pending.extend_from_slice(&input[..n]),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(e) => return Err(e.into()),
+        }
+        let whole = pending.len() / frame_bytes * frame_bytes;
+        if whole > 0 {
+            let mut samples: Vec<f32> = pending[..whole]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect();
+            pending.drain(..whole);
+            monitor_gain(&mut samples, boost);
+            peak = samples.iter().fold(peak, |p, v| p.max(v.abs()));
+            queue.extend(samples.iter().flat_map(|v| v.to_le_bytes()));
+            if queue.len() > max_queue {
+                let excess = (queue.len() - max_queue / 2) / frame_bytes * frame_bytes;
+                queue.drain(..excess);
+            }
+        }
+        let space = client.get_available_space_in_frames()? as usize;
+        let frames = space.min(queue.len() / frame_bytes);
+        if frames > 0 {
+            render.write_to_device_from_deque(frames, &mut queue, None)?;
+        }
+        if last_level.elapsed() > Duration::from_millis(80) {
+            on_level(peak);
+            peak = 0.0;
+            last_level = Instant::now();
+        }
+    }
+    let _ = client.stop_stream();
+    Ok(())
 }
 
 /// Write interleaved stereo 48kHz samples as a 16-bit PCM WAV file.
@@ -1199,6 +1306,22 @@ mod tests {
         assert_eq!(to_stereo(vec![0.1; 6], 4).len(), 2);
     }
 
+    #[test]
+    fn monitor_gain_boosts_and_never_clips() {
+        let mut quiet = vec![0.05f32, -0.05];
+        monitor_gain(&mut quiet, 6.0);
+        assert!(
+            (quiet[0] - 0.05 * 10f32.powf(0.3)).abs() < 1e-4,
+            "{quiet:?}"
+        );
+        let mut loud = vec![0.9f32, -1.0, 0.5];
+        monitor_gain(&mut loud, 24.0);
+        assert!(loud.iter().all(|v| v.abs() < 1.0), "{loud:?}");
+        assert!(loud[0] > 0.9 && loud[1] < -0.9);
+        let mut speech = vec![0.3f32];
+        monitor_gain(&mut speech, 0.0);
+        assert_eq!(speech[0], 0.3);
+    }
     #[test]
     fn unconsumed_queue_is_bounded() {
         let mut timeline = Timeline::new(ORIGIN);
