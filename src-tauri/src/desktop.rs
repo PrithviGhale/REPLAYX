@@ -229,6 +229,7 @@ fn save_settings_blocking(
     let previous = state.engine.settings();
     let mut settings = settings;
     settings.tray_hint_shown |= previous.tray_hint_shown;
+    settings.tour_done |= previous.tour_done;
     if state.engine.status().replay
         || state.engine.status().recording
         || state.engine.status().saving > 0
@@ -471,6 +472,25 @@ async fn voice_sample_render(
     })
     .await
     .map_err(err)?
+}
+/// The first-run tour was finished or skipped.
+#[tauri::command]
+fn mark_tour_done(state: State<AppState>) {
+    state.engine.mark_tour_done();
+}
+/// The built-in Voice Enhancer presets (the UI fills its controls from these).
+#[tauri::command]
+fn voice_presets() -> serde_json::Value {
+    let map: serde_json::Map<String, serde_json::Value> = crate::voice::PRESETS
+        .iter()
+        .map(|p| {
+            (
+                p.to_string(),
+                serde_json::json!(crate::voice::preset(p).unwrap()),
+            )
+        })
+        .collect();
+    serde_json::Value::Object(map)
 }
 /// Forget the comparison sample (closing the panel).
 #[tauri::command]
@@ -1269,6 +1289,8 @@ pub fn run() {
             clip_thumbnail,
             audio_test_stop,
             voice_sample_record,
+            voice_presets,
+            mark_tour_done,
             voice_sample_render,
             voice_sample_discard,
             open_sound_settings,

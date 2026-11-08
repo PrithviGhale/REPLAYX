@@ -2,6 +2,7 @@
 // Run: npx vite --config dev/vite.preview.ts   then open /dev/preview.html#home
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import type { Clip, Settings, Status } from '../src/api';
+import { CLEAR_VOICE } from '../src/audio';
 
 mockWindows('main');
 // Surface uncaught errors in the screenshot itself.
@@ -21,14 +22,14 @@ let emptyStatus = {} as Status;
 let previewSettings = {} as Settings;
 const scenario = new URLSearchParams(window.location.search).get('state') ?? 'replay';
 let settings = {} as Settings;
-const plain = { boost_db: 0, high_pass: false, noise_suppression: false, noise_gate: false, compressor: false };
+const plain = { boost_db: 0, voice: { ...CLEAR_VOICE } };
 const initialSettings = (): Settings => ({
   ...previewSettings,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX',
   audio: [
     { kind: 'application', device: '', pid: 29336, process_started: 1, name: 'Game', enabled: true, volume: 1, muted: false, ...plain },
     { kind: 'application', device: '', pid: 25872, process_started: 1, name: 'Discord', enabled: true, volume: 0.8, muted: false, ...plain },
-    { kind: 'microphone', device: 'b', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false, boost_db: 6, high_pass: true, noise_suppression: true, noise_gate: false, compressor: false },
+    { kind: 'microphone', device: 'b', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false, boost_db: 6, voice: { ...CLEAR_VOICE } },
   ],
 });
 const started = Date.now();
@@ -86,6 +87,7 @@ mockIPC((cmd, args) => {
       { pid: 19036, name: 'Spotify.exe', path: '', started: 1, active: false }, { pid: 24240, name: 'Browser.exe', path: '', started: 1, active: false },
     ];
     case 'app_icon': return null;
+    case 'voice_presets': return { raw: { ...CLEAR_VOICE, preset: 'raw', high_pass: false, suppression: 'off', compressor: false, mud_db: 0, presence_db: 0, air_db: 0 }, clear: CLEAR_VOICE };
     case 'audio_test': return { seconds: 6.2, packets: 620, peak: 0.42, rms: 0.08, discontinuities: 0, device_glitches: 0, timestamp_errors: 0, drift_correction_ppm: 0, measured_device_clock_ppm: 0, endpoint_mix_format: '48000 Hz · 2 ch · float' };
     default: return null;
   }

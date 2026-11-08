@@ -1,13 +1,20 @@
-import type { AudioSource } from './api';
+import type { AudioSource, VoiceConfig } from './api';
 
 /** Sources whose identity matches the saved settings can be mixed live. */
 export const identity = (a: AudioSource) => `${a.kind}|${a.device}|${a.pid}|${a.process_started}|${a.enabled}`;
 
-/** A new microphone source: raw capture plus the rumble filter, no boost. */
+/** Fallback for the "Clear" preset when the engine is not reachable (UI
+ * preview). The engine's values (api.voicePresets) are authoritative. */
+export const CLEAR_VOICE: VoiceConfig = {
+  preset: 'clear', high_pass: true, suppression: 'balanced', gate: false, gate_threshold_db: -50,
+  compressor: true, comp_threshold_db: -24, comp_ratio: 2.5, warmth_db: 0, mud_db: -1.5, presence_db: 2.5, air_db: 1, deesser: false,
+};
+
+/** A new source with the default Voice Enhancer settings (used for microphones). */
 export function micDefaults(device: string): AudioSource {
   return {
     kind: 'microphone', device, pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1, muted: false,
-    boost_db: 0, high_pass: true, noise_suppression: false, noise_gate: false, compressor: false,
+    boost_db: 0, voice: { ...CLEAR_VOICE },
   };
 }
 

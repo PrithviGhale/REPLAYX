@@ -58,7 +58,7 @@ export function AudioPage() {
 
   const update = (i: number, p: Partial<AudioSource>) => patch({ audio: sources.map((a, n) => (n === i ? { ...a, ...p } : a)) });
   const add = (kind: AudioKind, extra: Partial<AudioSource> = {}) => patch({
-    audio: [...sources, { ...micDefaults(''), kind, name: kindLabel[kind], high_pass: kind === 'microphone', ...extra }],
+    audio: [...sources, { ...micDefaults(''), kind, name: kindLabel[kind], ...extra }],
   });
   const setVolume = (i: number, volume: number, muted: boolean) => (liveMix ? setMix(i, volume, muted) : update(i, { volume, muted }));
 

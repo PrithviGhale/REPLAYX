@@ -37,7 +37,8 @@ test('storage estimate counts every audio track', () => {
 
 test('microphone state never claims recording unless capture runs', () => {
   const mic = micDefaults('');
-  assert.equal(mic.high_pass, true);
+  assert.equal(mic.voice.preset, 'clear');
+  assert.equal(mic.voice.suppression, 'balanced');
   assert.equal(mic.boost_db, 0);
   assert.equal(micState({ mic: null, capturing: true, deviceKnown: true }).key, 'none');
   assert.equal(micState({ mic, capturing: false, deviceKnown: true }).key, 'ready');

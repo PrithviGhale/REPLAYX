@@ -428,6 +428,17 @@ impl Engine {
         let _ = i.settings.save(&i.data_dir.join("settings.json"));
         self.publish(&i);
     }
+    /// Remember that the first-run tour was finished or skipped (saved at
+    /// once, also during capture).
+    pub fn mark_tour_done(&self) {
+        let mut i = self.0.lock().unwrap();
+        if i.settings.tour_done {
+            return;
+        }
+        i.settings.tour_done = true;
+        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        self.publish(&i);
+    }
     /// Mutate engine state with the lock held, then publish the result.
     pub fn update(&self, f: impl FnOnce(&mut Inner)) {
         let mut i = self.0.lock().unwrap();
@@ -2421,6 +2432,27 @@ mod tests {
             ffprobe: data.join("missing-ffprobe.exe"),
         };
         Engine::with_media(data, settings, media)
+    }
+    #[test]
+    fn tour_and_tray_hint_are_remembered_across_launches() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let settings = Settings {
+            output_dir: root.path().join("clips"),
+            audio: Vec::new(),
+            ..Default::default()
+        };
+        let engine = isolated(data.clone(), settings).unwrap();
+        assert!(!engine.settings().tour_done);
+        engine.mark_tour_done();
+        engine.mark_tray_hint_shown();
+        let reloaded = Settings::load(&data.join("settings.json")).unwrap();
+        assert!(
+            reloaded.tour_done && reloaded.tray_hint_shown,
+            "saved at once"
+        );
+        engine.mark_tour_done();
+        assert!(engine.settings().tour_done);
     }
     #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {

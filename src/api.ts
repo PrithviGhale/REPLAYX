@@ -7,7 +7,20 @@ export type AudioKind = 'system' | 'microphone' | 'application' | 'exclude';
 export type AudioSource = {
   kind: AudioKind; device: string; pid: number; process_started: number;
   name: string; enabled: boolean; volume: number; muted: boolean;
-  boost_db: number; high_pass: boolean; noise_suppression: boolean; noise_gate: boolean; compressor: boolean;
+  boost_db: number; voice: VoiceConfig;
+};
+export type VoicePreset = 'raw' | 'natural' | 'clear' | 'broadcast' | 'noise_free' | 'custom';
+export type Suppression = 'off' | 'light' | 'balanced' | 'strong';
+/** Mirror of voice::VoiceConfig (the engine owns the preset values: api.voicePresets). */
+export type VoiceConfig = {
+  preset: VoicePreset; high_pass: boolean; suppression: Suppression; gate: boolean; gate_threshold_db: number;
+  compressor: boolean; comp_threshold_db: number; comp_ratio: number;
+  warmth_db: number; mud_db: number; presence_db: number; air_db: number; deesser: boolean;
+};
+export type SavedVoice = { name: string; voice: VoiceConfig; boost_db: number };
+export type VoiceSample = {
+  original: string; enhanced: string; input_peak_db: number; enhanced_peak_db: number; input_clipped: boolean;
+  noise_floor_db: number; enhanced_noise_floor_db: number; match_db: number; seconds: number;
 };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Display = {
@@ -23,7 +36,7 @@ export type Settings = {
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
-  overlay: OverlaySettings; tray_hint_shown: boolean;
+  overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
@@ -83,15 +96,19 @@ export const api = {
   /** Returns the clip's id after the operation (new id for rename/move/mp4). */
   clipAction: (id: string, operation: 'delete' | 'rename' | 'move' | 'folder' | 'play' | 'mp4', value?: string) =>
     call<string>('clip_action', { id, operation, value: value ?? null }),
-  audioTest: (source: AudioSource, seconds: number) => call<TestCapture>('audio_test', { source, seconds }),
   audioTestStop: () => call<void>('audio_test_stop'),
-  audioTestData: () => call<string>('audio_test_data'),
-  audioTestDiscard: () => call<void>('audio_test_discard'),
+  voicePresets: () => call<Record<string, VoiceConfig>>('voice_presets'),
+  voiceSampleRecord: (source: AudioSource, seconds: number) => call<number>('voice_sample_record', { source, seconds }),
+  voiceSampleRender: (voice: VoiceConfig, boostDb: number) => call<VoiceSample>('voice_sample_render', { voice, boostDb }),
+  voiceSampleDiscard: () => call<void>('voice_sample_discard'),
+  openSoundSettings: () => call<void>('open_sound_settings'),
+  markTourDone: () => call<void>('mark_tour_done'),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
   micMonitorStart: (source: AudioSource, output: string) => call<void>('mic_monitor_start', { source, output }),
   micMonitorStop: () => call<void>('mic_monitor_stop'),
-  micMonitorSet: (volume: number, boostDb: number) => call<void>('mic_monitor_set', { volume, boostDb }),
+  micMonitorSet: (volume: number, voice: VoiceConfig, boostDb: number, original: boolean) =>
+    call<void>('mic_monitor_set', { volume, voice, boostDb, original }),
   openFolder: () => call<void>('open_folder'),
   checkUpdate: () => call<UpdateInfo>('check_update'),
   installUpdate: () => call<void>('install_update'),
@@ -120,7 +137,7 @@ export const previewSettings: Settings = {
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true },
-  tray_hint_shown: false,
+  tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
 export const VERSION = '0.2.2-alpha.2';
