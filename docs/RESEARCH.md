@@ -15,3 +15,25 @@ Tests must distinguish source animation stalls, capture acquisition repeats,
 filter/CFR repeats, encoder throughput and player behavior. GPU engine loads,
 hardware queue depths and capture-to-encode latency remain unavailable through
 the current process boundary; show “Not measured,” not invented values.
+
+## Game-FPS impact on hybrid laptops — November 8, 2026 (0.2.1-alpha.3)
+
+**Observation (measured, passive):** with REPLAYX 0.2.1-alpha.2 buffering at 120 fps on a near-static desktop, Windows' GPU engine counters showed REPLAYX's FFmpeg using about **34% of the Intel Iris Xe 3D engine** and 19% of its video engine (no game rendering at that moment). The user measured Roblox falling from 150–200 to 80–100 FPS while recording.
+
+**Why that matters on this hardware:** on an Optimus laptop the panel is driven by the Intel GPU. A game rendered on the RTX is copied to the Intel GPU and composited there by DWM before it reaches the screen, so the Intel 3D engine is on every game frame's path. Desktop Duplication must capture on that same adapter. Work REPLAYX puts on the Intel shader cores competes with the game's presentation.
+
+**Sources and what they say:**
+
+* Intel's GPU optimisation guide, [Media Engine Hardware](https://www.intel.com/content/www/us/en/docs/oneapi/optimization-guide-gpu/2023-0/media-engine-hardware.html): H.264 encode has a **low-power VDEnc path that is fully fixed-function**, and a PAK path that uses motion estimation and media kernels on the execution units. Gen 12 (Iris Xe) supports both. [Jellyfin's Intel guide](https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/intel/) gives the same two modes per generation.
+* [FFmpeg QSV encoder options](https://ffmpeg.org/ffmpeg-codecs.html#QSV-Encoders): `low_power` "reduce[s] power consumption and GPU usage". Rate control: `global_quality` alone selects ICQ, `maxrate > b` selects VBR, `maxrate = b` CBR. `vpp_qsv` has `scale_mode` (auto, low_power, hq, compute, vd, ve) and `out_color_matrix`/`out_range`.
+* [FFmpeg NVENC options](https://ffmpeg.org/ffmpeg-codecs.html): presets p1–p7, `rc vbr` with `cq`, `spatial-aq`. NVENC is a separate engine on the NVIDIA GPU, but on this laptop its frames must first cross from the Intel GPU.
+* [OBS encoding-performance guide](https://obsproject.com/kb/encoding-performance-troubleshooting): when a game drives the GPU at full throttle the recorder gets "very little GPU processing power". Recommended fixes are capping the game's frame rate or V-Sync, lowering output resolution or FPS, and letting the recorder reserve GPU priority (running as administrator). REPLAYX does not raise its GPU priority: on this hardware that would take time from the game.
+* [Microsoft Desktop Duplication](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api) and [Windows Graphics Capture](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture): both capture on the adapter that composes the desktop. Neither avoids the Intel GPU on a hybrid laptop. ShadowPlay's per-application capture on the NVIDIA GPU relies on driver internals that are not public.
+
+**Decisions in 0.2.1-alpha.3 (pending measurement in real games):**
+
+1. Prefer Quick Sync's fixed-function VDEnc (`-low_power 1`), probed first with automatic fallback. Expected effect: the encoder's motion estimation leaves the Intel shader cores.
+2. Keep scaling and colour conversion in Quick Sync VPP on the GPU (zero-copy), with explicit BT.709 conversion. `scale_mode` stays automatic until measured (`REPLAYX_VIDEO_TUNING=vpp_scale_mode=…` allows benchmarking `low_power`/`ve`).
+3. Show encoder speed and video lag, and stop with the real cause (encoder or GPU overloaded) instead of an audio symptom.
+4. Make 120 fps a visible trade-off in the UI rather than silently reducing it.
+5. Build a repeatable workload, `replayx-gameproxy`: a heavy shader on the high-performance GPU, presented through the display GPU like a game, with time-coded frames. `scripts/overhead-bench.py` measures game FPS and 1% lows with each capture path, GPU engine use, and recording smoothness. Results go to PERFORMANCE.md only once they are measured.

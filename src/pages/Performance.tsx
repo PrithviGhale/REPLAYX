@@ -39,7 +39,7 @@ export function PerformancePage() {
       <div className="grid-2">
         <Card title="Video pipeline">
           <dl className="facts">
-            <div><dt>Encoder</dt><dd>{active ? `${encoderName(s.encoder)}${s.label ? ` — ${s.label}` : ''}` : '—'}</dd></div>
+            <div><dt>Encoder</dt><dd>{active ? encoderName(s.encoder) : '—'} {active && s.label && <span className="muted small mono">{s.label}</span>}</dd></div>
             <div><dt>Encoder speed</dt><dd>{active && s.speed > 0 ? <>{s.speed.toFixed(2)}× real time {s.speed >= 0.99 ? <Badge tone="ok">keeping up</Badge> : <Badge tone="warn">falling behind</Badge>}</> : '—'}</dd></div>
             <div><dt>Video behind real time</dt><dd>{active ? `${(s.lag / 1000).toFixed(1)} s` : '—'}</dd></div>
             <div><dt>Scaling path</dt><dd>{active ? s.scaling || '—' : '—'} {active && s.scaling.startsWith('GPU zero-copy') && <Badge tone="ok">no CPU copy</Badge>}{active && s.scaling === 'CPU fallback' && <Badge tone="warn">higher CPU</Badge>}</dd></div>

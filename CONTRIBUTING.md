@@ -5,13 +5,13 @@ Thanks for helping. REPLAYX is a free, local-only Windows recorder, so contribut
 ## Ground rules
 
 - **Honest UI.** No placeholder controls, fake meters or simulated data in the app. If something is unsupported, show that.
-- **Evidence over claims.** Capture changes need a real recording that you inspected (ffprobe plus a full decode). Put measurements in `VALIDATION.md` and gaps in `KNOWN_LIMITATIONS.md`.
+- **Evidence over claims.** Capture changes need a real recording that you inspected (ffprobe plus a full decode). Put measurements in `docs/VALIDATION.md` and gaps in `docs/KNOWN_LIMITATIONS.md`. Never claim game-performance or smoothness improvements from file metadata or desktop-only tests.
 - **Don't break proven paths.** Audio timeline, segment/concat and geometry code is covered by regression tests. If a test fails, fix the cause; don't loosen the assertion.
 - **Privacy in reports.** Never attach recordings, screenshots or logs that contain other people's voices, chats or account details.
 
 ## Setup
 
-See [BUILDING.md](BUILDING.md). In short:
+See [BUILDING.md](docs/BUILDING.md). In short:
 
 ```powershell
 npm ci
@@ -30,8 +30,14 @@ npm run desktop                                                    # run the app
 | `src-tauri/src/engine.rs` | Capture pipeline, replay ring, saves, watchdog, recovery |
 | `src-tauri/src/desktop.rs` | Tauri commands, tray, hotkeys, updater |
 | `src-tauri/src/winutil.rs` | Audio sessions, icons, Recycle Bin, autostart |
+| `src-tauri/src/games.rs` | Foreground-game classification and clip attribution (process identity only) |
+| `src-tauri/src/library.rs` | Clip ids, persistent metadata index, safe delete/move |
+| `src-tauri/src/overlay.rs` | Native "game detected" notice |
+| `src-tauri/src/bin/` | `replayx-cli` (engine without UI) and `replayx-gameproxy` (benchmark workload) |
 | `src/` | React UI (`pages/`, `ui.tsx` components, `store.ts` status polling) |
-| `scripts/` | Setup, checks, bundling and measurement scripts |
+| `scripts/` | Setup, checks, bundling and measurement scripts ([index](scripts/README.md)) |
+| `docs/` | Architecture, building, performance, validation, limitations, roadmap, releasing |
+| `tests/` | Frontend unit tests (Node test runner) |
 | `dev/` | Mocked UI preview and headless screenshot tools (not shipped) |
 
 ## Testing hardware changes

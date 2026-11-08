@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="REPLAYX — Capture everything. Miss nothing.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d0e14"/>
+      <stop offset="1" stop-color="#14121f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.35" r="0.55">
+      <stop offset="0" stop-color="#7262ff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#7262ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a99cff"/>
+      <stop offset="1" stop-color="#6d5cf6"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b7cff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#8b7cff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#8b7cff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="320" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="320" rx="20" fill="url(#glow)"/>
+  <!-- timeline: the last moments kept on disk -->
+  <g opacity="0.55">
+    <rect x="760" y="196" width="420" height="6" rx="3" fill="#22242f"/>
+    <rect x="860" y="196" width="320" height="6" rx="3" fill="#7262ff"/>
+    <circle cx="1180" cy="199" r="9" fill="#ff4a5a"/>
+    <g fill="#2d303d">
+      <rect x="760" y="120" width="96" height="56" rx="8"/>
+      <rect x="868" y="120" width="96" height="56" rx="8" fill="#3a2f8f"/>
+      <rect x="976" y="120" width="96" height="56" rx="8" fill="#4a3cc0"/>
+      <rect x="1084" y="120" width="96" height="56" rx="8" fill="#7262ff"/>
+    </g>
+  </g>
+  <!-- mark -->
+  <g transform="translate(96 96)">
+    <rect width="88" height="88" rx="22" fill="url(#mark)"/>
+    <path d="M30 26 h22 a14 14 0 0 1 0 28 h-6 l12 12" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M30 26 v40" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <text x="212" y="152" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="6" fill="#ecedf3">REPLAY<tspan fill="#8b7cff">X</tspan></text>
+  <text x="214" y="196" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#b6b9c8">Capture everything. Miss nothing.</text>
+  <rect x="96" y="232" width="560" height="2" fill="url(#line)"/>
+  <text x="96" y="268" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="18" fill="#7f8399">Free, open-source Instant Replay and screen recorder for Windows</text>
+</svg>

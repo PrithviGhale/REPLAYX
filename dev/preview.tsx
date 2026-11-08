@@ -37,7 +37,9 @@ const status = (): Status => {
   return {
     ...emptyStatus,
     state: !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
-    encoder: on ? 'h264_qsv' : '', scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,
+    encoder: on ? 'h264_qsv_lp' : '', encoder_label: on ? 'h264_qsv (low-power VDEnc)' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
+    target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,
+    scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,
     buffer_seconds: on ? Math.min(60, 42 + t) : 0, buffer_bytes: on ? 71_000_000 : 0, free_bytes: 412 * 1024 ** 3,
     frames: on ? 2650 + Math.round(t * 60) : 0, dropped_frames: 0, fps: on ? 59.7 + Math.sin(t) * 0.2 : 0, elapsed: on ? 154 + t : 0,
     write_mbps: 1.6, memory_mb: 212, cpu_percent: 2.9 + Math.sin(t / 2) * 0.4, frame_age_ms: 16, segment_age_ms: 900,
@@ -51,12 +53,15 @@ const status = (): Status => {
 const svg = (hue: number, label: string) => `data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,22%)"/><stop offset="1" stop-color="hsl(${hue + 40},40%,10%)"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="16" y="164" fill="rgba(255,255,255,.5)" font-family="Segoe UI" font-size="14">${label}</text></svg>`)}`;
 const probe = (d: number, titles: string[]) => ({ duration: d, bytes: d * 1.55e6, video_codec: 'h264', audio_tracks: titles.length, width: 1920, height: 1080, start_time: 0, audio_titles: titles, fps: 60 });
+const clip = (category: string, name: string, kind: string, modified: number, d: number, titles: string[]): Clip =>
+  ({ id: `${category}/${name}`, name, category, kind, modified, bytes: d * 3.5e6, probe: { ...probe(d, titles), game: category, kind } });
+const mix = ['Playback mix', 'Game', 'Discord', 'Microphone'];
 const clips: Clip[] = scenario === 'empty' ? [] : [
-  { name: 'Replay-20261107-213012-a1b2c3d4.mkv', modified: 1794191412, probe: probe(60, ['Playback mix', 'Game', 'Discord', 'Microphone']) },
-  { name: 'Replay-20261107-205544-9f8e7d6c.mkv', modified: 1794189344, probe: probe(60, ['Playback mix', 'Game', 'Discord', 'Microphone']) },
-  { name: 'Recording-20261107-193010-11223344.mkv', modified: 1794184210, probe: probe(1324, ['Playback mix', 'Game', 'Discord', 'Microphone']) },
-  { name: 'Replay-20261106-221501-55667788.mkv', modified: 1794107701, probe: probe(30, ['Playback mix', 'System audio']) },
-  { name: 'Replay-20261106-220212-99aabbcc-export-1a2b3c4d.mp4', modified: 1794106932, probe: probe(30, ['Playback mix', 'System audio']) },
+  clip('Roblox', 'Roblox_2026-11-07_21-30-12.mkv', 'Replay', 1794191412, 60, mix),
+  clip('Fortnite', 'Fortnite_2026-11-07_20-55-44.mkv', 'Replay', 1794189344, 60, mix),
+  clip('Fortnite', 'Fortnite_2026-11-07_19-30-10.mkv', 'Recording', 1794184210, 1324, mix),
+  clip('Valorant', 'Valorant_2026-11-06_22-15-01.mkv', 'Replay', 1794107701, 30, mix),
+  clip('Desktop', 'Desktop_2026-11-06_22-02-12.mkv', 'Replay', 1794106932, 30, ['Playback mix', 'System audio']),
 ];
 mockIPC((cmd, args) => {
   const a = args as Record<string, unknown>;
@@ -72,7 +77,7 @@ mockIPC((cmd, args) => {
       devices: [{ id: 'a', name: 'Speakers (Realtek(R) Audio)', kind: 'system' }, { id: 'b', name: 'Headset Microphone', kind: 'microphone' }],
     };
     case 'clips': return clips;
-    case 'clip_thumbnail': { const i = clips.findIndex(c => c.name === a.name); return svg(230 + i * 35, (a.name as string).slice(0, 6)); }
+    case 'clip_thumbnail': { const i = clips.findIndex(c => c.id === a.id); return svg(230 + i * 35, clips[i]?.category ?? ''); }
     case 'audio_sessions': return [
       { pid: 29336, name: 'Game.exe', path: '', started: 1, active: true }, { pid: 25872, name: 'Discord.exe', path: '', started: 1, active: true },
       { pid: 19036, name: 'Spotify.exe', path: '', started: 1, active: false }, { pid: 24240, name: 'Browser.exe', path: '', started: 1, active: false },

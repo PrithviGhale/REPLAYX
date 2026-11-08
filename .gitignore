@@ -23,3 +23,30 @@ __pycache__/
 !tools/ffmpeg-stable-defender-scan.log
 dist-preview/
 dev/screens/
+
+# Recordings, replay buffers and test media never belong in the repository.
+*.mkv
+*.mp4
+*.mka
+*.mov
+*.wav
+*.f32
+segments.csv
+library-index.json
+video-path.json
+/settings.json
+
+# Crash dumps and diagnostics that can contain personal data.
+*.dmp
+*.etl
+*.wer
+
+# Signing material and local credentials.
+*.pfx
+*.p12
+*.pem
+*.snk
+*.secret
+.idea/
+.DS_Store
+Thumbs.db

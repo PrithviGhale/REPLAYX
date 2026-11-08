@@ -1,11 +1,38 @@
-# Security
+# Security policy
 
-Do not publish sensitive recordings, session settings, or raw FFmpeg diagnostic tails in an issue. Before a public release, enable GitHub private vulnerability reporting under Settings → Code security. Until a repository is created, do not invent a maintainer email or disclosure destination.
+## Reporting a vulnerability
 
-Threat model: an ordinary local desktop application running without administrator privileges. No remotely accessible server or arbitrary shell command endpoint. The Tauri window has a restrictive CSP and no general filesystem/shell plugin permissions. Native commands validate clip filenames and canonicalize paths to the recording directory. FFmpeg arguments are passed individually, never interpolated into a command shell. Replay concat manifests contain generated local filenames.
+Please report security problems **privately** through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([private vulnerability reporting](https://github.com/PrithviGhale/REPLAYX/security/advisories/new)). Do not open a public issue for a vulnerability.
 
-Update URLs must use the configured GitHub HTTPS endpoint. The supported Tauri updater verifies signatures with a compile-time public key. Private keys must never be committed. Installation is blocked while capture or save verification is active. Build/signature integration is present, but real release update verification must be tested with publisher-owned keys before distribution.
+Include the REPLAYX version (Settings → About), your Windows version and the steps to reproduce. Never attach recordings, settings files or FFmpeg logs that contain other people's voices, chats or account details.
 
-Remaining alpha hardening: authenticated named-pipe audio transport, sandboxing untrusted media decoders, exhaustive junction/reparse-point races, exhaustive crash/instance-lock validation, and signed Windows binaries. Do not import untrusted files into the recording directory. Windows code signing and Tauri update signing are different mechanisms.
+REPLAYX is maintained by volunteers, so there is no guaranteed response time. Fixes are released as new alpha builds; only the latest release receives fixes.
 
-The app now holds an exclusive per-data-directory lock and assigns the capture child to a kill-on-close Windows job. Geometry-change media is quarantined outside ordinary recovery. These mitigations do not establish protection against malicious software already running as the same user. Media-runtime security alerts must be reviewed without disabling Windows protection.
+## Supported versions
+
+| Version | Supported |
+| --- | --- |
+| Latest 0.2.x alpha release | Yes |
+| Older alpha builds | No: please update |
+
+## Threat model
+
+REPLAYX is an ordinary local desktop application that runs without administrator rights. It has no server, opens no network ports to other machines, and sends nothing anywhere.
+
+- The Tauri window has a restrictive content security policy and no general filesystem or shell permissions. Native commands validate clip names and resolve paths inside the recording folder before any file operation; deletion goes to the Recycle Bin.
+- FFmpeg arguments are passed as separate arguments, never through a shell. Concat manifests contain only names REPLAYX generated.
+- Audio reaches the FFmpeg child over a loopback (127.0.0.1) TCP socket. Software already running as the same Windows user could interfere with it. That is outside this threat model, like any other same-user process.
+- The capture child runs in a kill-on-close Windows job, and each data directory is locked to one REPLAYX instance.
+- Game detection reads only the foreground process name and window title. It never injects into, reads the memory of, or modifies games, and it does not interact with anti-cheat software.
+
+## Updates and signing
+
+- Release binaries are **not Authenticode-signed** yet, so Windows SmartScreen may warn.
+- In-app updates use the Tauri updater, which verifies signatures against a public key compiled into the app. Update signing keys are never committed to this repository.
+- Automatic installation stays disabled until a signing key is configured and a real upgrade has been tested. Until then, update by downloading the installer from the Releases page.
+
+## Known hardening gaps (alpha)
+
+- Unauthenticated loopback audio transport (see above).
+- No sandbox around FFmpeg's decoders. Do not put untrusted media files into the recording folder.
+- No code signing.

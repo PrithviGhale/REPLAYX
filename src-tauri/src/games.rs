@@ -494,7 +494,7 @@ mod tests {
         let c = |p: &str| classify(p, "", &none);
         assert_eq!(
             c(
-                r"C:\Users\Prithvi\AppData\Local\Roblox\Versions\version-f0ea5da9412f4e35\RobloxPlayerBeta.exe"
+                r"C:\Users\Player\AppData\Local\Roblox\Versions\version-f0ea5da9412f4e35\RobloxPlayerBeta.exe"
             ),
             game("Roblox")
         );
@@ -505,7 +505,7 @@ mod tests {
             game("Fortnite")
         );
         for p in [
-            r"C:\Users\Prithvi\AppData\Local\Roblox\Versions\version-f0ea5da9412f4e35\RobloxCrashHandler.exe",
+            r"C:\Users\Player\AppData\Local\Roblox\Versions\version-f0ea5da9412f4e35\RobloxCrashHandler.exe",
             r"C:\Program Files (x86)\Epic Games\Epic Online Services\EpicOnlineServicesUserHelper.exe",
             r"C:\Program Files (x86)\Epic Games\Launcher\Engine\Binaries\Win64\EpicWebHelper.exe",
             r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
