@@ -1,9 +1,11 @@
 # Load a preview page in headless Edge via the DevTools protocol and report
 # exceptions, console errors and whether the main thread still responds.
 param([string]$Url = 'http://127.0.0.1:1430/dev/preview.html?state=replay#audio', [int]$Port = 9333, [int]$Seconds = 8, [string]$Screenshot = '', [int]$Width = 1280, [int]$Height = 820, [string]$Click = '')
-$edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+# Chrome, not Edge: a new Edge profile signs in with the Windows account and
+# syncs the user's extensions and data into it (seen 2026-11-08).
+$edge = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 $profile = Join-Path $env:TEMP "rx-cdp-$([guid]::NewGuid())"
-$p = Start-Process $edge -ArgumentList "--headless=new", "--disable-gpu", "--disable-extensions", "--user-data-dir=$profile", "--remote-debugging-port=$Port", "about:blank" -PassThru
+$p = Start-Process $edge -ArgumentList "--headless=new", "--disable-gpu", "--disable-extensions", "--disable-sync", "--no-first-run", "--user-data-dir=$profile", "--remote-debugging-port=$Port", "about:blank" -PassThru
 try {
     $target = $null
     for ($i = 0; $i -lt 40 -and -not $target; $i++) {
@@ -77,6 +79,6 @@ try {
     }
 } finally {
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-    Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*$profile*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -like "*$profile*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Remove-Item -Recurse -Force $profile -ErrorAction SilentlyContinue
 }
