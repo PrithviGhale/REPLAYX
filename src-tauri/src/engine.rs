@@ -1183,6 +1183,9 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             }
         } else {
             for f in &feeds {
+                if media::tuning().audio_wallclock {
+                    c.args(["-use_wallclock_as_timestamps", "1"]);
+                }
                 c.args([
                     // Let FFmpeg's demuxer thread keep draining PCM while the video
                     // graph and encoder initialise.
@@ -1203,11 +1206,23 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                 ]);
             }
         }
-        let mut graph = format!("[0:v]{filter}[v]");
+        // Video and audio run in separate filter graphs (separate threads):
+        // in one shared graph, waiting for real-time audio stalled the video
+        // chain, which blocked the desktop grabber and repeated frames.
+        let video_graph = format!("[0:v]{filter}[v]");
+        let split = media::tuning().split_graphs;
+        let mut graph = if split {
+            String::new()
+        } else {
+            video_graph.clone()
+        };
         if source_count > 0 {
             for n in 0..source_count {
                 let input = n + 1;
-                graph += &format!(";[{input}:a]aresample=async=1000:first_pts=0");
+                if !graph.is_empty() {
+                    graph += ";";
+                }
+                graph += &format!("[{input}:a]aresample=async=1000:first_pts=0");
                 if s.separate_tracks {
                     graph += &format!(",asplit=2[m{n}][a{n}]")
                 } else {
@@ -1220,7 +1235,15 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             }
             graph += &format!("amix=inputs={source_count}:normalize=1[mix]");
         }
-        c.args(["-filter_complex", &graph, "-map", "[v]"]);
+        if split {
+            c.args(["-filter_complex", &video_graph]);
+            if !graph.is_empty() {
+                c.args(["-filter_complex", &graph]);
+            }
+            c.args(["-map", "[v]"]);
+        } else {
+            c.args(["-filter_complex", &graph, "-map", "[v]"]);
+        }
         if source_count > 0 {
             c.args([
                 "-map",
@@ -1260,11 +1283,11 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             .map(|p| (p.width, p.height))
             .unwrap_or((s.output_width(), s.height));
         media::encoding_args(&mut c, s, &encoder, size, media::converts_bt709(scaler));
+        c.args(["-fps_mode", "cfr", "-max_muxing_queue_size", "512"]);
+        if let Some(d) = media::tuning().interleave_delta {
+            c.args(["-max_interleave_delta", &d.to_string()]);
+        }
         c.args([
-            "-fps_mode",
-            "cfr",
-            "-max_muxing_queue_size",
-            "512",
             "-f",
             "segment",
             "-segment_time",

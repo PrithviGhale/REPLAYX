@@ -41,6 +41,15 @@ CONFIGS = {
     "cpu-scale-nvenc": (["encoder=h264_nvenc", "gpu=0"], ""),
     # Automatic path selection with and without raised capture priority.
     "smooth": (["scale_policy=smooth"], ""),
+    "wallclock": ([], "audio_wallclock=1"),
+    "split": ([], "split_graphs=1"),
+    "la20": ([], "nvenc_lookahead=20"),
+    "split-la20": ([], "split_graphs=1,nvenc_lookahead=20"),
+    "split-wallclock": ([], "split_graphs=1,audio_wallclock=1"),
+    "split-il0": ([], "split_graphs=1,interleave_delta=0"),
+    "vqueue64": ([], "video_queue=64"),
+    "split-vqueue": ([], "split_graphs=1,video_queue=64"),
+    "interleave0": ([], "interleave_delta=0"),
     "smooth-os2": (["scale_policy=smooth"], "oversample=2"),
     "smooth-os4": (["scale_policy=smooth"], "oversample=4"),
     "exact": (["scale_policy=exact"], ""),
@@ -97,7 +106,7 @@ def run(label, args, fps, height, mode, out):
     if cfg:
         overrides, tuning = cfg
         env = dict(os.environ, REPLAYX_VIDEO_TUNING=tuning)
-        cmd = [CLI, "capture-test", str(args.capture), "silent", f"fps={fps}", f"height={height}", f"mode={mode}",
+        cmd = [CLI, "capture-test", str(args.capture), args.audio, f"fps={fps}", f"height={height}", f"mode={mode}",
                f"width={args.width}", *([f"bitrate={args.bitrate}"] if args.bitrate else []), *overrides]
         subprocess.run(cmd, cwd=out, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
     else:
@@ -139,6 +148,7 @@ def main():
     ap.add_argument("--mode", default="stretch")
     ap.add_argument("--bitrate", type=int, default=0, help="0 = Balanced preset")
     ap.add_argument("--width", type=int, default=1920)
+    ap.add_argument("--audio", default="silent", help="silent or system (loopback; never the microphone)")
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--cpu-us", type=int, default=0)

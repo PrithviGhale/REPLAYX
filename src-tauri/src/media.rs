@@ -708,6 +708,16 @@ pub struct Tuning {
     /// Capture at this multiple of the output rate and keep the frame nearest
     /// each output slot (1 = capture at the output rate).
     pub oversample: u32,
+    /// Audio input timestamps from arrival (wall clock) instead of sample count.
+    pub audio_wallclock: bool,
+    /// Muxer interleaving window in microseconds (None = FFmpeg default).
+    pub interleave_delta: Option<u64>,
+    /// Separate filter graphs (threads) for video and audio.
+    pub split_graphs: bool,
+    /// Frames queued between the desktop grabber and the video filter graph.
+    pub video_queue: Option<u32>,
+    /// NVENC rate-control lookahead in frames.
+    pub nvenc_lookahead: Option<u32>,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -719,6 +729,11 @@ impl Default for Tuning {
             cpu_priority: false,
             gpu_priority: true,
             oversample: 1,
+            audio_wallclock: false,
+            interleave_delta: None,
+            split_graphs: true,
+            video_queue: None,
+            nvenc_lookahead: Some(20),
         }
     }
 }
@@ -734,6 +749,11 @@ pub fn tuning() -> Tuning {
                 "cpu_priority" => t.cpu_priority = v != "0",
                 "gpu_priority" => t.gpu_priority = v != "0",
                 "oversample" => t.oversample = v.parse::<u32>().unwrap_or(1).clamp(1, 8),
+                "audio_wallclock" => t.audio_wallclock = v != "0",
+                "interleave_delta" => t.interleave_delta = v.parse().ok(),
+                "split_graphs" => t.split_graphs = v != "0",
+                "video_queue" => t.video_queue = v.parse().ok(),
+                "nvenc_lookahead" => t.nvenc_lookahead = v.parse().ok(),
                 _ => {}
             }
         }
@@ -743,6 +763,7 @@ pub fn tuning() -> Tuning {
 /// Quick Sync VPP converts RGB to limited-range BT.709 YUV (the matching tags
 /// are written by `encoding_args`), instead of a driver-chosen matrix.
 const QSV_709: &str = ":out_color_matrix=bt709:out_range=1";
+const BGRA_709: &str = "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709";
 /// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
 pub fn converts_bt709(scaler: Scaler) -> bool {
     !matches!(scaler, Scaler::D3d11 | Scaler::Cuda)
@@ -759,9 +780,12 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         .map(|p| format!(",{p}"))
         .unwrap_or_default();
     match scaler {
-        Scaler::D3d11 => format!("setsar={}/{}", plan.sar.0, plan.sar.1),
+        // BGRA frames go to the encoder, which converts them with BT.709 limited
+        // range: say so on the frames so the stream and container are tagged
+        // correctly (they were tagged full-range RGB).
+        Scaler::D3d11 => format!("setsar={}/{},{BGRA_709}", plan.sar.0, plan.sar.1),
         Scaler::Cuda => format!(
-            "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1"
+            "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1,{BGRA_709}"
         ),
         Scaler::QsvZeroCopy => {
             format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},setsar=1")
@@ -825,6 +849,9 @@ pub fn video_input(
     if s.capture == "desktop-duplication" {
         let plan = plan.context("Missing validated display geometry")?;
         let rect = plan.source;
+        if let Some(q) = tuning().video_queue {
+            c.args(["-thread_queue_size", &q.to_string()]);
+        }
         c.args([
             "-f",
             "lavfi",
@@ -863,10 +890,13 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
     if s.preset == "custom" {
         return s.bitrate_mbps;
     }
+    // Matched to what NVIDIA's own recorder produced on the same laptop
+    // (about 16.5 Mb/s for 1440x1080 at 60 fps); NVENC lookahead and adaptive
+    // quantization spend those bits better than the previous 28 Mb/s did.
     let base = match s.preset.as_str() {
-        "performance" => 16.0,
-        "quality" => 45.0,
-        _ => 28.0,
+        "performance" => 10.0,
+        "quality" => 25.0,
+        _ => 16.0,
     };
     let pixels = (width as f64 * height as f64) / (1920.0 * 1080.0);
     let rate = (s.fps as f64 / 60.0).powf(0.75);
@@ -913,15 +943,21 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         c.args([
             "-preset",
             match s.preset.as_str() {
-                "performance" => "p2",
-                "quality" => "p5",
-                _ => "p4",
+                "performance" => "p3",
+                "quality" => "p6",
+                _ => "p5",
             },
             "-tune",
-            if s.preset == "quality" { "hq" } else { "ll" },
+            "hq",
+            "-spatial-aq",
+            "1",
         ]);
-        if s.preset == "quality" {
-            c.args(["-spatial-aq", "1"]);
+        // Rate-control lookahead: better bit allocation, and the encoder holds
+        // ~1/3 s of video, so video never runs ahead of the (deliberately
+        // held-back) audio. Ahead by more than FFmpeg's scheduling tolerance,
+        // the desktop grabber was paused and 57% of frames repeated.
+        if let Some(n) = tuning().nvenc_lookahead {
+            c.args(["-rc-lookahead", &n.to_string()]);
         }
     }
     if ffmpeg_encoder == "h264_amf" {
@@ -955,6 +991,15 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
                 "quality" => "slow",
                 _ => "medium",
             },
+        ]);
+    }
+    if !bt709 && ffmpeg_encoder == "h264_nvenc" {
+        // NVENC converts BGRA input with BT.709 limited range (measured: red
+        // decodes to Y 62, Cb 103, Cr 239) but tags it full-range "GBR".
+        // Correct the stream's colour description.
+        c.args([
+            "-bsf:v",
+            "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
         ]);
     }
     if bt709 {
@@ -1159,11 +1204,8 @@ mod tests {
         assert!(Scaler::D3d11.supports(&same));
         let fit = plan(full(2560, 1600), 1920, 1080, "fit").unwrap();
         assert!(!Scaler::Cuda.supports(&fit) && Scaler::Cpu.supports(&fit));
-        assert_eq!(video_filter(&same, Scaler::D3d11), "setsar=1/1");
-        assert_eq!(
-            video_filter(&stretched.anamorphic(), Scaler::D3d11),
-            "setsar=4/3"
-        );
+        assert!(video_filter(&same, Scaler::D3d11).starts_with("setsar=1/1,setparams=range=tv"));
+        assert!(video_filter(&stretched.anamorphic(), Scaler::D3d11).starts_with("setsar=4/3,"));
         assert!(video_filter(&stretched, Scaler::Cuda).contains("scale_cuda=w=1920:h=1080"));
         assert!(!converts_bt709(Scaler::Cuda) && converts_bt709(Scaler::QsvZeroCopy));
     }
@@ -1249,7 +1291,7 @@ mod tests {
         let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
         assert!(pair("-c:v", "h264_qsv") && pair("-low_power", "1"));
         assert!(pair("-colorspace", "bt709") && pair("-color_range", "tv"));
-        assert!(pair("-b:v", "28M") && pair("-maxrate", "42000k"));
+        assert!(pair("-b:v", "16M") && pair("-maxrate", "24000k"));
         let mut c = command(Path::new("ffmpeg"));
         encoding_args(
             &mut c,
@@ -1274,12 +1316,12 @@ mod tests {
                 h,
             )
         };
-        assert_eq!(at("performance", 60, 1920, 1080), 16);
-        assert_eq!(at("balanced", 60, 1920, 1080), 28);
-        assert_eq!(at("quality", 60, 1920, 1080), 45);
-        assert!(at("balanced", 120, 1920, 1080) > 28 && at("balanced", 120, 1920, 1080) < 56);
-        assert!(at("balanced", 60, 1280, 720) < 16);
-        assert!(at("quality", 60, 3840, 2160) > 100);
+        assert_eq!(at("performance", 60, 1920, 1080), 10);
+        assert_eq!(at("balanced", 60, 1920, 1080), 16);
+        assert_eq!(at("quality", 60, 1920, 1080), 25);
+        assert!(at("balanced", 120, 1920, 1080) > 16 && at("balanced", 120, 1920, 1080) < 32);
+        assert!(at("balanced", 60, 1280, 720) < 10);
+        assert!(at("quality", 60, 3840, 2160) > 60);
         let custom = Settings {
             preset: "custom".into(),
             bitrate_mbps: 33,

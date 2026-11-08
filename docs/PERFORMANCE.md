@@ -23,6 +23,19 @@
 
 User recording before the fix (Fortnite 1440×1080 → 1920×1080, CUDA copy path): 76% repeated frames, 14 new pictures per second median, freezes up to 2.9 s (`scripts/clip-smoothness.py`). Remaining frame-to-frame variation in Smooth recordings follows the game's own frame pacing: at about 170–190 FPS, a 60 fps recording mixes 2- and 3-game-frame steps.
 
+**Audio starvation (the stutter users saw), measured** with system-audio loopback and the game proxy at about 180 FPS:
+
+| Pipeline | Repeated frames |
+| --- | --- |
+| Silent (all earlier smoothness tests) | 0.0–0.6% |
+| With audio, one shared filter graph (0.2.1-alpha.3 before this fix) | 57% |
+| Separate video/audio graphs | 33% |
+| NVENC lookahead only | 58% |
+| Audio timestamps from wall clock / muxer interleave 0 | 55–56% |
+| **Separate graphs + NVENC lookahead 20 (default)** | **0.0–0.28%** |
+
+During real Roblox play, Desktop Duplication delivered 133 new frames/s, WGC window capture 122 and WGC monitor 124. The app pipeline with audio kept 19 of them per second; silent it kept 60. A GeForce recording of Fortnite on the same laptop: 1440×1080, 16.5 Mb/s, about 30 new pictures per second (43% repeated).
+
 **Real game.** Roblox, same place and camera, Roblox's own frame-rate display (Shift+F5): REPLAYX closed, replay at 60 fps, replay at 120 fps, recording at 1080p60, saving a replay while playing. Results will be recorded here as reported, labelled as user measurements.
 
 ## 0.2.1-alpha.2 — capture start
