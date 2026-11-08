@@ -19,6 +19,10 @@ export function markStartRequest(recording: boolean) {
   startRequest = { at: performance.now(), recording };
 }
 
+let firstPollDone: () => void = () => undefined;
+/** Resolves after the first status answer from the engine (or its failure). */
+export const firstPoll = new Promise<void>(resolve => { firstPollDone = resolve; });
+
 async function poll() {
   try {
     const next = await api.status();
@@ -35,6 +39,7 @@ async function poll() {
   } catch (e) {
     pollError = String(e);
   }
+  firstPollDone();
   listeners.forEach(l => l());
   // While REPLAYX is hidden (a game in front, minimised, in the tray) nothing is
   // drawn, so poll every 2 s: the window should cost the game nothing.

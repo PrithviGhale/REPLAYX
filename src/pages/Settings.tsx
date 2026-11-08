@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
+import { Compass, Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
+import { startTour } from '../Tour';
 import { api, type Settings, type UpdateInfo } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
@@ -67,7 +68,7 @@ export function SettingsPage() {
 
   return (
     <Section>
-      <div className="tabs" role="tablist">
+      <div className="tabs" role="tablist" data-tour="settings-tabs">
         {tabs.map(t => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}><t.icon size={15} />{t.label}</button>)}
       </div>
 
@@ -82,7 +83,7 @@ export function SettingsPage() {
             </Field>
             <p className="muted small">Saved as Matroska (.mkv), which survives crashes and keeps every audio track. Export any clip to MP4 from the library.</p>
           </Card>
-          <Card title="Game detection" subtitle="REPLAYX looks at which program is in front (process name only; nothing is read from games).">
+          <Card tour="game-detection" title="Game detection" subtitle="REPLAYX looks at which program is in front (process name only; nothing is read from games).">
             <Toggle label="Organize clips by game" checked={draft.organize_by_game} disabled={active} onChange={v => patch({ organize_by_game: v })}
               description="Saves into a folder per game, e.g. Fortnite\Fortnite_2026-11-07_15-30-22.mkv. Desktop activity goes to Desktop. Existing clips are not moved." />
             <Toggle label="Show a notice when a game is detected" checked={draft.game_notifications} disabled={active} onChange={v => patch({ game_notifications: v })}
@@ -104,11 +105,14 @@ export function SettingsPage() {
             </div>
           </Card>
           <OverlayCard />
-          <Card title="Startup and window">
+          <Card tour="tray" title="Startup and window">
             <Toggle label="Start with Windows" checked={draft.launch_at_startup} disabled={active} onChange={v => patch({ launch_at_startup: v })}
               description="Opens REPLAYX in the system tray when you sign in. Capture never starts on its own." />
             <Toggle label="Minimize to tray when closing" checked={draft.close_to_tray} disabled={active} onChange={v => patch({ close_to_tray: v })}
               description="Closing the window keeps REPLAYX running in the tray: Instant Replay, recording and hotkeys keep working. Quit from the tray menu; REPLAYX asks first if a recording or save is in progress." />
+          </Card>
+          <Card title="Getting started" subtitle="A one-minute guided tour of the main features. It only shows things; it never starts recording.">
+            <Button icon={Compass} onClick={startTour}>Replay tutorial</Button>
           </Card>
         </>
       )}
@@ -208,7 +212,7 @@ function OverlayCard() {
   ].filter(Boolean);
   const bottom = o.position.startsWith('bottom');
   return (
-    <Card title="Status overlay" subtitle="Small icons in a corner of your screen, over every app, game and the desktop: Instant Replay, microphone, and a red dot while recording. Click-through, and never in your clips.">
+    <Card tour="overlay" title="Status overlay" subtitle="Small icons in a corner of your screen, over every app, game and the desktop: Instant Replay, microphone, and a red dot while recording. Click-through, and never in your clips.">
       <Toggle label="Show the status overlay" checked={o.enabled} disabled={active} onChange={v => set({ enabled: v })}
         description="Visible to you while you record, invisible in the saved video. Windows hides desktop windows behind exclusive full-screen games." />
       <div className={`ov-settings ${o.enabled ? '' : 'off'}`}>

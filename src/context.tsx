@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText, native, previewSettings, type Caps, type Clip, type Settings } from './api';
-import { refreshNow } from './store';
+import { firstPoll, refreshNow } from './store';
+import { splashDone, splashStep } from './splash';
 import { listen } from '@tauri-apps/api/event';
 import { applySaveEvent, type SaveEvent } from './save-events';
 import { removeClip, upsertClip } from './library';
@@ -87,7 +88,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!native) return;
-    api.settings().then(s => { setSaved(s); setDraft(s); setLoaded(true); }).catch(e => toast('error', errorText(e)));
+    // Startup: each splash step is shown only while it is really happening.
+    splashStep('Loading settings');
+    api.settings()
+      .then(s => { setSaved(s); setDraft(s); setLoaded(true); splashStep('Checking recording engine'); return Promise.race([firstPoll, new Promise(r => window.setTimeout(r, 8000))]); })
+      .catch(e => toast('error', errorText(e)))
+      .finally(() => splashDone());
     refreshCaps().catch(e => toast('error', errorText(e)));
     refreshClips().catch(e => toast('error', errorText(e)));
   }, [refreshCaps, refreshClips, toast]);

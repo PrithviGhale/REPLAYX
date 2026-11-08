@@ -130,7 +130,7 @@ export function CapturePage() {
         )}
       </Card>
 
-      <Card title="Output" subtitle="The video size is independent of your display: 1920 × 1080 always saves a 1920 × 1080 file.">
+      <Card tour="video-output" title="Output" subtitle="The video size is independent of your display: 1920 × 1080 always saves a 1920 × 1080 file.">
         <dl className="size-flow">
           <div><dt>Display (source)</dt><dd>{src.width} × {src.height} <em>{aspect(src.width, src.height)}</em></dd></div>
           <div><dt>Saved video</dt><dd>{p.width} × {p.height} <em>{aspect(p.width, p.height)}</em></dd></div>
@@ -193,7 +193,7 @@ export function CapturePage() {
         <p className="muted small">Stretched 4:3 games (for example 1440×1080 shown full-screen) change the display mode itself. REPLAYX detects the change, restarts capture on the new mode and validates the encoded size, so the desktop can't leak into the frame.</p>
       </Card>
 
-      <Card title="Encoding">
+      <Card tour="video-quality" title="Encoding">
         <div className="grid-2 tight">
           <Field label="Encoder" hint="Automatic prefers fixed-function encoders (Intel low-power Quick Sync, NVIDIA NVENC) so the GPU shader cores stay free for the game.">
             <select value={draft.encoder} disabled={active} onChange={e => patch({ encoder: e.target.value })}>

@@ -15,6 +15,7 @@ import { ClipsPage } from './pages/Clips';
 import { PerformancePage } from './pages/Performance';
 import { SettingsPage } from './pages/Settings';
 import { QuitPrompt } from './QuitPrompt';
+import { Tour } from './Tour';
 
 export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'performance' | 'settings';
 const NAV: { group: string; items: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] }[] = [
@@ -58,11 +59,11 @@ function CaptureDock() {
   if (recovering) return <div className="dock"><Button variant="danger" icon={X} disabled={!!busy} onClick={() => go('stop_all')}>Cancel recovery</Button></div>;
   return (
     <div className="dock">
-      <ReplaySwitch />
-      <Button variant="primary" icon={Save} disabled={!!busy || !native || !s.replay || s.buffer <= 0}
+      <span data-tour="replay-switch"><ReplaySwitch /></span>
+      <Button variant="primary" icon={Save} data-tour="save-replay" disabled={!!busy || !native || !s.replay || s.buffer <= 0}
         title={`Save the last ${duration(draft.replay_seconds)} (${hotkeyLabel(draft.replay_hotkey)})`}
         onClick={async () => { const r = await go('save_replay'); const m = saved(r); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>
-      <Button variant="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native} aria-pressed={rec.mode !== 'record'}
+      <Button variant="record" data-tour="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native} aria-pressed={rec.mode !== 'record'}
         title={rec.mode === 'cancel' ? 'Cancel: capture is still starting, nothing has been recorded' : `${rec.mode === 'stop' ? 'Stop and save' : 'Start'} recording (${hotkeyLabel(draft.recording_hotkey)})`}
         className={rec.mode !== 'record' ? 'on' : ''}
         onClick={rec.onClick}>
@@ -130,7 +131,7 @@ export function App() {
             <div className="nav-group" key={g.group}>
               <div className="nav-title">{g.group}</div>
               {g.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>
+                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>
                   <Icon size={17} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
                 </button>
               ))}
@@ -168,6 +169,7 @@ export function App() {
       </div>
       <Toasts />
       <QuitPrompt onNavigate={go} />
+      <Tour go={setPage} />
     </div>
   );
 }

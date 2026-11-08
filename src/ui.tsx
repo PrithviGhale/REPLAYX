@@ -1,11 +1,13 @@
 import React, { Component, useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
-export function Card({ title, actions, children, className = '', subtitle }: {
+export function Card({ title, actions, children, className = '', subtitle, tour }: {
   title?: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string;
+  /** Anchor for the first-run tour (data-tour). */
+  tour?: string;
 }) {
   return (
-    <section className={`card ${className}`}>
+    <section className={`card ${className}`} data-tour={tour}>
       {(title || actions) && (
         <header className="card-head">
           <div>{title && <h2>{title}</h2>}{subtitle && <p className="card-sub">{subtitle}</p>}</div>
