@@ -92,6 +92,7 @@ export const api = {
   audioDevices: () => call<Device[]>('audio_devices'),
   micMonitorStart: (source: AudioSource, output: string) => call<void>('mic_monitor_start', { source, output }),
   micMonitorStop: () => call<void>('mic_monitor_stop'),
+  micMonitorSet: (volume: number, boostDb: number) => call<void>('mic_monitor_set', { volume, boostDb }),
   openFolder: () => call<void>('open_folder'),
   checkUpdate: () => call<UpdateInfo>('check_update'),
   installUpdate: () => call<void>('install_update'),

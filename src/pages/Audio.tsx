@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AppWindow, Mic, Plus, RefreshCw, Speaker, Trash2, Volume2, VolumeX, Waves } from 'lucide-react';
+import { AppWindow, Plus, RefreshCw, Speaker, Trash2, Volume2, VolumeX, Waves } from 'lucide-react';
 import { api, errorText, native, type AudioKind, type AudioSource, type Session } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
@@ -85,11 +85,13 @@ export function AudioPage() {
       {!liveMix && sources.length > 0 && <div className="banner info">Save your source changes to adjust volume live during capture.</div>}
 
       <Card title="Sources" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing devices', refreshCaps)}>Devices</Button>}>
-        {sources.length === 0 && <Empty icon={Waves} title="No audio sources">Add your system sound, a microphone, or individual apps.</Empty>}
+        {sources.every(s => s.kind === 'microphone') && <Empty icon={Waves} title="No other audio sources">Add your system sound or individual apps such as the game and Discord.</Empty>}
         <ul className="sources">
           {sources.map((a, i) => {
             const fi = feedIndex(sources, i);
             const thisTrack = a.enabled && draft.separate_tracks ? ++track : null;
+            // The microphone has its own card above (it is always present).
+            if (a.kind === 'microphone') return null;
             const meterOn = active && a.enabled && !a.muted && liveMix;
             return (
               <li key={i} className={`source ${a.enabled ? '' : 'off'}`}>
@@ -104,9 +106,9 @@ export function AudioPage() {
                   <IconButton label="Remove source" icon={Trash2} disabled={active} onClick={() => patch({ audio: sources.filter((_, n) => n !== i) })} />
                 </div>
                 <div className="source-body">
-                  {a.kind === 'system' || a.kind === 'microphone' ? (
+                  {a.kind === 'system' ? (
                     <select aria-label="Device" value={a.device} disabled={active} onChange={e => update(i, { device: e.target.value })}>
-                      <option value="">Windows default {a.kind === 'microphone' ? 'microphone' : 'output'}</option>
+                      <option value="">Windows default output</option>
                       {devices(a.kind).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   ) : (
@@ -122,7 +124,7 @@ export function AudioPage() {
                       onChange={e => setVolume(i, Number(e.target.value) / 100, a.muted)} />
                     <span className="range-value">{Math.round(a.volume * 100)}%</span>
                     <Meter peak={meterOn ? peaks[fi] ?? 0 : 0} active={meterOn} />
-                    <Button size="sm" variant="ghost" disabled={active || (a.kind !== 'system' && a.kind !== 'microphone' && !a.pid)} onClick={() => setTesting(a)}>Test</Button>
+                    <Button size="sm" variant="ghost" disabled={active || (a.kind !== 'system' && !a.pid)} onClick={() => setTesting(a)}>Test</Button>
                   </div>
                   {active && a.enabled && liveMix && (stats.disc[fi] ?? 0) > 0 && <small className="warn-text">{stats.disc[fi]} audio discontinuities this session</small>}
                 </div>
@@ -132,11 +134,10 @@ export function AudioPage() {
         </ul>
         <div className="add-row">
           <Button icon={Speaker} disabled={active || sources.length >= 5} onClick={() => add('system')}>System output</Button>
-          <Button icon={Mic} disabled={active || sources.length >= 5} onClick={() => add('microphone')}>Microphone</Button>
           <Button icon={AppWindow} disabled={active || sources.length >= 5 || !native} onClick={() => setPicker({ mode: 'application', index: null })}>Application…</Button>
           <Button icon={Plus} variant="ghost" disabled={active || sources.length >= 5 || !native} onClick={() => setPicker({ mode: 'exclude', index: null })}>Everything except an app…</Button>
         </div>
-        <p className="muted small">Up to five sources. Typical setup for games with voice chat: the game app, Discord, and your microphone — with System output off.</p>
+        <p className="muted small">Up to five sources including the microphone. Typical setup for games with voice chat: the game app and Discord, with System output off.</p>
       </Card>
 
       {picker && <AppPicker mode={picker.mode} onClose={() => setPicker(null)} onPick={s => {

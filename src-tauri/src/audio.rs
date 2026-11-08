@@ -524,6 +524,17 @@ pub fn monitor_gain(samples: &mut [f32], boost_db: f32) {
         };
     }
 }
+/// Linear monitoring gain for a volume (0-2) and boost (dB).
+pub fn monitor_level(volume: f32, boost_db: f32) -> f32 {
+    volume.clamp(0.0, 2.0) * 10f32.powf(boost_db.clamp(0.0, 24.0) / 20.0)
+}
+/// Whether listening would leak into capture: an enabled System or
+/// "everything except" source records what plays on the speakers.
+pub fn monitor_leaks(sources: &[AudioSource]) -> bool {
+    sources
+        .iter()
+        .any(|a| a.enabled && (a.kind == "system" || a.kind == "exclude"))
+}
 /// Longest a monitoring session runs before it stops by itself.
 pub const MONITOR_LIMIT: Duration = Duration::from_secs(600);
 /// "Hear yourself": play `source` (normally the microphone) on an output
@@ -534,11 +545,16 @@ pub fn monitor(
     source: AudioSource,
     output: &str,
     stop: &AtomicBool,
+    gain: &AtomicU32,
     mut on_level: impl FnMut(f32),
 ) -> Result<()> {
     use std::io::Read;
-    let boost = source.boost_db;
-    let feed = spawn(source)?;
+    // Volume and boost come from `gain` (changeable while listening).
+    let feed = spawn(AudioSource {
+        volume: 1.0,
+        muted: false,
+        ..source
+    })?;
     let mut socket = std::net::TcpStream::connect(feed.url.trim_start_matches("tcp://"))?;
     socket.set_read_timeout(Some(Duration::from_millis(10)))?;
     wasapi::initialize_mta().ok()?;
@@ -593,7 +609,11 @@ pub fn monitor(
                 .map(|b| f32::from_le_bytes(*b))
                 .collect();
             pending.drain(..whole);
-            monitor_gain(&mut samples, boost);
+            let g = f32::from_bits(gain.load(Ordering::Relaxed));
+            for s in samples.iter_mut() {
+                *s *= g;
+            }
+            monitor_gain(&mut samples, 0.0);
             peak = samples.iter().fold(peak, |p, v| p.max(v.abs()));
             queue.extend(samples.iter().flat_map(|v| v.to_le_bytes()));
             if queue.len() > max_queue {

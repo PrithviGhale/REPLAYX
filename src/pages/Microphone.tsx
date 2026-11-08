@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { Headphones, Mic, MicOff, Play, RotateCcw, Square } from 'lucide-react';
+import { ChevronDown, Headphones, Mic, MicOff, RotateCcw, Square } from 'lucide-react';
 import { api, errorText, native, type AudioSource, type TestCapture } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
 import { db } from '../format';
-import { Badge, Button, Card, Empty, Field, IconButton, Meter, Modal, Toggle } from '../ui';
+import { Badge, Button, Card, IconButton, Meter, Modal } from '../ui';
 import { feedIndex } from './shared';
 import { identity, micDefaults, micState } from '../audio';
 
@@ -72,145 +72,128 @@ export function SourceTest({ source, onClose }: { source: AudioSource; onClose: 
 }
 
 const PROCESSING: { key: 'high_pass' | 'noise_suppression' | 'noise_gate' | 'compressor'; label: string; text: string }[] = [
-  { key: 'high_pass', label: 'Remove rumble (high-pass)', text: 'Cuts sound below about 80 Hz: desk bumps, fan rumble and breath pops. Voices are unaffected. Recommended.' },
+  { key: 'high_pass', label: 'Remove rumble', text: 'Cuts sound below about 80 Hz: desk bumps, fan rumble and breath pops. Voices are unaffected. Recommended.' },
   { key: 'noise_suppression', label: 'Noise suppression', text: 'Light reduction of steady background noise such as fans or hum. Kept gentle so speech stays natural.' },
   { key: 'noise_gate', label: 'Quiet between words', text: 'Lowers background noise between sentences by up to about 10 dB (a soft expander, not a hard cut-off).' },
   { key: 'compressor', label: 'Even out volume', text: 'Makes quiet and loud speech closer in level. Useful if you sometimes shout.' },
 ];
 
-/** Microphone setup: device, availability, track, volume, boost, processing and test. */
+/** Microphone: always present (no "add" step). Device, record on/off, live
+ * volume and mute, a Discord-style live test, and boost/processing tucked
+ * away under Advanced. */
 export function MicrophoneCard() {
   const { draft, saved, patch, caps, setMix } = useApp();
   const active = useStatus(activeOf);
   const peaks = useStatus(x => x.audio_peaks);
-  const [testing, setTesting] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
   const sources = draft.audio;
   const index = sources.findIndex(s => s.kind === 'microphone');
   const mic = index >= 0 ? sources[index] : null;
   const inputs = (caps?.devices ?? []).filter(d => d.kind === 'microphone');
+  const outputs = (caps?.devices ?? []).filter(d => d.kind === 'system');
   // Volume/mute go to the running recorder only when the saved source list matches.
   const live = !!mic && saved.audio.length === sources.length && saved.audio.every((a, i) => identity(a) === identity(sources[i]));
   const fi = index >= 0 ? feedIndex(sources, index) : -1;
-  const peak = active && live && mic?.enabled && !mic.muted ? peaks[fi] ?? 0 : 0;
+  const capturePeak = active && live && mic?.enabled && !mic.muted ? peaks[fi] ?? 0 : 0;
   const state = micState({ mic, capturing: active && live, deviceKnown: !mic?.device || inputs.some(d => d.id === mic.device) });
-  const update = (p: Partial<AudioSource>) => patch({ audio: sources.map((a, n) => (n === index ? { ...a, ...p } : a)) });
   const track = mic && mic.enabled && draft.separate_tracks ? sources.filter(s => s.enabled).indexOf(mic) + 2 : null;
-  if (!mic) return <AddMicrophone />;
-  return (
-    <Card title="Microphone" subtitle="Your voice on its own track. Processing is applied to the recording only; Windows' microphone level is never changed."
-      actions={<Badge tone={state.tone} dot>{state.label}</Badge>}>
-      <div className="mic-grid">
-        <Field label="Recording microphone">
-          <select value={mic.device} disabled={active} onChange={e => update({ device: e.target.value })}>
-            <option value="">Windows default microphone</option>
-            {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            {mic.device && !inputs.some(d => d.id === mic.device) && <option value={mic.device}>Disconnected microphone</option>}
-          </select>
-        </Field>
-        <Toggle label="Record microphone" checked={mic.enabled} disabled={active} onChange={v => update({ enabled: v })}
-          description={track ? `Track ${track} in your clips, plus the mix on track 1.` : draft.separate_tracks ? 'Off: your voice is not recorded.' : 'Mixed into the single audio track.'} />
-      </div>
-      <div className="mix-row">
-        <IconButton label={mic.muted ? 'Unmute microphone' : 'Mute microphone'} icon={mic.muted ? MicOff : Mic} className={mic.muted ? 'muted' : ''}
-          onClick={() => (live ? setMix(index, mic.volume, !mic.muted) : update({ muted: !mic.muted }))} />
-        <input type="range" min={0} max={200} step={1} value={Math.round(mic.volume * 100)} aria-label="Microphone volume"
-          onChange={e => (live ? setMix(index, Number(e.target.value) / 100, mic.muted) : update({ volume: Number(e.target.value) / 100 }))} />
-        <span className="range-value">{Math.round(mic.volume * 100)}%</span>
-        <Meter peak={peak} active={peak > 0} />
-      </div>
-      {peak >= 0.98 && <div className="banner warn small">Peaks are reaching the limiter. Lower the boost or volume if your voice sounds squashed.</div>}
-      <div className="mic-boost"><Field label={`Boost · +${mic.boost_db} dB`} hint="Makes a quiet microphone louder. A limiter always follows the boost, so loud moments are held below full scale instead of clipping.">
-        <input type="range" min={0} max={24} step={1} value={mic.boost_db} disabled={active} aria-label="Microphone boost"
-          onChange={e => update({ boost_db: Number(e.target.value) })} />
-      </Field></div>
-      <div className="processing">
-        {PROCESSING.map(p => (
-          <Toggle key={p.key} label={p.label} checked={mic[p.key]} disabled={active} onChange={v => update({ [p.key]: v } as Partial<AudioSource>)} description={p.text} />
-        ))}
-      </div>
-      <div className="mic-actions">
-        <Button icon={Play} disabled={active || !native} onClick={() => setTesting(true)}>Record a test</Button>
-        <Button variant="ghost" icon={RotateCcw} disabled={active} onClick={() => update({ ...micDefaults(mic.device), name: mic.name })}>Reset to defaults</Button>
-        {active && <span className="muted small">Stop capture to change the device, boost or processing (volume and mute work live).</span>}
-      </div>
-      <HearYourself source={mic} />
-      {testing && <SourceTest source={mic} onClose={() => setTesting(false)} />}
-    </Card>
-  );
-}
 
-/** No microphone source yet: list what Windows reports (updated live when a
- * device is plugged in) and add the chosen one in one click. */
-function AddMicrophone() {
-  const { draft, patch, caps } = useApp();
-  const active = useStatus(activeOf);
-  const inputs = (caps?.devices ?? []).filter(d => d.kind === 'microphone');
-  const [choice, setChoice] = useState('');
-  const full = draft.audio.length >= 5;
-  return (
-    <Card title="Microphone" actions={<Badge tone={inputs.length ? 'ok' : 'warn'} dot>{inputs.length ? `${inputs.length} found` : 'None found'}</Badge>}>
-      {inputs.length === 0 ? (
-        <Empty icon={MicOff} title="No microphone found">Plug in your microphone or headset. REPLAYX notices it within a couple of seconds; no need to refresh. If it is plugged in, check Windows Settings → Privacy &amp; security → Microphone.</Empty>
-      ) : (
-        <>
-          <p className="muted small">Your microphone is not recorded yet. Choose it to record your voice on its own track. Nothing is recorded until you start Instant Replay or a recording.</p>
-          <div className="add-mic">
-            <Field label="Microphone">
-              <select value={choice} onChange={e => setChoice(e.target.value)}>
-                <option value="">Windows default microphone</option>
-                {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </Field>
-            <Button variant="primary" icon={Mic} disabled={active || full} onClick={() => patch({ audio: [...draft.audio, micDefaults(choice)] })}>Use this microphone</Button>
-          </div>
-          {active && <div className="banner info small">Turn off Instant Replay and recording first; then add the microphone and save.</div>}
-          {full && <div className="banner warn small">Five audio sources is the maximum. Remove one in Sources below.</div>}
-        </>
-      )}
-    </Card>
-  );
-}
-
-/** "Hear yourself": the microphone played live on an output, with its volume
- * and boost. Ends on Stop, when leaving the page, or after 10 minutes. */
-function HearYourself({ source }: { source: AudioSource }) {
-  const { caps } = useApp();
-  const active = useStatus(activeOf);
-  const outputs = (caps?.devices ?? []).filter(d => d.kind === 'system');
+  // Live test ("hear yourself"): nothing is recorded.
+  const [testing, setTesting] = useState(false);
+  const [testPeak, setTestPeak] = useState(0);
   const [output, setOutput] = useState('');
-  const [on, setOn] = useState(false);
-  const [peak, setPeak] = useState(0);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!native) return;
-    const a = listen<number>('mic-monitor-level', e => setPeak(e.payload));
-    const b = listen<{ error: string | null }>('mic-monitor-ended', e => { setOn(false); setPeak(0); if (e.payload.error) setError(e.payload.error); });
+    const a = listen<number>('mic-monitor-level', e => setTestPeak(e.payload));
+    const b = listen<{ error: string | null }>('mic-monitor-ended', e => { setTesting(false); setTestPeak(0); if (e.payload.error) setError(e.payload.error); });
     return () => { void a.then(u => u()); void b.then(u => u()); void api.micMonitorStop().catch(() => undefined); };
   }, []);
-  const start = async () => {
-    setError(null);
-    try { await api.micMonitorStart({ ...source, enabled: true, muted: false }, output); setOn(true); } catch (e) { setError(errorText(e)); }
+  // Hearing yourself while System audio is captured would put it in the clip.
+  const leaks = active && saved.audio.some(a => a.enabled && (a.kind === 'system' || a.kind === 'exclude'));
+
+  if (!mic) {
+    return (
+      <Card title="Microphone">
+        <div className="banner warn small">Five other audio sources are set up, so there is no room for the microphone. Remove one in Sources below.</div>
+      </Card>
+    );
+  }
+  const update = (p: Partial<AudioSource>) => patch({ audio: sources.map((a, n) => (n === index ? { ...a, ...p } : a)) });
+  const setVolume = (volume: number, muted: boolean) => {
+    if (live) void setMix(index, volume, muted); else update({ volume, muted });
+    if (testing) void api.micMonitorSet(volume, mic.boost_db).catch(() => undefined);
   };
-  const stop = () => { void api.micMonitorStop(); };
+  const setBoost = (boost_db: number) => {
+    update({ boost_db });
+    if (testing) void api.micMonitorSet(mic.volume, boost_db).catch(() => undefined);
+  };
+  const toggleTest = async () => {
+    setError(null);
+    if (testing) { void api.micMonitorStop(); return; }
+    try { await api.micMonitorStart({ ...mic, enabled: true, muted: false }, output); setTesting(true); } catch (e) { setError(errorText(e)); }
+  };
+  const peak = testing ? testPeak : capturePeak;
   return (
-    <div className="hear">
-      <div className="hear-head">
-        <Headphones size={16} />
-        <div><strong>Hear yourself</strong><small>Plays your microphone live so you can check how you sound. Use headphones: with speakers it echoes. Nothing is recorded.</small></div>
-      </div>
-      <div className="hear-row">
-        <select aria-label="Listen on" value={output} disabled={on} onChange={e => setOutput(e.target.value)}>
-          <option value="">Windows default output</option>
-          {outputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+    <Card title="Microphone" className="mic-card"
+      actions={<>
+        <Badge tone={state.tone} dot>{state.label}</Badge>
+        {track && <Badge tone="accent">Track {track}</Badge>}
+        <button role="switch" aria-checked={mic.enabled} aria-label="Record microphone" title={mic.enabled ? 'Recorded in your clips' : 'Not recorded'}
+          className={`switch ${mic.enabled ? 'on' : ''}`} disabled={active} onClick={() => update({ enabled: !mic.enabled })}><span /></button>
+      </>}>
+      <div className="mic-row">
+        <select className="mic-device" aria-label="Microphone" value={mic.device} disabled={active || testing} onChange={e => update({ device: e.target.value })}>
+          <option value="">Windows default microphone</option>
+          {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {mic.device && !inputs.some(d => d.id === mic.device) && <option value={mic.device}>Disconnected microphone</option>}
         </select>
-        {on
-          ? <Button variant="danger" icon={Square} onClick={stop}>Stop listening</Button>
-          : <Button variant="primary" icon={Headphones} disabled={active || !native} onClick={start}>Start listening</Button>}
-        <Meter peak={on ? peak : 0} active={on} />
+        <IconButton label={mic.muted ? 'Unmute microphone' : 'Mute microphone'} icon={mic.muted ? MicOff : Mic} className={mic.muted ? 'muted' : ''}
+          onClick={() => setVolume(mic.volume, !mic.muted)} />
+        <input type="range" min={0} max={200} step={1} value={Math.round(mic.volume * 100)} aria-label="Microphone volume"
+          onChange={e => setVolume(Number(e.target.value) / 100, mic.muted)} />
+        <span className="range-value">{Math.round(mic.volume * 100)}%</span>
       </div>
-      {on && <p className="muted small">Live with your volume and boost (about a tenth of a second delay). Rumble filter, noise suppression and the other processing are heard in <em>Record a test</em> and in your clips.</p>}
-      {active && !on && <p className="muted small">Available while Instant Replay and recording are off.</p>}
+      <div className="mic-row">
+        <Button variant={testing ? 'danger' : 'primary'} icon={testing ? Square : Headphones} disabled={!native || (!testing && leaks)} onClick={toggleTest}>
+          {testing ? 'Stop testing' : 'Test mic'}
+        </Button>
+        <select className="mic-output" aria-label="Hear yourself on" value={output} disabled={testing} onChange={e => setOutput(e.target.value)}>
+          <option value="">Listen on: Windows default output</option>
+          {outputs.map(d => <option key={d.id} value={d.id}>Listen on: {d.name}</option>)}
+        </select>
+        <Meter peak={peak} active={peak > 0} />
+      </div>
+      {testing && <p className="mic-note">You're hearing yourself live (nothing is recorded). Use headphones, speakers will echo. Volume and boost change instantly.</p>}
+      {!testing && leaks && <p className="mic-note">Test mic is off while Instant Replay records System audio, because you would hear yourself in the clip.</p>}
+      {!mic.enabled && <p className="mic-note">Your microphone is not recorded. Turn on the switch above to record your voice on its own track.</p>}
+      {peak >= 0.98 && <div className="banner warn small">Very loud: the limiter is catching peaks. Lower the boost or volume.</div>}
       {error && <div className="banner bad small">{error}</div>}
-    </div>
+
+      <button className="disclosure mic-more" onClick={() => setAdvanced(a => !a)} aria-expanded={advanced}>
+        <ChevronDown size={15} className={advanced ? 'open' : ''} />Boost and processing
+        <span className="muted small">{[mic.boost_db > 0 && `+${mic.boost_db} dB`, ...PROCESSING.filter(p => mic[p.key]).map(p => p.label)].filter(Boolean).join(' · ') || 'Off'}</span>
+      </button>
+      {advanced && (
+        <div className="mic-advanced">
+          <label className="mic-boost-row" title="Makes a quiet microphone louder. A limiter always follows, so it never clips.">
+            <span>Boost</span>
+            <input type="range" min={0} max={24} step={1} value={mic.boost_db} disabled={active} aria-label="Microphone boost" onChange={e => setBoost(Number(e.target.value))} />
+            <span className="range-value">+{mic.boost_db} dB</span>
+          </label>
+          <div className="mic-checks">
+            {PROCESSING.map(p => (
+              <label key={p.key} title={p.text} className={active ? 'disabled' : ''}>
+                <input type="checkbox" checked={mic[p.key]} disabled={active} onChange={e => update({ [p.key]: e.target.checked } as Partial<AudioSource>)} />{p.label}
+              </label>
+            ))}
+          </div>
+          <div className="mic-adv-foot">
+            <Button size="sm" variant="ghost" icon={RotateCcw} disabled={active} onClick={() => update({ ...micDefaults(mic.device), enabled: mic.enabled, name: mic.name })}>Reset to defaults</Button>
+            <span className="muted small">Processing applies to recordings{active ? '; stop capture to change it' : ''}. Windows' microphone level is never changed.</span>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

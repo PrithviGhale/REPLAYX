@@ -29,6 +29,17 @@ pub struct AudioSource {
     /// Gentle compressor that evens out loud and quiet speech.
     pub compressor: bool,
 }
+impl AudioSource {
+    /// The Windows default microphone with the rumble filter on.
+    pub fn microphone() -> Self {
+        Self {
+            kind: "microphone".into(),
+            name: "Microphone".into(),
+            high_pass: true,
+            ..Default::default()
+        }
+    }
+}
 impl Default for AudioSource {
     fn default() -> Self {
         Self {
@@ -106,7 +117,8 @@ pub struct Settings {
     pub settings_version: u32,
 }
 /// Current settings layout. 2: explicit output width (0.2.1-alpha.3).
-pub const SETTINGS_VERSION: u32 = 2;
+/// 3: a microphone source is always present (0.2.2-alpha.1).
+pub const SETTINGS_VERSION: u32 = 3;
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -126,7 +138,7 @@ impl Default for Settings {
             buffer_mb: 2048,
             output_dir: PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default())
                 .join("Videos/REPLAYX"),
-            audio: vec![AudioSource::default()],
+            audio: vec![AudioSource::default(), AudioSource::microphone()],
             separate_tracks: true,
             replay_hotkey: "Control+Shift+F10".into(),
             recording_hotkey: "Control+Shift+F9".into(),
@@ -166,9 +178,20 @@ impl Settings {
         if self.settings_version >= SETTINGS_VERSION {
             return false;
         }
-        self.width = crate::geometry::canvas(self.height).0;
-        if self.canvas_mode == "native" {
-            self.canvas_mode = "stretch".into();
+        if self.settings_version < 2 {
+            self.width = crate::geometry::canvas(self.height).0;
+            if self.canvas_mode == "native" {
+                self.canvas_mode = "stretch".into();
+            }
+        }
+        // 3: the microphone is part of every setup (the app has no separate
+        // "add microphone" step any more). Its own on/off switch decides
+        // whether it is recorded.
+        if self.settings_version < 3
+            && !self.audio.iter().any(|a| a.kind == "microphone")
+            && self.audio.len() < 5
+        {
+            self.audio.push(AudioSource::microphone());
         }
         self.settings_version = SETTINGS_VERSION;
         true
@@ -438,12 +461,23 @@ mod tests {
             (s.output_width(), s.height, s.canvas_mode.as_str()),
             (1280, 720, "fit")
         );
-        // A current file with a custom size is left alone.
-        let new = serde_json::json!({"width":2560,"height":1080,"canvas_mode":"crop","settings_version":2});
+        // A version 2 file keeps its custom size and gains the microphone.
+        let new = serde_json::json!({"width":2560,"height":1080,"canvas_mode":"crop","settings_version":2,
+            "audio":[{"kind":"system","name":"System audio"}]});
         let mut s: Settings = serde_json::from_value(new).unwrap();
-        assert!(!s.migrate());
+        assert!(s.migrate());
         assert_eq!(s.output_width(), 2560);
+        assert_eq!(s.audio.iter().filter(|a| a.kind == "microphone").count(), 1);
+        assert!(s.audio[1].high_pass && s.audio[1].device.is_empty());
         s.validate().unwrap();
+        assert!(!s.migrate(), "runs once");
+        // An existing microphone is not duplicated.
+        let mut s = Settings {
+            settings_version: 2,
+            ..Default::default()
+        };
+        s.migrate();
+        assert_eq!(s.audio.iter().filter(|a| a.kind == "microphone").count(), 1);
     }
     #[test]
     fn output_size_is_validated_for_hardware_encoders() {

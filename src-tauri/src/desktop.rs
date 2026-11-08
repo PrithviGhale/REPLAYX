@@ -47,6 +47,8 @@ struct AppState {
     test_stop: Arc<std::sync::atomic::AtomicBool>,
     /// Set to end live microphone monitoring ("hear yourself").
     monitor_stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Live monitoring gain (f32 bits), adjustable while listening.
+    monitor_gain: Arc<std::sync::atomic::AtomicU32>,
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
@@ -448,8 +450,8 @@ fn mic_monitor_start(
     state: State<AppState>,
 ) -> Reply<()> {
     let status = state.engine.status();
-    if status.replay || status.recording {
-        return Err("Turn off Instant Replay and recording to listen to your microphone".into());
+    if (status.replay || status.recording) && audio::monitor_leaks(&state.engine.settings().audio) {
+        return Err("While capture records System audio, hearing yourself would end up in the clip. Turn off Instant Replay to test your mic.".into());
     }
     {
         let mut busy = state.testing_audio.lock().unwrap();
@@ -461,9 +463,14 @@ fn mic_monitor_start(
     let flag = state.testing_audio.clone();
     let stop = state.monitor_stop.clone();
     stop.store(false, std::sync::atomic::Ordering::Relaxed);
+    let gain = state.monitor_gain.clone();
+    gain.store(
+        audio::monitor_level(source.volume, source.boost_db).to_bits(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     thread::spawn(move || {
         let level_app = app.clone();
-        let result = audio::monitor(source, &output, &stop, |peak| {
+        let result = audio::monitor(source, &output, &stop, &gain, |peak| {
             let _ = level_app.emit("mic-monitor-level", peak);
         });
         *flag.lock().unwrap() = false;
@@ -473,6 +480,14 @@ fn mic_monitor_start(
         );
     });
     Ok(())
+}
+/// Change volume/boost while listening.
+#[tauri::command]
+fn mic_monitor_set(volume: f32, boost_db: f32, state: State<AppState>) {
+    state.monitor_gain.store(
+        audio::monitor_level(volume, boost_db).to_bits(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 }
 #[tauri::command]
 fn mic_monitor_stop(state: State<AppState>) {
@@ -928,6 +943,7 @@ pub fn run() {
                 testing_audio: Arc::new(Mutex::new(false)),
                 test_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 monitor_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                monitor_gain: Arc::new(std::sync::atomic::AtomicU32::new(1f32.to_bits())),
                 app: app.handle().clone(),
                 library: Arc::new(Mutex::new(Library {
                     index: library::Index::load(&data.join("library-index.json")),
@@ -1200,6 +1216,7 @@ pub fn run() {
             audio_test_data,
             audio_devices,
             mic_monitor_start,
+            mic_monitor_set,
             mic_monitor_stop,
             audio_test_discard,
             open_folder

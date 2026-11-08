@@ -341,6 +341,9 @@ fn main() -> Result<()> {
         settings.audio.push(Default::default());
         settings.audio.push(Default::default());
     } else {
+        // One source only: the default settings also contain the microphone,
+        // which a capture test must never open unless asked to.
+        settings.audio.truncate(1);
         match args.get(3).map(String::as_str).unwrap_or("system") {
             "silent" => settings.audio.clear(),
             "microphone" => {

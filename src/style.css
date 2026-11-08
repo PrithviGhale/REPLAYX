@@ -538,3 +538,21 @@ details p { margin-top: 8px; }
 .hear-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hear-row select { max-width: 320px; }
 .hear-row .meter { flex: 1 1 160px; }
+.mic-card .card-actions { display: flex; align-items: center; gap: 8px; }
+.mic-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.mic-row:first-of-type { margin-top: 2px; }
+.mic-device { flex: 1 1 240px; max-width: 380px; }
+.mic-row input[type=range] { flex: 0 1 180px; }
+.mic-output { flex: 0 1 300px; }
+.mic-row .meter { flex: 1 1 140px; min-width: 120px; }
+.mic-note { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; }
+.mic-more { margin-top: 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mic-more .muted { margin-left: 4px; }
+.mic-advanced { margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); display: grid; gap: 10px; }
+.mic-boost-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.mic-boost-row input[type=range] { flex: 0 1 260px; }
+.mic-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+.mic-checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.mic-checks label.disabled { opacity: 0.55; cursor: default; }
+.mic-checks input { accent-color: var(--accent); width: 15px; height: 15px; }
+.mic-adv-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

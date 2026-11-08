@@ -2433,6 +2433,8 @@ mod tests {
             root.path().join("data"),
             Settings {
                 output_dir: root.path().join("clips"),
+                // Never a real device in tests (the default includes the mic).
+                audio: Vec::new(),
                 ..Default::default()
             },
         )
