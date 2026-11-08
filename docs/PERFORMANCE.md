@@ -13,6 +13,16 @@
 | Quick Sync, low-power VDEnc (0.2.1-alpha.3 default) | pending | pending | pending |
 | Quick Sync VPP → NVENC (hybrid) | pending | pending | pending |
 
+**NVIDIA-driven display, measured** (RTX 4070 Laptop driving the panel at 1920×1080@250 Hz, `replayx-gameproxy` at about 185 FPS, 60 fps recording, 25 s runs; game FPS before → during):
+
+| Path | Repeated frames in the recording | Game FPS |
+| --- | --- | --- |
+| Zero-copy D3D11 → NVENC (no resize), normal / high GPU priority | 0.14% / 0.0% | −3.5% / −4.5% |
+| Smooth: display pixels, marked to play at the chosen shape | 0.0–0.6% (5 runs) | −3% to −7% |
+| CUDA copy path (resize through system memory), various priorities | 3.6–86% (7 runs) | −3% to −24% |
+
+User recording before the fix (Fortnite 1440×1080 → 1920×1080, CUDA copy path): 76% repeated frames, 14 new pictures per second median, freezes up to 2.9 s (`scripts/clip-smoothness.py`). Remaining frame-to-frame variation in Smooth recordings follows the game's own frame pacing: at about 170–190 FPS, a 60 fps recording mixes 2- and 3-game-frame steps.
+
 **Real game.** Roblox, same place and camera, Roblox's own frame-rate display (Shift+F5): REPLAYX closed, replay at 60 fps, replay at 120 fps, recording at 1080p60, saving a replay while playing. Results will be recorded here as reported, labelled as user measurements.
 
 ## 0.2.1-alpha.2 — capture start

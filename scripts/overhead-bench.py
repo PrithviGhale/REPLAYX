@@ -39,6 +39,15 @@ CONFIGS = {
     "nvenc-hybrid": (["encoder=h264_nvenc"], ""),
     "nvenc-hybrid-sfc": (["encoder=h264_nvenc"], "vpp_scale_mode=1"),
     "cpu-scale-nvenc": (["encoder=h264_nvenc", "gpu=0"], ""),
+    # Automatic path selection with and without raised capture priority.
+    "smooth": (["scale_policy=smooth"], ""),
+    "smooth-os2": (["scale_policy=smooth"], "oversample=2"),
+    "smooth-os4": (["scale_policy=smooth"], "oversample=4"),
+    "exact": (["scale_policy=exact"], ""),
+    "prio-none": ([], "cpu_priority=0,gpu_priority=0"),
+    "prio-gpu": ([], "cpu_priority=0,gpu_priority=1"),
+    "prio-cpu": ([], "cpu_priority=1,gpu_priority=0"),
+    "prio-both": ([], "cpu_priority=1,gpu_priority=1"),
 }
 
 GPU_PS = r"""
@@ -89,7 +98,7 @@ def run(label, args, fps, height, mode, out):
         overrides, tuning = cfg
         env = dict(os.environ, REPLAYX_VIDEO_TUNING=tuning)
         cmd = [CLI, "capture-test", str(args.capture), "silent", f"fps={fps}", f"height={height}", f"mode={mode}",
-               f"bitrate={args.bitrate}", *overrides]
+               f"width={args.width}", *([f"bitrate={args.bitrate}"] if args.bitrate else []), *overrides]
         subprocess.run(cmd, cwd=out, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
     else:
         gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
@@ -97,7 +106,13 @@ def run(label, args, fps, height, mode, out):
         time.sleep(args.capture + 4)
     t1 = time.perf_counter()
     proxy.wait(timeout=total + 60)
-    usage = json.loads(gpu.communicate(timeout=60)[0] or "{}") if gpu else {}
+    usage = {}
+    if gpu:
+        try:
+            usage = json.loads(gpu.communicate(timeout=90)[0] or "{}")
+        except (subprocess.TimeoutExpired, json.JSONDecodeError):
+            gpu.kill()
+            usage = {"error": "GPU counter sampling timed out"}
     log = json.load(open(proxy_log))
     abs_t = [log["start_qpc_s"] + p for p in log["presents_s"]]
     base = stats([t for t in abs_t if log["start_qpc_s"] + 2 < t < t0 - 0.5])
@@ -122,7 +137,8 @@ def main():
     ap.add_argument("--fps", default="60")
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--mode", default="stretch")
-    ap.add_argument("--bitrate", type=int, default=12)
+    ap.add_argument("--bitrate", type=int, default=0, help="0 = Balanced preset")
+    ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--cpu-us", type=int, default=0)

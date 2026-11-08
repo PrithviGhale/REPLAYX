@@ -52,14 +52,14 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const { toast } = useApp();
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
-    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
+    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
     free: x.free_bytes, error: x.error, notice: x.notice, hotkey: x.hotkey_error, recovery: x.recovery_sessions,
   }));
   const peaks = useStatus(x => x.audio_peaks);
   const active = useStatus(activeOf);
   const display = caps?.displays.find(d => d.index === draft.display);
   const p = plan(sourceRect(display, draft.source_rect), outputWidth(draft.width, draft.height), draft.height, draft.canvas_mode);
-  const out = active && s.ow ? `${s.ow} × ${s.oh}` : `${p.width} × ${p.height}`;
+  const out = active && s.ow ? `${s.ow} × ${s.oh}${s.pw ? ` (plays as ${s.pw} × ${s.ph})` : ''}` : `${p.width} × ${p.height}`;
   const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
   const rec = useRecordButton('Stop & save');
   const starting = s.pending || s.state === 'Starting';

@@ -187,8 +187,50 @@ pub struct VideoPlan {
     /// Scaled image size inside the frame; smaller than the frame only for `fit`.
     pub image_width: u32,
     pub image_height: u32,
+    /// Sample (pixel) aspect ratio written to the stream. 1:1 except for
+    /// anamorphic recordings, which keep the captured pixels and tell players
+    /// to show them at the chosen shape (see `anamorphic`).
+    #[serde(default = "square")]
+    pub sar: (u32, u32),
+}
+fn square() -> (u32, u32) {
+    (1, 1)
+}
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
 }
 impl VideoPlan {
+    /// The frame must be resized (the capture region differs from the output).
+    pub fn needs_scaling(&self) -> bool {
+        (self.source.width, self.source.height) != (self.width, self.height)
+    }
+    /// Keep the captured pixels and mark them to display at this plan's shape:
+    /// a 1440×1080 capture planned as 1920×1080 becomes 1440×1080 with sample
+    /// aspect 4:3, which players show as 1920×1080. Used where the display GPU
+    /// cannot resize on the GPU in the bundled FFmpeg (NVIDIA/AMD-driven
+    /// displays): a CPU round trip there repeats frames while a game runs.
+    pub fn anamorphic(&self) -> VideoPlan {
+        let (sw, sh) = (self.source.width as u64, self.source.height as u64);
+        let (num, den) = (self.width as u64 * sh, self.height as u64 * sw);
+        let g = gcd(num, den).max(1);
+        VideoPlan {
+            source: self.source,
+            width: self.source.width,
+            height: self.source.height,
+            image_width: self.source.width,
+            image_height: self.source.height,
+            sar: ((num / g) as u32, (den / g) as u32),
+        }
+    }
+    /// Size players show (equal to the frame size unless anamorphic).
+    pub fn display_size(&self) -> (u32, u32) {
+        let w = (self.width as u64 * self.sar.0 as u64 / self.sar.1.max(1) as u64) as u32;
+        (w, self.height)
+    }
     pub fn padded(&self) -> bool {
         (self.image_width, self.image_height) != (self.width, self.height)
     }
@@ -224,6 +266,7 @@ pub fn plan(source: CaptureRect, width: u32, height: u32, mode: &str) -> Result<
         height: ch,
         image_width: iw,
         image_height: ih,
+        sar: (1, 1),
     };
     Ok(match mode {
         "stretch" => fixed(source, cw, ch),
@@ -254,6 +297,7 @@ pub fn plan(source: CaptureRect, width: u32, height: u32, mode: &str) -> Result<
                 height: ch,
                 image_width: w,
                 image_height: ch,
+                sar: (1, 1),
             }
         }
         _ => bail!("Unknown aspect mode"),
@@ -520,5 +564,33 @@ mod tests {
         let s43 = plan(full(1440, 1080), 1920, 1080, "stretch").unwrap();
         assert!(!s43.padded());
         assert!(plan(src, 1921, 1080, "stretch").is_err());
+    }
+    #[test]
+    fn anamorphic_recordings_play_at_the_chosen_shape() {
+        // Stretched Fortnite: 1440x1080 display, 1920x1080 chosen.
+        let p = plan(full(1440, 1080), 1920, 1080, "stretch").unwrap();
+        assert!(p.needs_scaling());
+        let a = p.anamorphic();
+        assert_eq!((a.width, a.height, a.sar), (1440, 1080, (4, 3)));
+        assert_eq!(a.display_size(), (1920, 1080));
+        assert!(
+            !a.needs_scaling(),
+            "the capture goes straight to the encoder"
+        );
+        // 16:10 desktop recorded as 16:9.
+        let a = plan(full(2560, 1600), 1920, 1080, "stretch")
+            .unwrap()
+            .anamorphic();
+        assert_eq!((a.width, a.height, a.sar), (2560, 1600, (10, 9)));
+        assert_eq!(a.display_size(), (2844, 1600));
+        // Crop captures a 16:9 region already: square pixels.
+        let a = plan(full(2560, 1600), 1920, 1080, "crop")
+            .unwrap()
+            .anamorphic();
+        assert_eq!((a.width, a.height, a.sar), (2560, 1440, (1, 1)));
+        // Same size needs nothing.
+        assert!(!plan(full(1920, 1080), 1920, 1080, "stretch")
+            .unwrap()
+            .needs_scaling());
     }
 }

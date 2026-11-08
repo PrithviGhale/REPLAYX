@@ -145,6 +145,16 @@ export function CapturePage() {
             ))}
           </div>
         )}
+        {!native && (
+          <Field label="When the GPU driving your display can't resize frames"
+            hint="Desktop PCs with NVIDIA or AMD graphics, and laptops while a full-screen game runs on the NVIDIA GPU. Measured under a game load: Smooth repeated 0–0.6% of frames, Exact repeated 3–86%.">
+            <Segmented label="Resize policy" value={draft.scale_policy} disabled={active} onChange={v => patch({ scale_policy: v })}
+              options={[
+                { value: 'smooth', label: 'Smooth (recommended)', hint: 'Record the display\u2019s own pixels on the GPU and mark the file to play at the chosen shape' },
+                { value: 'exact', label: 'Exact size', hint: 'Resize through a CPU copy for a file of exactly this size; can stutter in demanding games' },
+              ]} />
+          </Field>
+        )}
         <Field label="Frame rate" hint={draft.fps > 60 ? `${draft.fps} fps doubles capture and encoding work. On laptops whose display runs on the integrated GPU this can lower game FPS; the Performance page shows if the encoder falls behind.` : undefined}>
           <Segmented label="Frame rate" value={draft.fps} disabled={active} onChange={v => patch({ fps: v })}
             options={[30, 60, 120, 144].map(f => ({ value: f, label: `${f} fps`, hint: f > 60 ? 'Needs GPU headroom' : undefined }))} />

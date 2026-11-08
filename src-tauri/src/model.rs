@@ -71,6 +71,11 @@ pub struct Settings {
     pub game_mappings: Vec<crate::games::GameMapping>,
     /// Show a small "<game> detected" notice when a game comes to the front.
     pub game_notifications: bool,
+    /// When the display's GPU cannot resize frames on the GPU (NVIDIA/AMD-driven
+    /// displays with the bundled FFmpeg): "smooth" records the display's pixels
+    /// marked to play at the chosen shape; "exact" resizes through a CPU copy,
+    /// which can repeat frames while a demanding game runs.
+    pub scale_policy: String,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -110,6 +115,7 @@ impl Default for Settings {
             organize_by_game: true,
             game_mappings: Vec::new(),
             game_notifications: true,
+            scale_policy: "smooth".into(),
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -181,6 +187,9 @@ impl Settings {
         }
         if ![128, 160, 192, 256, 320].contains(&self.audio_bitrate_kbps) {
             bail!("Unsupported audio bitrate")
+        }
+        if !["smooth", "exact"].contains(&self.scale_policy.as_str()) {
+            bail!("Invalid scaling policy")
         }
         if !["balanced", "quality", "performance", "custom"].contains(&self.preset.as_str()) {
             bail!("Invalid preset")

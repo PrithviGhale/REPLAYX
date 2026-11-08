@@ -21,7 +21,7 @@ export type Settings = {
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string;
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
-  game_notifications: boolean; settings_version: number;
+  game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
 };
 export type Status = {
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
@@ -34,7 +34,7 @@ export type Status = {
   frame_age_ms: number; hotkey_error: string | null;
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
   pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
-  encoder_speed: number; video_lag_ms: number; target_bitrate_mbps: number; encoder_label: string; foreground_game: string | null;
+  encoder_speed: number; video_lag_ms: number; target_bitrate_mbps: number; encoder_label: string; foreground_game: string | null; play_width: number; play_height: number;
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
@@ -93,7 +93,7 @@ export const emptyStatus: Status = {
   scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],
-  encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null,
+  encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null, play_width: 0, play_height: 0,
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */
@@ -103,7 +103,7 @@ export const previewSettings: Settings = {
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2,
+  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2, scale_policy: 'smooth',
 };
 
 export const VERSION = '0.2.1-alpha.3';

@@ -366,6 +366,7 @@ fn main() -> Result<()> {
             Some(("height", v)) => settings.height = v.parse()?,
             Some(("width", v)) => settings.width = v.parse()?,
             Some(("preset", v)) => settings.preset = v.into(),
+            Some(("scale_policy", v)) => settings.scale_policy = v.into(),
             Some(("encoder", v)) => settings.encoder = v.into(),
             Some(("bitrate", v)) => {
                 settings.bitrate_mbps = v.parse()?;

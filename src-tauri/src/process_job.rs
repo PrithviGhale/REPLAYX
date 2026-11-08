@@ -38,6 +38,37 @@ impl Drop for CaptureJob {
     }
 }
 
+/// Raise the capture/encoder process's CPU scheduling class (above normal).
+pub fn raise_cpu_priority(child: &Child) -> bool {
+    use windows::Win32::System::Threading::{SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS};
+    unsafe { SetPriorityClass(HANDLE(child.as_raw_handle()), ABOVE_NORMAL_PRIORITY_CLASS).is_ok() }
+}
+/// Raise the process's GPU scheduling class to HIGH, so its small capture and
+/// scaling jobs are not queued behind a game that keeps the GPU at 100% (OBS
+/// documents the same remedy). Takes effect once the process has opened its
+/// GPU device. HIGH, not REALTIME: realtime could starve the compositor.
+/// Allowed without admin rights for a process we own. Returns the NTSTATUS.
+pub fn raise_gpu_priority(child: &Child) -> i32 {
+    use windows::{
+        core::{s, w},
+        Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+    };
+    const D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH: i32 = 4;
+    unsafe {
+        let Ok(gdi) = LoadLibraryW(w!("gdi32.dll")) else {
+            return -1;
+        };
+        let Some(f) = GetProcAddress(gdi, s!("D3DKMTSetProcessSchedulingPriorityClass")) else {
+            return -1;
+        };
+        let set: unsafe extern "system" fn(HANDLE, i32) -> i32 = std::mem::transmute(f);
+        set(
+            HANDLE(child.as_raw_handle()),
+            D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

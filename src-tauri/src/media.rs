@@ -701,6 +701,13 @@ pub struct Tuning {
     pub vpp_scale_mode: Option<u8>,
     pub draw_mouse: bool,
     pub qsv_async_depth: Option<u32>,
+    /// Raise the encoder process's CPU scheduling class.
+    pub cpu_priority: bool,
+    /// Raise the encoder process's GPU scheduling class.
+    pub gpu_priority: bool,
+    /// Capture at this multiple of the output rate and keep the frame nearest
+    /// each output slot (1 = capture at the output rate).
+    pub oversample: u32,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -709,6 +716,9 @@ impl Default for Tuning {
             vpp_scale_mode: None,
             draw_mouse: true,
             qsv_async_depth: None,
+            cpu_priority: false,
+            gpu_priority: true,
+            oversample: 1,
         }
     }
 }
@@ -721,6 +731,9 @@ pub fn tuning() -> Tuning {
                 "vpp_scale_mode" => t.vpp_scale_mode = v.parse().ok(),
                 "draw_mouse" => t.draw_mouse = v != "0",
                 "qsv_async_depth" => t.qsv_async_depth = v.parse().ok(),
+                "cpu_priority" => t.cpu_priority = v != "0",
+                "gpu_priority" => t.gpu_priority = v != "0",
+                "oversample" => t.oversample = v.parse::<u32>().unwrap_or(1).clamp(1, 8),
                 _ => {}
             }
         }
@@ -746,7 +759,7 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         .map(|p| format!(",{p}"))
         .unwrap_or_default();
     match scaler {
-        Scaler::D3d11 => "setsar=1".to_string(),
+        Scaler::D3d11 => format!("setsar={}/{}", plan.sar.0, plan.sar.1),
         Scaler::Cuda => format!(
             "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1"
         ),
@@ -818,14 +831,16 @@ pub fn video_input(
             "-i",
             &format!(
                 "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
-                s.display, s.fps, u8::from(tuning().draw_mouse), rect.width, rect.height, rect.x, rect.y
+                s.display, s.fps * tuning().oversample, u8::from(tuning().draw_mouse), rect.width, rect.height, rect.x, rect.y
             ),
         ]);
-        return Ok(format!(
-            "{},{}",
-            regrid_filter(s.fps),
-            video_filter(plan, scaler)
-        ));
+        let timing = if tuning().oversample > 1 {
+            // Several captures per output slot: keep the one nearest each slot.
+            format!("fps={}:round=near", s.fps)
+        } else {
+            regrid_filter(s.fps)
+        };
+        return Ok(format!("{},{}", timing, video_filter(plan, scaler)));
     }
     c.args(["-f", "gdigrab", "-framerate", &s.fps.to_string(), "-i"]);
     c.arg(if s.capture == "window" {
@@ -1144,7 +1159,11 @@ mod tests {
         assert!(Scaler::D3d11.supports(&same));
         let fit = plan(full(2560, 1600), 1920, 1080, "fit").unwrap();
         assert!(!Scaler::Cuda.supports(&fit) && Scaler::Cpu.supports(&fit));
-        assert_eq!(video_filter(&same, Scaler::D3d11), "setsar=1");
+        assert_eq!(video_filter(&same, Scaler::D3d11), "setsar=1/1");
+        assert_eq!(
+            video_filter(&stretched.anamorphic(), Scaler::D3d11),
+            "setsar=4/3"
+        );
         assert!(video_filter(&stretched, Scaler::Cuda).contains("scale_cuda=w=1920:h=1080"));
         assert!(!converts_bt709(Scaler::Cuda) && converts_bt709(Scaler::QsvZeroCopy));
     }

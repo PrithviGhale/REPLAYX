@@ -183,6 +183,10 @@ fn main() -> windows::core::Result<()> {
         )?;
         let (device, context): (ID3D11Device, ID3D11DeviceContext) =
             (device.unwrap(), context.unwrap());
+        // One frame in flight, so the time stamped into a frame is close to
+        // when it reaches the screen (a deep render-ahead queue would make the
+        // stamp drift against display time and look like capture judder).
+        device.cast::<IDXGIDevice1>()?.SetMaximumFrameLatency(1)?;
         let mut tearing = windows::core::BOOL(0);
         let tearing_ok = factory
             .cast::<IDXGIFactory5>()?

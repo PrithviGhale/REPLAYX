@@ -81,6 +81,9 @@ pub struct Status {
     pub encoder_label: String,
     /// Game in front right now, also while not capturing (for the notice).
     pub foreground_game: Option<String>,
+    /// Size players show when the stream is anamorphic (0 = the encoded size).
+    pub play_width: u32,
+    pub play_height: u32,
 }
 /// Snapshot readable without the engine lock, so no caller (in particular the
 /// UI thread) ever waits for capture startup, saves or recovery.
@@ -1116,6 +1119,25 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
         )?),
         None => None,
     };
+    // Displays driven by the NVIDIA (or AMD) GPU have no GPU scaler for Desktop
+    // Duplication frames in the bundled FFmpeg (scale_d3d11 cannot create its
+    // output texture; D3D11 frames cannot be mapped to Vulkan or D3D12). A CPU
+    // round trip repeated 13-86% of frames under a game load in measurements,
+    // the zero-copy path 0-0.14%. "smooth" therefore records the display's
+    // pixels and marks the stream to play at the chosen shape.
+    let anamorphic = match (&geometry, plan) {
+        (Some(g), Some(p))
+            if s.gpu_scaling
+                && s.scale_policy == "smooth"
+                && [media::VENDOR_NVIDIA, media::VENDOR_AMD].contains(&g.adapter_vendor)
+                && p.needs_scaling()
+                && !p.padded() =>
+        {
+            Some(p)
+        }
+        _ => None,
+    };
+    let plan = anamorphic.map(|p| p.anamorphic()).or(plan);
     mark(&mut timings, began, "Display measured");
     let path = select_video_path(&req, geometry.as_ref(), plan.as_ref())?;
     let (scaler, encoder) = (path.scaler, path.encoder.clone());
@@ -1271,7 +1293,17 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                 return Err(error.context("Could not protect encoder process with a Windows job"));
             }
         };
-        mark(&mut timings, began, "Encoder process started");
+        let cpu_raised =
+            crate::media::tuning().cpu_priority && crate::process_job::raise_cpu_priority(&child);
+        mark(
+            &mut timings,
+            began,
+            if cpu_raised {
+                "Encoder process started (CPU priority above normal)"
+            } else {
+                "Encoder process started"
+            },
+        );
         Ok((child, job, feeds, source_count))
     })();
     let (mut child, job, feeds, source_count) = match started {
@@ -1708,6 +1740,22 @@ impl Inner {
                 "GPU scaling is unavailable on this display adapter; using the CPU fallback (see Performance for details).".into(),
             );
         }
+        (self.status.play_width, self.status.play_height) = match p.plan {
+            Some(plan) if plan.sar != (1, 1) => {
+                let (w, h) = plan.display_size();
+                self.status.notice = Some(format!(
+                    "Recording your display's {}×{} pixels instead of resizing to {}×{}, marked to play at {w}×{h}. Keeping every frame on the GPU is what makes the recording smooth: this GPU can only resize through a CPU copy, which stutters in games. Players and editors show it at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
+                    plan.width,
+                    plan.height,
+                    self.settings.output_width(),
+                    self.settings.height,
+                    self.settings.output_width(),
+                    self.settings.height
+                ));
+                (w, h)
+            }
+            _ => (0, 0),
+        };
         if let Some(cache) = p.cache {
             self.video_path_cache = Some(cache);
         }
@@ -2005,6 +2053,17 @@ impl Inner {
             let ms = p.progress.first_frame_ms.load(Ordering::Relaxed);
             if ms > 0 {
                 p.reported_first_frame = true;
+                if media::tuning().gpu_priority {
+                    let status = crate::process_job::raise_gpu_priority(&p.child);
+                    self.status.start_timings.push(media::StageTiming {
+                        stage: if status == 0 {
+                            "Encoder GPU priority raised (high)".into()
+                        } else {
+                            format!("Encoder GPU priority unchanged (status {status:#x})")
+                        },
+                        elapsed_ms: p.began.elapsed().as_millis() as u64,
+                    });
+                }
                 self.status.start_timings.push(media::StageTiming {
                     stage: "First frame encoded".into(),
                     elapsed_ms: ms,
