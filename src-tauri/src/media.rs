@@ -691,6 +691,55 @@ fn summarize_error(text: &str) -> String {
 }
 
 /// Build the filter chain for a scaler. `plan` is required for Desktop Duplication.
+/// FFmpeg filter graphs for a capture: video and, when there is audio, a
+/// second graph for the audio sources (per-source chain, then a mix and one
+/// track per source).
+///
+/// The video and audio graphs MUST stay separate (`split`, the default): in
+/// one shared graph FFmpeg runs both on one thread, and waiting for real-time
+/// audio stalled the video chain, which blocked the desktop grabber. With
+/// audio, 57% of frames repeated (0.2.1-alpha.3); separate graphs plus NVENC
+/// lookahead brought it to 0.0-0.28%. See docs/PERFORMANCE.md.
+pub fn filter_graphs(
+    video_filter: &str,
+    chains: &[String],
+    separate: bool,
+    split: bool,
+) -> Vec<String> {
+    let video = format!("[0:v]{video_filter}[v]");
+    if chains.is_empty() {
+        return vec![video];
+    }
+    let mut audio = String::new();
+    for (n, chain) in chains.iter().enumerate() {
+        if n > 0 {
+            audio += ";";
+        }
+        audio += &format!("[{}:a]aresample=async=1000:first_pts=0", n + 1);
+        if !chain.is_empty() {
+            audio += &format!(",{chain}");
+        }
+        audio += &if separate {
+            format!(",asplit=2[m{n}][a{n}]")
+        } else {
+            format!("[m{n}]")
+        };
+    }
+    audio += ";";
+    for n in 0..chains.len() {
+        audio += &format!("[m{n}]");
+    }
+    audio += &format!("amix=inputs={}:normalize=1[mix]", chains.len());
+    if split {
+        vec![video, audio]
+    } else {
+        vec![format!("{video};{audio}")]
+    }
+}
+/// Per-source audio processing in FFmpeg (none for most sources).
+pub fn source_chain(_source: &crate::model::AudioSource) -> String {
+    String::new()
+}
 /// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
 /// the defaults for benchmarking only (see scripts/overhead-bench.py).
 #[derive(Debug, Clone)]
@@ -1328,5 +1377,39 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(target_bitrate_mbps(&custom, 1920, 1080), 33);
+    }
+    #[test]
+    fn video_and_audio_never_share_a_filter_graph() {
+        // Regression guard for the 0.2.1-alpha.3 stutter fix (57% -> 0.28%).
+        assert!(Tuning::default().split_graphs);
+        let g = filter_graphs("setsar=1", &["".into(), "".into()], true, true);
+        assert_eq!(g.len(), 2);
+        assert!(g[0].starts_with("[0:v]") && !g[0].contains(":a]"));
+        assert!(g[1].contains("[1:a]") && g[1].contains("[2:a]") && g[1].contains("amix=inputs=2"));
+        assert!(!g[1].contains("[0:v]"));
+        assert_eq!(
+            filter_graphs("setsar=1", &[], true, true),
+            vec!["[0:v]setsar=1[v]".to_string()]
+        );
+        // Per-source processing sits before the split, so mix and track agree.
+        let g = filter_graphs("x", &["highpass=f=80".into()], true, true);
+        assert!(g[1].contains("first_pts=0,highpass=f=80,asplit=2[m0][a0]"));
+    }
+    #[test]
+    fn nvenc_keeps_lookahead_so_video_never_runs_ahead_of_audio() {
+        // Second half of the stutter fix: the encoder holds ~1/3 s of video.
+        assert_eq!(Tuning::default().nvenc_lookahead, Some(20));
+        let mut c = command(Path::new("ffmpeg"));
+        encoding_args(
+            &mut c,
+            &Settings::default(),
+            "h264_nvenc",
+            (1920, 1080),
+            false,
+        );
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-rc-lookahead" && w[1] == "20"));
     }
 }

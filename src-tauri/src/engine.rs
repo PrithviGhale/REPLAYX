@@ -1206,44 +1206,24 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                 ]);
             }
         }
-        // Video and audio run in separate filter graphs (separate threads):
-        // in one shared graph, waiting for real-time audio stalled the video
-        // chain, which blocked the desktop grabber and repeated frames.
-        let video_graph = format!("[0:v]{filter}[v]");
-        let split = media::tuning().split_graphs;
-        let mut graph = if split {
-            String::new()
+        let chains: Vec<String> = if synthetic {
+            vec![String::new(); source_count]
         } else {
-            video_graph.clone()
+            s.audio
+                .iter()
+                .filter(|a| a.enabled)
+                .map(media::source_chain)
+                .collect()
         };
-        if source_count > 0 {
-            for n in 0..source_count {
-                let input = n + 1;
-                if !graph.is_empty() {
-                    graph += ";";
-                }
-                graph += &format!("[{input}:a]aresample=async=1000:first_pts=0");
-                if s.separate_tracks {
-                    graph += &format!(",asplit=2[m{n}][a{n}]")
-                } else {
-                    graph += &format!("[m{n}]")
-                }
-            }
-            graph += ';'.to_string().as_str();
-            for n in 0..source_count {
-                graph += &format!("[m{n}]");
-            }
-            graph += &format!("amix=inputs={source_count}:normalize=1[mix]");
+        for graph in media::filter_graphs(
+            &filter,
+            &chains,
+            s.separate_tracks,
+            media::tuning().split_graphs,
+        ) {
+            c.args(["-filter_complex", &graph]);
         }
-        if split {
-            c.args(["-filter_complex", &video_graph]);
-            if !graph.is_empty() {
-                c.args(["-filter_complex", &graph]);
-            }
-            c.args(["-map", "[v]"]);
-        } else {
-            c.args(["-filter_complex", &graph, "-map", "[v]"]);
-        }
+        c.args(["-map", "[v]"]);
         if source_count > 0 {
             c.args([
                 "-map",
