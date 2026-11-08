@@ -14,7 +14,7 @@ export function ReplayPage() {
   const { draft, patch, run, refreshClips, busy } = useApp();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const active = useStatus(activeOf);
-  const s = useStatus(x => ({ buffer: x.buffer_seconds, bytes: x.buffer_bytes, replay: x.replay, recovery: x.recovery_sessions }));
+  const s = useStatus(x => ({ buffer: x.buffer_seconds, bytes: x.buffer_bytes, replay: x.replay, recovery: x.recovery_sessions, free: x.free_bytes }));
   const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
   // Was draft.bitrate_mbps (the Custom slider) for every preset, which
   // under-estimated Balanced buffers by a quarter.
@@ -61,6 +61,7 @@ export function ReplayPage() {
             {short ? `This budget holds only about ${duration(covered)}. Raise it or lower the bitrate to keep the full ${durationLabel(draft.replay_seconds)}.`
               : `Covers the full ${durationLabel(draft.replay_seconds)} (room for about ${duration(covered)}).`}
           </div>
+          {s.free > 0 && s.free - s.bytes < budget + 256 * 1024 * 1024 && <div className="banner warn"><HardDrive size={15} />Only {bytes(s.free)} free on the recording drive, less than this budget plus room for saved clips. Free some space or lower the budget; REPLAYX stops capture safely (keeping what is on disk) when less than 128 MB is left.</div>}
           {!short && worstCovered < draft.replay_seconds && <p className="muted small">In very detailed scenes video can use up to {rate.cap} Mb/s; then this budget keeps about {duration(worstCovered)}. The oldest buffered seconds go first; saved clips are never touched.</p>}
         </Card>
       </div>

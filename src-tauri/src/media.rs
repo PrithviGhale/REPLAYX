@@ -625,6 +625,12 @@ impl Media {
             .args(["-hide_banner", "-v", "error", "-nostdin", "-i"])
             .arg(input)
             .args(["-map", "0", "-c", "copy", "-movflags", "+faststart", "-n"])
+            // HEVC in MP4 must be tagged hvc1 for Apple devices and some players.
+            .args(if original.video_codec == "hevc" {
+                &["-tag:v", "hvc1"][..]
+            } else {
+                &[][..]
+            })
             .arg(&part)
             .output()?;
         if !r.status.success() {

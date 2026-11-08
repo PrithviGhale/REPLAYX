@@ -1639,11 +1639,20 @@ impl Inner {
     pub fn activity_due(&mut self) -> Option<Vec<crate::games::GameMapping>> {
         let now = Instant::now();
         let capturing = self.pipeline.as_ref().is_some_and(|p| !p.synthetic);
-        let idle_watch = self.pipeline.is_none() && self.settings.game_notifications;
-        if !(capturing || idle_watch)
-            || self
-                .last_activity_sample
-                .is_some_and(|t| now - t < Duration::from_secs(1))
+        // While idle, the game-detected notice and the games-only overlay
+        // need to know what is in front.
+        let overlay = &self.settings.overlay;
+        let idle_watch = self.pipeline.is_none()
+            && (self.settings.game_notifications || (overlay.enabled && overlay.games_only));
+        if !(capturing || idle_watch) {
+            // Nobody samples: never leave a stale game behind (it would keep
+            // the overlay up after leaving the game).
+            self.status.foreground_game = None;
+            return None;
+        }
+        if self
+            .last_activity_sample
+            .is_some_and(|t| now - t < Duration::from_secs(1))
         {
             return None;
         }
