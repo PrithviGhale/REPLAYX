@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1-alpha.3 — lighter capture on gaming laptops, real 1920×1080, sharper presets, recovery fixes
+
+Game-FPS and smoothness improvements in this build are **not yet measured in a real game**. The measurements so far, and how to run the comparison, are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+- **Less work on the display GPU.** On laptops whose screen runs on the Intel GPU, the RTX's game frames are composited by that same Intel GPU. REPLAYX was measured using a third of its 3D engine at 120 fps. Quick Sync now uses Intel's fixed-function low-power encoder (VDEnc) when available, with automatic fallback.
+- **Real 1920×1080.** The output size is now independent of the display: 1920 × 1080 always saves a 1920 × 1080 file. Choose 720p, 1080p, 1440p, 4K, the display's own shape, or a custom size, and Stretch, Preserve (bars) or Crop, with the effect shown before you choose. Older settings that recorded 1728 × 1080 on a 16:10 display move to 1920 × 1080 with Stretch to fill.
+- **Quality presets.** Performance, Balanced (28 Mb/s at 1080p60, up from a fixed 12) and High quality (45 Mb/s), scaled to resolution and frame rate, or a custom bitrate. VBR with a 1.5× peak cap, BT.709 colour conversion and tags.
+- **Fixed: "Audio output backpressure exceeded 3s" stopped recordings.** The cause was the video side falling behind real time, so FFmpeg stopped reading audio. REPLAYX now measures encoder speed and video lag, warns on the Performance page, and stops with the real reason ("the encoder fell 8 s behind…") instead of an audio error.
+- **Fixed: after a failed recording the app said "Capture is off" but Record answered "Recording is already active".** The recorded part is now saved, and a new recording can start immediately.
+- **Game-detected notice.** A small bar in the top-right corner, for example *Roblox detected · Instant Replay ready*: once per game, never over the centre of the screen, and it can be turned off in Settings. It uses the same detection as clip folders and runs without the engine lock.
+- **Instant Replay switch.** A real on/off switch (Off, Starting, On, Stopping, Error) in the header, on Home and on the Instant Replay page, driven by the engine's state.
+- **The window costs less while you play.** When REPLAYX is hidden behind a game, it polls the engine every 2 s instead of four times a second.
+- Performance page: encoder speed, video lag, target bitrate and the encoder's low-power state.
+- Developer tools: `replayx-gameproxy` (game-like GPU workload with time-coded frames), `scripts/overhead-bench.py`, `scripts/gameproxy-check.py`.
+
 ## 0.2.1-alpha.2 — Record no longer freezes the app; faster starts; interrupted-session fixes
 
 - **Fixed: pressing Record froze REPLAYX ("Not responding").** Root cause: once a second while capturing, the game detector asked Windows for the foreground window's title while holding the engine lock. When REPLAYX itself was in front (always true right after clicking Record), Windows delivers that request as a message to REPLAYX's own window thread, and that thread was waiting for the same lock to read the status: a deadlock. Capture kept writing replay segments, but the recording never received any and the window never recovered. Reproduced on the 0.2.1-alpha.1 build in 2 of 2 valid runs; 0 of 8 runs froze with this build.

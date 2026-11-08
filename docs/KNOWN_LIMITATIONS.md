@@ -1,6 +1,14 @@
-# Known limitations — 0.2.1-alpha.2
+# Known limitations — 0.2.1-alpha.3
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## Game performance and smoothness (0.2.1-alpha.3)
+
+- **The game-FPS impact of this build has not been measured in a real game yet.** On a hybrid laptop (Intel display GPU + NVIDIA), 0.2.1-alpha.2 reduced Roblox from 150–200 to 80–100 FPS in the user's test. This build moves encoding to Intel's fixed-function encoder, but capture itself must still run on the display GPU.
+- 120 fps doubles capture and encoding work. If the encoder cannot keep up, the Performance page says so, and capture stops after the video falls 8 s behind. Choose 60 fps or the Performance preset.
+- A recording can only be as smooth as the game: if the game renders fewer frames than the recording rate (for example 90 FPS into a 120 fps recording), some frames are necessarily repeated.
+- *Preserve aspect* (black bars) needs an extra frame copy through the CPU; *Stretch* and *Crop* stay on the GPU.
+- The game-detected notice cannot appear over games in exclusive full-screen mode (Windows does not allow it); it shows over windowed and borderless games.
 
 ## Capture start (0.2.1-alpha.2)
 

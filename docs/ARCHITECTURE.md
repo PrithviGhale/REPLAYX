@@ -72,6 +72,17 @@ The engine state lives behind one mutex. Rule since 0.2.1-alpha.2: **the window'
 
 `Engine::start` takes the lock only to check state and record the intent (`Starting { recording, replay }`), then releases it while `prepare_pipeline` checks the media runtime (once per launch), measures the display, selects the capture path, opens audio devices and starts FFmpeg. It then re-takes the lock to install the encoder, or to discard it if Stop/Cancel cleared the intent meanwhile. A Record while capture already runs attaches to that encoder. The working GPU path is stored in `video-path.json` (keyed by display device, mode, plan and encoder settings, not by the per-boot adapter LUID) and reused without probing; a path that fails before its first valid segment is denied, forgotten and replaced by probing. A watchdog abandons starts that exceed 60 s. User stops delete the replay buffer they leave behind (marker file plus background retries for briefly locked segments); buffers left by crashes stay for recovery.
 
+## Encoder choice, output size and overload (0.2.1-alpha.3)
+
+* **Encoder ladder.** `media::scaling_candidates` lists GPU paths in order; each is verified by a five-frame probe of the real capture → filter → encoder chain before use, and the winner is remembered per display and settings. On an Intel-driven display the order is D3D11 → NVENC/AMF (works when the display and encoder share a GPU), Quick Sync with the fixed-function **VDEnc** encoder (`h264_qsv_lp`, `-low_power 1`), Quick Sync with the shader-assisted encoder, Quick Sync VPP → NVENC/AMF with a scaled-frame transfer, then the CPU. VDEnc comes first because the alternative runs motion estimation on the Intel shader cores, which on hybrid laptops also composite every game frame.
+* **Output size.** Settings hold an explicit `width` × `height`. `geometry::plan` maps the captured region into it with *stretch*, *fit* (bars, CPU pad) or *crop* (centre crop at capture, nothing extra copied); *native* keeps the display's proportions at the chosen height. Quick Sync VPP and the CPU scaler convert with BT.709 limited range and the stream is tagged accordingly.
+* **Bitrate.** `media::target_bitrate_mbps` scales a preset's 1080p60 bitrate by pixel count and frame rate; VBR with `maxrate` 1.5× and a 2× buffer.
+* **Overload.** FFmpeg's progress reports `speed` and `out_time`. The engine computes how far encoded video trails the wall clock since the first frame. FFmpeg stops reading inputs that run ahead of the slowest output, so a lagging video encoder eventually starves the audio socket. At 8 s of lag capture stops with an explicit overload error (the audio queue holds 10 s). A recording cut short by any error is finalized as a clip and cleared, so the next Record starts normally.
+
+## Game-detected notice
+
+The engine samples the foreground process once a second without its lock (also while idle when the notice is enabled). `Status.foreground_game` feeds `overlay::Announcer`, which reports a game only when it newly comes to the front, at most once per game per 10 minutes. `overlay::Overlay` shows a native layered window (GDI, `WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT`, click-through, never focused) in the top-right corner of the work area for about 4 s, on its own thread. Text comes from the engine state (`overlay::capture_line`), so it never claims replay is ready when it is not.
+
 ## Saving clips
 
 A save hard-links the selected finalized segments into a snapshot (milliseconds), then a worker joins them

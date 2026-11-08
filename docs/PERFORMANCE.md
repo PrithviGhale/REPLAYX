@@ -1,5 +1,20 @@
 # Performance evidence and pending benchmark
 
+## 0.2.1-alpha.3 — game-FPS impact (measurement in progress)
+
+**What was measured.** With 0.2.1-alpha.2 buffering at 120 fps (Quick Sync, 12 Mb/s, 2560×1600 → 1728×1080) on a near-static desktop, Windows' per-engine GPU counters (`\GPU Engine(*)\Utilization Percentage`, 8 × 1 s) showed REPLAYX's FFmpeg at **34.4% of the Intel Iris Xe 3D engine** and **19.4% of its video engine**; REPLAYX's own window added 8.2% of the 3D engine. The user's report: Roblox 150–200 FPS without recording, 80–100 FPS with it.
+
+**Method for the comparison** (`scripts/overhead-bench.py`, needs a free desktop): `replayx-gameproxy` renders a heavy shader uncapped on the RTX in a borderless full-screen window, so its frames take the same Optimus path as a game. Its own frame times give FPS, 1% and 0.1% lows before and during a real REPLAYX capture of it. GPU engine use is sampled in the same window. The saved clip is analysed frame by frame (`gameproxy-check.py`: repeated frames, freezes, frame-advance percentiles). Each configuration runs back to back with a no-capture control for thermal drift.
+
+| Configuration | Game FPS (avg / 1% low) | Intel 3D engine | Repeated frames in clip |
+| --- | --- | --- | --- |
+| No capture (control) | pending | — | — |
+| Quick Sync, shader-assisted (0.2.1-alpha.2 path) | pending | pending | pending |
+| Quick Sync, low-power VDEnc (0.2.1-alpha.3 default) | pending | pending | pending |
+| Quick Sync VPP → NVENC (hybrid) | pending | pending | pending |
+
+**Real game.** Roblox, same place and camera, Roblox's own frame-rate display (Shift+F5): REPLAYX closed, replay at 60 fps, replay at 120 fps, recording at 1080p60, saving a replay while playing. Results will be recorded here as reported, labelled as user measurements.
+
 ## 0.2.1-alpha.2 — capture start
 
 Measured with `replayx-cli start-bench silent` (real capture of the 2560×1600 display to 1728×1080 60 fps, Quick Sync zero-copy) and in the real window with `scripts/ui-record-check.mjs`. Times are from the start request.
