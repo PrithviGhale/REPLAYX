@@ -289,7 +289,8 @@ impl Media {
             }
             text
         });
-        let deadline = Instant::now() + Duration::from_secs(8);
+        // Five frames normally take well under a second, first driver init ~1-2 s.
+        let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
             if let Ok(Some(status)) = child.try_wait() {
                 break Some(status);
@@ -595,8 +596,13 @@ impl Media {
 /// be handed to NVENC directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Scaler {
-    /// Direct3D 11 video processor, frames stay on the display GPU (zero copy).
+    /// No scaling: Direct3D 11 frames go straight to the encoder, which converts
+    /// BGRA to YUV itself (zero copy). Only when the frame needs no resize.
     D3d11,
+    /// One frame copy into CUDA, scaled there (BGRA), encoded by NVENC. For
+    /// displays driven by the NVIDIA GPU. (FFmpeg's scale_d3d11 cannot create
+    /// its output texture in the pinned build, on Intel or NVIDIA.)
+    Cuda,
     /// Intel VPP + Quick Sync encode, frames stay on the Intel GPU (zero copy).
     QsvZeroCopy,
     /// Intel VPP scaling, then only the scaled NV12 frame is copied to the encoder.
@@ -607,15 +613,24 @@ pub enum Scaler {
 impl Scaler {
     pub fn label(self) -> &'static str {
         match self {
-            Scaler::D3d11 => "GPU zero-copy (Direct3D 11)",
+            Scaler::D3d11 => "GPU zero-copy (Direct3D 11 → encoder)",
+            Scaler::Cuda => "GPU scaling (CUDA) + one frame transfer",
             Scaler::QsvZeroCopy => "GPU zero-copy (Intel Quick Sync)",
             Scaler::QsvHybrid => "GPU scaling (Intel VPP) + scaled-frame transfer",
             Scaler::Cpu => "CPU fallback",
         }
     }
-    /// Whether the scaler can produce this plan's frame (padding needs system memory).
+    /// Whether the scaler can produce this plan's frame (padding needs system
+    /// memory; the direct path cannot resize at all).
     pub fn supports(self, plan: &VideoPlan) -> bool {
-        !matches!(self, Scaler::D3d11 | Scaler::QsvZeroCopy) || !plan.padded()
+        match self {
+            Scaler::D3d11 => {
+                !plan.padded()
+                    && (plan.source.width, plan.source.height) == (plan.width, plan.height)
+            }
+            Scaler::QsvZeroCopy | Scaler::Cuda => !plan.padded(),
+            Scaler::QsvHybrid | Scaler::Cpu => true,
+        }
     }
 }
 
@@ -639,27 +654,30 @@ pub fn encoder_label(id: &str) -> String {
         other => other.into(),
     }
 }
-pub fn scaling_candidates(requested: &str) -> Vec<(Scaler, &'static str)> {
-    match requested {
-        "auto" => vec![
-            (Scaler::D3d11, "h264_nvenc"),
-            (Scaler::D3d11, "h264_amf"),
-            (Scaler::QsvZeroCopy, "h264_qsv_lp"),
-            (Scaler::QsvZeroCopy, "h264_qsv"),
-            (Scaler::QsvHybrid, "h264_nvenc"),
-            (Scaler::QsvHybrid, "h264_amf"),
-        ],
-        "h264_nvenc" => vec![
-            (Scaler::D3d11, "h264_nvenc"),
-            (Scaler::QsvHybrid, "h264_nvenc"),
-        ],
-        "h264_amf" => vec![(Scaler::D3d11, "h264_amf"), (Scaler::QsvHybrid, "h264_amf")],
-        "h264_qsv" => vec![
-            (Scaler::QsvZeroCopy, "h264_qsv_lp"),
-            (Scaler::QsvZeroCopy, "h264_qsv"),
-        ],
-        _ => vec![],
-    }
+pub const VENDOR_INTEL: u32 = 0x8086;
+pub const VENDOR_NVIDIA: u32 = 0x10de;
+pub const VENDOR_AMD: u32 = 0x1002;
+/// GPU paths worth probing, fastest first, for the GPU that drives the
+/// display. Paths that cannot work on that GPU are not tried: each failed
+/// probe costs a capture start, and Quick Sync probes on a display owned by
+/// another GPU could run into their timeout (0.2.1-alpha.3 took ~30 s to start
+/// on an NVIDIA-driven display). Unknown vendors get every candidate.
+pub fn scaling_candidates(requested: &str, vendor: u32) -> Vec<(Scaler, &'static str)> {
+    let all = [
+        (VENDOR_NVIDIA, Scaler::D3d11, "h264_nvenc"),
+        (VENDOR_NVIDIA, Scaler::Cuda, "h264_nvenc"),
+        (VENDOR_AMD, Scaler::D3d11, "h264_amf"),
+        (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv_lp"),
+        (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv"),
+        (VENDOR_INTEL, Scaler::QsvHybrid, "h264_nvenc"),
+        (VENDOR_INTEL, Scaler::QsvHybrid, "h264_amf"),
+    ];
+    let known = [VENDOR_INTEL, VENDOR_NVIDIA, VENDOR_AMD].contains(&vendor);
+    all.into_iter()
+        .filter(|(v, _, _)| !known || *v == vendor)
+        .filter(|(_, _, e)| requested == "auto" || ffmpeg_encoder(e).0 == requested)
+        .map(|(_, s, e)| (s, e))
+        .collect()
 }
 
 fn summarize_error(text: &str) -> String {
@@ -714,7 +732,7 @@ pub fn tuning() -> Tuning {
 const QSV_709: &str = ":out_color_matrix=bt709:out_range=1";
 /// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
 pub fn converts_bt709(scaler: Scaler) -> bool {
-    !matches!(scaler, Scaler::D3d11)
+    !matches!(scaler, Scaler::D3d11 | Scaler::Cuda)
 }
 pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     let t = tuning();
@@ -728,7 +746,10 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         .map(|p| format!(",{p}"))
         .unwrap_or_default();
     match scaler {
-        Scaler::D3d11 => format!("scale_d3d11=width={iw}:height={ih}:format=nv12,setsar=1"),
+        Scaler::D3d11 => "setsar=1".to_string(),
+        Scaler::Cuda => format!(
+            "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1"
+        ),
         Scaler::QsvZeroCopy => {
             format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},setsar=1")
         }
@@ -736,7 +757,7 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
             "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},hwdownload,format=nv12{pad},setsar=1"
         ),
         Scaler::Cpu => format!(
-            "hwdownload,format=bgra,scale={iw}:{ih}:flags=bicubic:out_color_matrix=bt709:out_range=tv{pad},setsar=1,format=yuv420p"
+            "hwdownload,format=bgra,scale={iw}:{ih}:flags=bilinear:out_color_matrix=bt709:out_range=tv{pad},setsar=1,format=yuv420p"
         ),
     }
 }
@@ -1065,18 +1086,34 @@ mod tests {
     }
 
     #[test]
-    fn zero_copy_paths_are_tried_before_transfers_and_cpu_is_never_a_candidate() {
-        let auto = scaling_candidates("auto");
-        assert_eq!(auto[0], (Scaler::D3d11, "h264_nvenc"));
-        let qsv = auto
-            .iter()
-            .position(|c| c.0 == Scaler::QsvZeroCopy)
-            .unwrap();
-        let hybrid = auto.iter().position(|c| c.0 == Scaler::QsvHybrid).unwrap();
+    fn candidates_follow_the_gpu_that_drives_the_display() {
+        // Intel-driven display (hybrid laptop desktop): Quick Sync first,
+        // low-power before shader-assisted, then a transfer to NVENC/AMF.
+        let intel = scaling_candidates("auto", VENDOR_INTEL);
+        assert_eq!(intel[0], (Scaler::QsvZeroCopy, "h264_qsv_lp"));
+        let qsv = intel.iter().position(|c| c.1 == "h264_qsv").unwrap();
+        let hybrid = intel.iter().position(|c| c.0 == Scaler::QsvHybrid).unwrap();
         assert!(qsv < hybrid);
-        assert!(scaling_candidates("h264_nvenc")
+        assert!(intel
+            .iter()
+            .all(|c| c.0 != Scaler::D3d11 && c.0 != Scaler::Cuda));
+        // NVIDIA-driven display (desktop PC, or Advanced Optimus during a
+        // full-screen game): NVENC only, zero copy first; no Quick Sync probes.
+        let nvidia = scaling_candidates("auto", VENDOR_NVIDIA);
+        assert_eq!(
+            nvidia,
+            vec![(Scaler::D3d11, "h264_nvenc"), (Scaler::Cuda, "h264_nvenc")]
+        );
+        assert_eq!(
+            scaling_candidates("auto", VENDOR_AMD),
+            vec![(Scaler::D3d11, "h264_amf")]
+        );
+        // Unknown vendor: everything; an explicit encoder filters the list.
+        assert_eq!(scaling_candidates("auto", 0).len(), 7);
+        assert!(scaling_candidates("h264_nvenc", 0)
             .iter()
             .all(|c| c.1 == "h264_nvenc"));
+        assert!(scaling_candidates("h264_qsv", VENDOR_NVIDIA).is_empty());
         for r in [
             "auto",
             "h264_nvenc",
@@ -1085,8 +1122,31 @@ mod tests {
             "libopenh264",
             "mpeg4",
         ] {
-            assert!(scaling_candidates(r).iter().all(|c| c.0 != Scaler::Cpu));
+            for v in [0, VENDOR_INTEL, VENDOR_NVIDIA, VENDOR_AMD] {
+                assert!(scaling_candidates(r, v).iter().all(|c| c.0 != Scaler::Cpu));
+            }
         }
+    }
+    #[test]
+    fn direct_encoding_only_without_resizing() {
+        let full = |w, h| CaptureRect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+        };
+        // 1440x1080 stretched gameplay recorded as 1920x1080 needs scaling.
+        let stretched = plan(full(1440, 1080), 1920, 1080, "stretch").unwrap();
+        assert!(!Scaler::D3d11.supports(&stretched));
+        assert!(Scaler::Cuda.supports(&stretched));
+        // A 1920x1080 display recorded at 1920x1080 goes straight to NVENC.
+        let same = plan(full(1920, 1080), 1920, 1080, "stretch").unwrap();
+        assert!(Scaler::D3d11.supports(&same));
+        let fit = plan(full(2560, 1600), 1920, 1080, "fit").unwrap();
+        assert!(!Scaler::Cuda.supports(&fit) && Scaler::Cpu.supports(&fit));
+        assert_eq!(video_filter(&same, Scaler::D3d11), "setsar=1");
+        assert!(video_filter(&stretched, Scaler::Cuda).contains("scale_cuda=w=1920:h=1080"));
+        assert!(!converts_bt709(Scaler::Cuda) && converts_bt709(Scaler::QsvZeroCopy));
     }
 
     #[test]
@@ -1152,7 +1212,7 @@ mod tests {
     }
     #[test]
     fn low_power_quick_sync_is_tried_first() {
-        let auto = scaling_candidates("auto");
+        let auto = scaling_candidates("auto", VENDOR_INTEL);
         let lp = auto.iter().position(|c| c.1 == "h264_qsv_lp").unwrap();
         let normal = auto.iter().position(|c| c.1 == "h264_qsv").unwrap();
         assert!(lp < normal);

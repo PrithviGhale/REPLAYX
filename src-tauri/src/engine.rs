@@ -902,7 +902,8 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v2|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}",
+        "v3|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}",
+        g.adapter_vendor,
         g.device,
         g.desktop_width,
         g.desktop_height,
@@ -916,17 +917,42 @@ fn remembered_key(
         req.media.ffmpeg.display()
     )
 }
-fn remember_video_path(data_dir: &Path, path: &RememberedPath) {
+/// Remembered paths, one per display mode and settings (newest first). A hybrid
+/// laptop alternates between modes (desktop on the Intel GPU, full-screen game
+/// on the NVIDIA GPU), and each must start without probing.
+#[derive(Serialize, serde::Deserialize, Default)]
+struct RememberedPaths {
+    paths: Vec<RememberedPath>,
+}
+const REMEMBERED_MAX: usize = 8;
+fn remembered_paths(data_dir: &Path) -> RememberedPaths {
+    fs::read(data_dir.join(REMEMBERED_PATH))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+fn write_remembered(data_dir: &Path, all: &RememberedPaths) {
     let file = data_dir.join(REMEMBERED_PATH);
     let tmp = data_dir.join("video-path.json.tmp");
-    if let Ok(bytes) = serde_json::to_vec_pretty(path) {
+    if let Ok(bytes) = serde_json::to_vec_pretty(all) {
         if fs::write(&tmp, bytes).is_ok() {
             let _ = fs::rename(&tmp, &file);
         }
     }
 }
-fn forget_video_path(data_dir: &Path) {
-    let _ = fs::remove_file(data_dir.join(REMEMBERED_PATH));
+fn remember_video_path(data_dir: &Path, path: RememberedPath) {
+    let mut all = remembered_paths(data_dir);
+    all.paths.retain(|p| p.key != path.key);
+    all.paths.insert(0, path);
+    all.paths.truncate(REMEMBERED_MAX);
+    write_remembered(data_dir, &all);
+}
+/// Forget one remembered path (it failed during a real start).
+fn forget_video_path(data_dir: &Path, scaler: Scaler, encoder: &str) {
+    let mut all = remembered_paths(data_dir);
+    all.paths
+        .retain(|p| !(p.scaler == scaler && p.encoder == encoder));
+    write_remembered(data_dir, &all);
 }
 struct VideoPath {
     scaler: Scaler,
@@ -988,9 +1014,10 @@ fn select_video_path(
             .map(|(_, r)| r.clone())
     };
     let stable = remembered_key(req, g, plan);
-    let remembered = fs::read(req.data_dir.join(REMEMBERED_PATH))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<RememberedPath>(&b).ok());
+    let remembered = remembered_paths(&req.data_dir)
+        .paths
+        .into_iter()
+        .find(|r| r.key == stable);
     if let Some(r) = remembered {
         if r.key == stable
             && s.gpu_scaling
@@ -1009,7 +1036,7 @@ fn select_video_path(
     }
     let mut rejected = Vec::new();
     let candidates = if s.gpu_scaling {
-        media::scaling_candidates(&s.encoder)
+        media::scaling_candidates(&s.encoder, g.adapter_vendor)
     } else {
         rejected.push("GPU scaling disabled in settings".into());
         Vec::new()
@@ -1032,7 +1059,7 @@ fn select_video_path(
                 // something temporary and must be re-checked on the next start.
                 remember_video_path(
                     &req.data_dir,
-                    &RememberedPath {
+                    RememberedPath {
                         key: stable,
                         scaler,
                         encoder: encoder.into(),
@@ -1849,7 +1876,7 @@ impl Inner {
             && !error.starts_with("Audio");
         if startup_gpu_failure {
             if let Some((key, scaler, encoder)) = self.video_path_cache.take() {
-                forget_video_path(&self.data_dir);
+                forget_video_path(&self.data_dir, scaler, &encoder);
                 self.denied_paths
                     .push((format!("{key}|{scaler:?}|{encoder}"), error.clone()));
                 let (replay, recording) = (self.status.replay, self.status.recording);

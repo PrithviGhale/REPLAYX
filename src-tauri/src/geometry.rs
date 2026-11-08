@@ -39,6 +39,11 @@ pub struct DisplayGeometry {
     pub index: u32,
     pub device: String,
     pub adapter_luid: String,
+    /// PCI vendor of the GPU driving this display (0x8086 Intel, 0x10DE
+    /// NVIDIA, 0x1002 AMD). Hybrid laptops can move the display between GPUs
+    /// (for example NVIDIA Advanced Optimus while a full-screen game runs).
+    #[serde(default)]
+    pub adapter_vendor: u32,
     pub left: i32,
     pub top: i32,
     pub desktop_width: u32,
@@ -114,6 +119,7 @@ pub fn display(index: u32) -> Result<DisplayGeometry> {
                 "{}:{}",
                 adapter_desc.AdapterLuid.HighPart, adapter_desc.AdapterLuid.LowPart
             ),
+            adapter_vendor: adapter_desc.VendorId,
             left: rect.left,
             top: rect.top,
             desktop_width: width,
@@ -279,6 +285,7 @@ mod tests {
             index: 0,
             device: "DISPLAY1".into(),
             adapter_luid: "0:1".into(),
+            adapter_vendor: 0x8086,
             left: -1280,
             top: 0,
             desktop_width: w,
