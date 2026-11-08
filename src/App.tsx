@@ -14,6 +14,7 @@ import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
 import { PerformancePage } from './pages/Performance';
 import { SettingsPage } from './pages/Settings';
+import { QuitPrompt } from './QuitPrompt';
 
 export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'performance' | 'settings';
 const NAV: { group: string; items: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] }[] = [
@@ -118,6 +119,8 @@ export function App() {
   const pollError = usePollError();
   useEffect(() => { startPolling(); }, []);
   const title = NAV.flatMap(g => g.items).find(i => i.id === page)!.label;
+  // Tray "Settings…" and similar open a page by name.
+  const go = React.useCallback((p: string) => { if (NAV.some(g => g.items.some(i => i.id === p))) setPage(p as Page); }, []);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -164,6 +167,7 @@ export function App() {
         <SaveBar />
       </div>
       <Toasts />
+      <QuitPrompt onNavigate={go} />
     </div>
   );
 }

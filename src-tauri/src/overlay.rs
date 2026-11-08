@@ -314,6 +314,8 @@ fn show(n: &Notice) -> windows::core::Result<()> {
             Some(instance.into()),
             None,
         )?;
+        // Never in clips (it used to be captured into the first seconds).
+        let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         let radius = (14.0 * scale) as i32;
         let region = CreateRoundRectRgn(0, 0, w + 1, h + 1, radius, radius);
         let _ = SetWindowRgn(hwnd, Some(region), false);

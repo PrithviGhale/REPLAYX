@@ -15,7 +15,7 @@ use std::{
     thread,
 };
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager, State,
 };
@@ -219,6 +219,8 @@ fn save_settings_blocking(
 ) -> Reply<()> {
     settings.validate().map_err(err)?;
     let previous = state.engine.settings();
+    let mut settings = settings;
+    settings.tray_hint_shown |= previous.tray_hint_shown;
     if state.engine.status().replay
         || state.engine.status().recording
         || state.engine.status().saving > 0
@@ -708,6 +710,70 @@ async fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
     *state.updating.lock().unwrap() = false;
     result
 }
+/// Bring the main window forward, optionally on a page.
+fn show_main(app: &tauri::AppHandle, page: Option<&str>) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    if let Some(page) = page {
+        let _ = app.emit("navigate", page);
+    }
+}
+/// Tray texts: (replay on, replay label, save enabled, recording label, mic label).
+fn tray_labels(status: &Status, settings: &Settings) -> (bool, String, bool, String, String) {
+    let view = crate::status_overlay::view(status, settings);
+    use crate::status_overlay::{MicState, ReplayState};
+    let replay = match view.replay {
+        ReplayState::Off => "Instant Replay: off",
+        ReplayState::Starting => "Instant Replay: starting…",
+        ReplayState::On => "Instant Replay: on",
+        ReplayState::Saving => "Instant Replay: saving…",
+        ReplayState::Error => "Instant Replay: error",
+    };
+    let recording = match (status.recording, view.recording) {
+        (true, Some(s)) => format!("Stop recording ({}:{:02})", s / 60, s % 60),
+        (true, None) => "Stop recording (starting…)".into(),
+        _ => "Start recording".into(),
+    };
+    let mic = match view.mic {
+        MicState::None => "Microphone: not added",
+        MicState::Off => "Microphone: off",
+        MicState::Muted => "Microphone: muted",
+        MicState::Ready => "Microphone: ready",
+        MicState::Live => "Microphone: recording",
+        MicState::Error => "Microphone: error",
+    };
+    (
+        status.replay,
+        replay.into(),
+        status.replay && matches!(status.state.as_str(), "Buffering" | "Recording"),
+        recording,
+        mic.into(),
+    )
+}
+/// Quit from the tray or the close button. While a recording or a save is in
+/// progress the window asks first (the frontend calls `exit_app`); otherwise
+/// capture is stopped, the recording finalized and the encoder ended.
+fn request_quit(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let status = state.engine.status();
+        if status.recording || status.saving > 0 {
+            show_main(&app, None);
+            let _ = app.emit(
+                "confirm-quit",
+                serde_json::json!({"recording": status.recording, "saving": status.saving}),
+            );
+            return;
+        }
+        match state.engine.shutdown() {
+            Ok(()) => app.exit(0),
+            Err(e) => state.report(err(e)),
+        }
+    });
+}
 #[tauri::command]
 async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<()> {
     let state = state.inner().clone();
@@ -837,33 +903,44 @@ pub fn run() {
                 .engine
                 .update(|i| i.status.hotkey_error = hotkeys);
             let show = MenuItem::with_id(app, "show", "Open REPLAYX", true, None::<&str>)?;
-            let save = MenuItem::with_id(app, "save", "Save instant replay", true, None::<&str>)?;
             let replay =
-                MenuItem::with_id(app, "replay", "Start / stop replay", true, None::<&str>)?;
-            let recording = MenuItem::with_id(
+                CheckMenuItem::with_id(app, "replay", "Instant Replay", true, false, None::<&str>)?;
+            let save = MenuItem::with_id(app, "save", "Save replay", false, None::<&str>)?;
+            let recording =
+                MenuItem::with_id(app, "recording", "Start recording", true, None::<&str>)?;
+            let mic = MenuItem::with_id(app, "mic", "Microphone: not added", false, None::<&str>)?;
+            let clips = MenuItem::with_id(app, "clips", "Open clips folder", true, None::<&str>)?;
+            let open_settings =
+                MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit REPLAYX", true, None::<&str>)?;
+            let menu = Menu::with_items(
                 app,
-                "recording",
-                "Start / stop recording",
-                true,
-                None::<&str>,
+                &[
+                    &show,
+                    &PredefinedMenuItem::separator(app)?,
+                    &replay,
+                    &save,
+                    &recording,
+                    &mic,
+                    &PredefinedMenuItem::separator(app)?,
+                    &clips,
+                    &open_settings,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit,
+                ],
             )?;
-            let quit = MenuItem::with_id(
-                app,
-                "quit",
-                "Exit and finalize recording",
-                true,
-                None::<&str>,
-            )?;
-            let menu = Menu::with_items(app, &[&show, &save, &replay, &recording, &quit])?;
+            let tray_items = (replay.clone(), save.clone(), recording.clone(), mic.clone());
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("REPLAYX — Stopped")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
+                    "show" => show_main(app, None),
+                    "settings" => show_main(app, Some("settings")),
+                    "clips" => {
+                        let root = app.state::<AppState>().engine.settings().output_dir;
+                        if fs::create_dir_all(&root).is_ok() {
+                            let _ = command("explorer.exe").arg(&root).spawn();
                         }
                     }
                     "save" => background_action(app.clone(), "save_replay"),
@@ -879,18 +956,7 @@ pub fn run() {
                         app.clone(),
                         recording_toggle(&app.state::<AppState>().engine.status()),
                     ),
-                    "quit" => {
-                        let app = app.clone();
-                        thread::spawn(move || {
-                            let state = app.state::<AppState>();
-                            if state.engine.status().saving == 0 {
-                                match state.engine.shutdown() {
-                                    Ok(()) => app.exit(0),
-                                    Err(e) => state.report(err(e)),
-                                }
-                            }
-                        });
-                    }
+                    "quit" => request_quit(app.clone()),
                     _ => {}
                 })
                 .build(app)?;
@@ -901,6 +967,9 @@ pub fn run() {
                 let mut family = vec![own];
                 let mut tick = 0u64;
                 let notices = crate::overlay::Overlay::spawn();
+                let status_overlay = crate::status_overlay::StatusOverlay::spawn();
+                let mut tray_shown = Default::default();
+                let mut overlay_frame: Option<crate::status_overlay::Frame> = None;
                 let mut announcer = crate::overlay::Announcer::default();
                 loop {
                     thread::sleep(std::time::Duration::from_secs(1));
@@ -909,9 +978,44 @@ pub fn run() {
                     if let Some(tray) = handle.tray_by_id("main-tray") {
                         let _ = tray.set_tooltip(Some(format!("REPLAYX — {}", status.state)));
                     }
+                    // Tray menu mirrors the real state (texts only change on news).
+                    {
+                        let settings = state.engine.settings();
+                        let labels = tray_labels(&status, &settings);
+                        if labels != tray_shown {
+                            let (replay, save, recording, mic) = &tray_items;
+                            let _ = replay.set_checked(labels.0);
+                            let _ = replay.set_text(&labels.1);
+                            let _ = save.set_enabled(labels.2);
+                            let _ = recording.set_text(&labels.3);
+                            let _ = mic.set_text(&labels.4);
+                            tray_shown = labels;
+                        }
+                    }
                     // "Game detected" notice, from the same detector that files
                     // clips (sampled by the engine without its lock).
                     let settings = state.engine.settings();
+                    // In-game status overlay: only sent when what it shows changes.
+                    let frame = crate::status_overlay::visible(
+                        &settings.overlay,
+                        status.foreground_game.is_some(),
+                    )
+                    .then(|| crate::status_overlay::Frame {
+                        items: crate::status_overlay::items(
+                            &crate::status_overlay::view(&status, &settings),
+                            &settings.overlay,
+                        ),
+                        position: settings.overlay.position.clone(),
+                        opacity: settings.overlay.opacity,
+                        capturable: false,
+                    })
+                    .filter(|f| !f.items.is_empty());
+                    if frame != overlay_frame || frame.is_some() {
+                        // Re-sent while visible so it follows the game's monitor
+                        // and stays on top; the overlay thread skips repaints.
+                        status_overlay.update(frame.clone());
+                        overlay_frame = frame;
+                    }
                     let news = announcer.observe(
                         status
                             .foreground_game
@@ -982,23 +1086,22 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
+                api.prevent_close();
                 if state.engine.settings().close_to_tray {
-                    api.prevent_close();
                     let _ = window.hide();
+                    if !state.engine.settings().tray_hint_shown {
+                        state.engine.mark_tray_hint_shown();
+                        // One-time explanation; the notice thread ends after it.
+                        let notice = crate::overlay::Overlay::spawn();
+                        notice.show(crate::overlay::Notice {
+                            title: "REPLAYX is still running".into(),
+                            subtitle: "In the tray. Right-click its icon to quit.".into(),
+                            active: true,
+                            icon_exe: None,
+                        });
+                    }
                 } else {
-                    api.prevent_close();
-                    let app = window.app_handle().clone();
-                    thread::spawn(move || {
-                        let state = app.state::<AppState>();
-                        if state.engine.status().saving > 0 {
-                            state.report("Wait for saving to finish before exiting".into());
-                            return;
-                        }
-                        match state.engine.shutdown() {
-                            Ok(()) => app.exit(0),
-                            Err(e) => state.report(err(e)),
-                        }
-                    });
+                    request_quit(window.app_handle().clone());
                 }
             }
         })

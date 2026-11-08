@@ -1,5 +1,39 @@
 # Performance evidence and pending benchmark
 
+## 0.2.2-alpha.1 — quality per GB and codecs
+
+Method: `scripts/quality-bench.py` encodes the same footage with each configuration (NVENC p5, tune hq, spatial AQ, lookahead 20, no B-frames, 2 s GOP, exactly as REPLAYX does) and scores it against the source with FFmpeg's libvmaf (VMAF v0.6.1, plus SSIM and PSNR). Two sources: 20 s of the user's real Roblox recording (itself H.264 at 16 Mb/s, which slightly favours H.264) and a 12 s lossless synthetic game-like scene with noise foliage, a fractal, gradients, a minimap and a HUD (much harder to compress). Results: `test-output/quality/*/results.json`.
+
+Real Roblox gameplay, 1080p60:
+
+| Configuration | Mb/s | MB/min | VMAF | VMAF 5% low | SSIM |
+|---|---|---|---|---|---|
+| H.264 VBR 16 (0.2.1-alpha.3 Balanced) | 16.66 | 124.9 | 97.89 | 92.29 | 0.9959 |
+| **H.264 CQ 28 (new Balanced)** | 14.65 | 109.9 | 97.61 | 92.53 | 0.9954 |
+| H.264 CQ 30 | 11.86 | 89.0 | 95.65 | 89.93 | 0.9926 |
+| H.264 VBR 10 | 10.49 | 78.7 | 93.27 | 84.35 | 0.9896 |
+| HEVC CQ 28 | 14.20 | 106.5 | 97.29 | 92.64 | 0.9951 |
+| HEVC CQ 30 | 11.25 | 84.3 | 95.59 | 90.05 | 0.9930 |
+| **AV1 CQ 34 (new Balanced, cap 18)** | 12.47 | 93.5 | 97.65 | 93.00 | 0.9939 |
+| AV1 CQ 36 | 10.52 | 78.9 | 96.64 | 91.59 | 0.9923 |
+| AV1 CQ 38 (new Performance) | 8.81 | 66.1 | 95.18 | 89.84 | 0.9902 |
+
+Synthetic hard scene: H.264 VBR 16.55 Mb/s → VMAF 84.0; H.264 CQ 28 → 22.0 Mb/s (under its 24 Mb/s cap), 86.1; AV1 CQ 34 capped at 18 → 18.5 Mb/s, 86.7; HEVC CQ 30 → 16.9 Mb/s, 83.1 (worse than H.264 at equal rate).
+
+Conclusions: constant quality with a cap beats a fixed average (same picture for 12% less on real gameplay; more bits where a scene needs them, never above the cap). AV1 needs about 25% fewer bits than H.264 for the same VMAF. HEVC on this GPU with these settings is not meaningfully smaller than H.264, so the app does not promise smaller HEVC files. H.264 stays the default because it plays everywhere.
+
+Game-FPS impact and smoothness (`scripts/overhead-bench.py`, the GPU-heavy game proxy full screen on the RTX 4070, system audio captured, Balanced 1080p60, 20 s per run, one run each):
+
+| Codec | Game FPS without → with REPLAYX | Cost | 1% low | Repeated frames in clip |
+|---|---|---|---|---|
+| H.264 CQ 28 | 972.4 → 943.8 | 2.9% | 551.5 → 526.1 | 0.0% |
+| HEVC CQ 28 | 982.5 → 939.2 | 4.4% | 559.3 → 524.7 | 0.0% |
+| AV1 CQ 34 | 957.9 → 929.3 | 3.0% | 536.7 → 510.3 | 0.14% (one frame) |
+
+The proxy runs uncapped near 1000 FPS here, so these percentages are an upper bound for a game at a normal frame rate; earlier runs at ~185 FPS cost 3–7%. Not yet measured in a real game.
+
+Colour: NVENC's RGB→YUV conversion was measured by encoding solid colours from system-memory BGRA, CUDA frames and Direct3D 11 textures with H.264, HEVC and AV1: always BT.601 matrix, limited range (red → Y 81, Cb 90, Cr 239). Quick Sync's video processor converts to BT.709 (red → Y 61, Cb 102, Cr 239).
+
 ## 0.2.1-alpha.3 — game-FPS impact (measurement in progress)
 
 **What was measured.** With 0.2.1-alpha.2 buffering at 120 fps (Quick Sync, 12 Mb/s, 2560×1600 → 1728×1080) on a near-static desktop, Windows' per-engine GPU counters (`\GPU Engine(*)\Utilization Percentage`, 8 × 1 s) showed REPLAYX's FFmpeg at **34.4% of the Intel Iris Xe 3D engine** and **19.4% of its video engine**; REPLAYX's own window added 8.2% of the 3D engine. The user's report: Roblox 150–200 FPS without recording, 80–100 FPS with it.

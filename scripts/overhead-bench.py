@@ -57,6 +57,12 @@ CONFIGS = {
     "prio-gpu": ([], "cpu_priority=0,gpu_priority=1"),
     "prio-cpu": ([], "cpu_priority=1,gpu_priority=0"),
     "prio-both": ([], "cpu_priority=1,gpu_priority=1"),
+    # Codecs with the default (Balanced, capped constant quality on NVENC).
+    "h264": (["codec=h264"], ""),
+    "hevc": (["codec=hevc"], ""),
+    "av1": (["codec=av1"], ""),
+    "av1-quality": (["codec=av1", "preset=quality"], ""),
+    "h264-quality": (["codec=h264", "preset=quality"], ""),
 }
 
 GPU_PS = r"""

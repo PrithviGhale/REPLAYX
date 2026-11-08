@@ -3,7 +3,8 @@ import { Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, ShieldCheck
 import { api, type Settings, type UpdateInfo } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { Badge, Button, Card, Field, Kbd, Toggle } from '../ui';
+import { Badge, Button, Card, Field, Kbd, Segmented, Toggle } from '../ui';
+import type { OverlayPosition, OverlaySettings } from '../api';
 import { Section } from './shared';
 import { VERSION } from '../api';
 
@@ -102,11 +103,12 @@ export function SettingsPage() {
               <Button size="sm" disabled={active || draft.game_mappings.length >= 200} onClick={() => patch({ game_mappings: [...draft.game_mappings, { exe: '', name: '' }] })}>Add correction</Button>
             </div>
           </Card>
+          <OverlayCard />
           <Card title="Startup and window">
             <Toggle label="Start with Windows" checked={draft.launch_at_startup} disabled={active} onChange={v => patch({ launch_at_startup: v })}
               description="Opens REPLAYX in the system tray when you sign in. Capture never starts on its own." />
-            <Toggle label="Keep running in the tray when closed" checked={draft.close_to_tray} disabled={active} onChange={v => patch({ close_to_tray: v })}
-              description="Capture and hotkeys keep working. Use the tray menu to exit." />
+            <Toggle label="Minimize to tray when closing" checked={draft.close_to_tray} disabled={active} onChange={v => patch({ close_to_tray: v })}
+              description="Closing the window keeps REPLAYX running in the tray: Instant Replay, recording and hotkeys keep working. Quit from the tray menu; REPLAYX asks first if a recording or save is in progress." />
           </Card>
         </>
       )}
@@ -156,5 +158,51 @@ export function SettingsPage() {
         </Card>
       )}
     </Section>
+  );
+}
+
+const CORNERS: { value: OverlayPosition; label: string }[] = [
+  { value: 'top-left', label: 'Top left' }, { value: 'top-right', label: 'Top right' },
+  { value: 'bottom-left', label: 'Bottom left' }, { value: 'bottom-right', label: 'Bottom right' },
+];
+
+/** In-game status overlay preferences, with a live preview of the pill. */
+function OverlayCard() {
+  const { draft, patch } = useApp();
+  const active = useStatus(activeOf);
+  const o = draft.overlay;
+  const set = (p: Partial<OverlaySettings>) => patch({ overlay: { ...o, ...p } });
+  const item = (color: string, text: string) => <span className="ov-item"><i style={{ background: color }} />{o.compact ? null : text}</span>;
+  return (
+    <Card title="In-game overlay" subtitle="A small status pill over your game: Instant Replay, recording time and microphone. It is click-through, never takes focus and is excluded from capture, so it never appears in clips.">
+      <Toggle label="Show the status overlay" checked={o.enabled} disabled={active} onChange={v => set({ enabled: v })}
+        description="Shown over windowed and borderless games. Windows hides every desktop window behind exclusive full-screen games." />
+      <div className={`ov-settings ${o.enabled ? '' : 'off'}`}>
+        <div className="ov-preview" aria-hidden="true">
+          <div className={`ov-screen ${o.position}`}>
+            <div className="ov-pill" style={{ opacity: o.opacity / 100 }}>
+              {o.show_timer ? item('#ff4a5a', 'REC 0:42') : item('#ff4a5a', 'REC')}
+              {o.show_replay && item('#9a8cff', 'Replay on')}
+              {o.show_mic && item('#3ad29f', 'Mic live')}
+            </div>
+          </div>
+        </div>
+        <div className="ov-options">
+          <Field label="Position">
+            <Segmented label="Overlay position" value={o.position} disabled={active || !o.enabled} onChange={v => set({ position: v })} options={CORNERS} />
+          </Field>
+          <Field label={`Opacity · ${o.opacity}%`}>
+            <input type="range" min={30} max={100} step={5} value={o.opacity} disabled={active || !o.enabled} aria-label="Overlay opacity" onChange={e => set({ opacity: Number(e.target.value) })} />
+          </Field>
+          <Toggle label="Only while a game is in front" checked={o.games_only} disabled={active || !o.enabled} onChange={v => set({ games_only: v })}
+            description="Off: also on the desktop and in other apps." />
+          <Toggle label="Compact (dots only)" checked={o.compact} disabled={active || !o.enabled} onChange={v => set({ compact: v })} />
+          <Toggle label="Instant Replay state" checked={o.show_replay} disabled={active || !o.enabled} onChange={v => set({ show_replay: v })} />
+          <Toggle label="Microphone state" checked={o.show_mic} disabled={active || !o.enabled} onChange={v => set({ show_mic: v })} />
+          <Toggle label="Recording timer" checked={o.show_timer} disabled={active || !o.enabled} onChange={v => set({ show_timer: v })}
+            description="The red recording dot appears only once video is actually being written." />
+        </div>
+      </div>
+    </Card>
   );
 }

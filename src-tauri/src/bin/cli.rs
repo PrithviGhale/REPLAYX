@@ -7,6 +7,9 @@ fn main() -> Result<()> {
     if action == "audio-test" {
         return audio_test(&args);
     }
+    if action == "overlay-test" {
+        return overlay_test(&args);
+    }
     if action == "start-bench" {
         return start_bench(&args);
     }
@@ -315,7 +318,7 @@ fn main() -> Result<()> {
     ]
     .contains(&action)
     {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E codec=C preset=P bitrate=MBPS] | probe FILE | recover DATA_DIR | overlay-test [out-dir]");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -368,6 +371,7 @@ fn main() -> Result<()> {
             Some(("preset", v)) => settings.preset = v.into(),
             Some(("scale_policy", v)) => settings.scale_policy = v.into(),
             Some(("encoder", v)) => settings.encoder = v.into(),
+            Some(("codec", v)) => settings.codec = v.into(),
             Some(("bitrate", v)) => {
                 settings.bitrate_mbps = v.parse()?;
                 settings.preset = "custom".into();
@@ -711,4 +715,206 @@ fn start_bench(args: &[String]) -> Result<()> {
     )?;
     println!("\nwrote {}", root.join("start-bench.json").display());
     Ok(())
+}
+
+/// Proof that the in-game overlay never reaches clips: show it over a solid
+/// backdrop and grab real Desktop Duplication frames (the capture REPLAYX
+/// records) into lossless files, with the overlay hidden, shown excluded from
+/// capture, and shown capturable (control: proves the test can see it).
+fn overlay_test(args: &[String]) -> Result<()> {
+    use replayx_core::status_overlay::{Frame, Item, StatusOverlay};
+    use windows::{
+        core::w,
+        Win32::{Foundation::RECT, UI::WindowsAndMessaging::*},
+    };
+    let out = PathBuf::from(
+        args.get(2)
+            .map(String::as_str)
+            .unwrap_or("test-output/overlay"),
+    );
+    std::fs::create_dir_all(&out)?;
+    let media = Media::discover()?;
+    let overlay = StatusOverlay::spawn();
+    let frame = |capturable: bool| Frame {
+        items: vec![
+            Item {
+                color: (255, 74, 90),
+                label: "REC 0:42".into(),
+            },
+            Item {
+                color: (154, 140, 255),
+                label: "Replay on".into(),
+            },
+            Item {
+                color: (58, 210, 159),
+                label: "Mic live".into(),
+            },
+        ],
+        position: "bottom-right".into(),
+        opacity: 100,
+        capturable,
+    };
+    overlay.update(Some(frame(false)));
+    thread::sleep(Duration::from_millis(800));
+    let hwnd = unsafe { FindWindowW(w!("ReplayxStatusOverlay"), None) }?;
+    let mut r = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut r) }?;
+    // Backdrop under the overlay: a solid colour, so only the overlay can
+    // change the captured pixels.
+    let pad = 40;
+    let back = RECT {
+        left: r.left - pad,
+        top: r.top - pad,
+        right: r.right + pad,
+        bottom: r.bottom + pad,
+    };
+    let backdrop = thread::spawn(move || unsafe { backdrop_window(back, Duration::from_secs(12)) });
+    thread::sleep(Duration::from_millis(500));
+    overlay.update(Some(frame(false)));
+    thread::sleep(Duration::from_millis(300));
+    // Desktop Duplication output containing the overlay.
+    let display = replayx_core::geometry::displays()
+        .into_iter()
+        .find(|d| {
+            r.left >= d.left
+                && r.left < d.left + d.desktop_width as i32
+                && r.top >= d.top
+                && r.top < d.top + d.desktop_height as i32
+        })
+        .ok_or_else(|| anyhow::anyhow!("overlay is not on a known display"))?;
+    let (w, h) = (
+        ((r.right - r.left) as u32 + 1) & !1,
+        ((r.bottom - r.top) as u32 + 1) & !1,
+    );
+    let (x, y) = ((r.left - display.left) as u32, (r.top - display.top) as u32);
+    let grab = |name: &str| -> Result<Vec<u8>> {
+        let file = out.join(format!("{name}.mkv"));
+        let ok = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg(format!("ddagrab=output_idx={}:framerate=10:video_size={w}x{h}:offset_x={x}:offset_y={y},hwdownload,format=bgra", display.index))
+            .args(["-frames:v", "8", "-c:v", "ffv1"])
+            .arg(&file)
+            .status()?
+            .success();
+        if !ok {
+            bail!("ddagrab failed for {name}");
+        }
+        let png = out.join(format!("{name}.png"));
+        let _ = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-y", "-sseof", "-0.3", "-i"])
+            .arg(&file)
+            .args(["-frames:v", "1"])
+            .arg(&png)
+            .status();
+        let raw = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-sseof", "-0.3", "-i"])
+            .arg(&file)
+            .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()?
+            .stdout;
+        Ok(raw)
+    };
+    let excluded = grab("overlay-excluded")?;
+    overlay.update(Some(frame(true)));
+    thread::sleep(Duration::from_millis(400));
+    let visible = grab("overlay-capturable-control")?;
+    overlay.update(None);
+    thread::sleep(Duration::from_millis(400));
+    let hidden = grab("overlay-hidden")?;
+    let _ = backdrop.join();
+    let diff = |a: &[u8], b: &[u8]| -> f64 {
+        let n = a.len().min(b.len()).max(1);
+        a.iter()
+            .zip(b)
+            .map(|(p, q)| (*p as f64 - *q as f64).abs())
+            .sum::<f64>()
+            / n as f64
+    };
+    let (ex, ctl) = (diff(&excluded, &hidden), diff(&visible, &hidden));
+    let pass = !hidden.is_empty() && ex < 1.0 && ctl > 10.0;
+    let report = serde_json::json!({
+        "display": display.device, "region": [x, y, w, h],
+        "excluded_vs_hidden_mean_abs_diff": ex, "capturable_vs_hidden_mean_abs_diff": ctl,
+        "pass": pass, "files": out.display().to_string(),
+    });
+    std::fs::write(out.join("result.json"), serde_json::to_vec_pretty(&report)?)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if !pass {
+        bail!("overlay exclusion check failed");
+    }
+    Ok(())
+}
+
+unsafe extern "system" fn backdrop_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wp: windows::Win32::Foundation::WPARAM,
+    lp: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wp, lp)
+}
+/// A plain opaque top-most window for `overlay_test` (click-through, no focus).
+unsafe fn backdrop_window(r: windows::Win32::Foundation::RECT, life: Duration) {
+    use windows::{
+        core::w,
+        Win32::{
+            Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*,
+        },
+    };
+    let Ok(instance) = GetModuleHandleW(None) else {
+        return;
+    };
+    let class = w!("ReplayxOverlayTestBackdrop");
+    RegisterClassW(&WNDCLASSW {
+        lpfnWndProc: Some(backdrop_proc),
+        hInstance: instance.into(),
+        lpszClassName: class,
+        hbrBackground: CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00_50_A0_30)),
+        ..Default::default()
+    });
+    let Ok(hwnd) = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
+        class,
+        w!("REPLAYX overlay test"),
+        WS_POPUP,
+        r.left,
+        r.top,
+        r.right - r.left,
+        r.bottom - r.top,
+        None,
+        None,
+        Some(instance.into()),
+        None,
+    ) else {
+        return;
+    };
+    let _ = SetLayeredWindowAttributes(
+        hwnd,
+        windows::Win32::Foundation::COLORREF(0),
+        255,
+        LWA_ALPHA,
+    );
+    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    // Keep the overlay above the backdrop.
+    if let Ok(o) = FindWindowW(w!("ReplayxStatusOverlay"), None) {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(o),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+    let end = std::time::Instant::now() + life;
+    let mut msg = MSG::default();
+    while std::time::Instant::now() < end {
+        while PeekMessageW(&mut msg, Some(hwnd), 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        thread::sleep(Duration::from_millis(30));
+    }
+    let _ = DestroyWindow(hwnd);
 }

@@ -97,6 +97,10 @@ pub struct Settings {
     /// marked to play at the chosen shape; "exact" resizes through a CPU copy,
     /// which can repeat frames while a demanding game runs.
     pub scale_policy: String,
+    /// In-game status overlay (replay, recording, microphone).
+    pub overlay: crate::status_overlay::OverlaySettings,
+    /// Close-to-tray explanation already shown once.
+    pub tray_hint_shown: bool,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -138,6 +142,8 @@ impl Default for Settings {
             game_mappings: Vec::new(),
             game_notifications: true,
             scale_policy: "smooth".into(),
+            overlay: Default::default(),
+            tray_hint_shown: false,
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -206,6 +212,11 @@ impl Settings {
         .contains(&self.encoder.as_str())
         {
             bail!("Unsupported encoder")
+        }
+        if !crate::status_overlay::POSITIONS.contains(&self.overlay.position.as_str())
+            || !(30..=100).contains(&self.overlay.opacity)
+        {
+            bail!("Invalid overlay position or opacity")
         }
         if !["auto", "h264", "hevc", "av1"].contains(&self.codec.as_str()) {
             bail!("Unsupported video codec")

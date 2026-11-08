@@ -417,6 +417,17 @@ impl Engine {
         self.publish(&i);
         Ok(())
     }
+    /// Remember that the close-to-tray explanation was shown (saved at once;
+    /// works during capture, unlike `set_settings`).
+    pub fn mark_tray_hint_shown(&self) {
+        let mut i = self.0.lock().unwrap();
+        if i.settings.tray_hint_shown {
+            return;
+        }
+        i.settings.tray_hint_shown = true;
+        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        self.publish(&i);
+    }
     /// Mutate engine state with the lock held, then publish the result.
     pub fn update(&self, f: impl FnOnce(&mut Inner)) {
         let mut i = self.0.lock().unwrap();

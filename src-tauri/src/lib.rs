@@ -11,4 +11,5 @@ pub mod media;
 pub mod model;
 pub mod overlay;
 pub mod process_job;
+pub mod status_overlay;
 pub mod winutil;
