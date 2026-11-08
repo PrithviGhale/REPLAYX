@@ -488,7 +488,7 @@ fn run(rx: mpsc::Receiver<Option<Frame>>) {
                         };
                         // Never in clips: Desktop Duplication and Windows
                         // Graphics Capture skip this window (Windows 10 2004+).
-                        let _ = SetWindowDisplayAffinity(
+                        let excluded = SetWindowDisplayAffinity(
                             h,
                             if frame.capturable {
                                 WDA_NONE
@@ -496,6 +496,13 @@ fn run(rx: mpsc::Receiver<Option<Frame>>) {
                                 WDA_EXCLUDEFROMCAPTURE
                             },
                         );
+                        // Windows before 10 2004 cannot exclude it: then it is
+                        // never shown, rather than ending up in clips.
+                        if excluded.is_err() && !frame.capturable {
+                            let _ = ShowWindow(h, SW_HIDE);
+                            shown = None;
+                            continue;
+                        }
                         let area = anchor();
                         let area = (area.left, area.top, area.right, area.bottom);
                         let unchanged = shown

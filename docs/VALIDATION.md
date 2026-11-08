@@ -1,3 +1,42 @@
+# Validation — 0.2.2-alpha.1 (November 8, 2026)
+
+Same laptop (RTX 4070 Laptop GPU drove the panel during these tests: Advanced Optimus, DISPLAY5). The user was away. No microphone was opened (no microphone test was run), nothing was played, no game was launched or touched; capture tests used REPLAYX's own game proxy and throw-away folders under `test-output/`. The user's settings file was backed up before the start-up smoke test and is byte-identical afterwards.
+
+## Measured
+
+| Test | Result |
+| --- | --- |
+| Quality per GB (VMAF/SSIM/PSNR, `scripts/quality-bench.py`, real Roblox clip + synthetic scene) | See docs/PERFORMANCE.md. New Balanced H.264 (CQ 28): 14.7 Mb/s, VMAF 97.6 vs 16.7 Mb/s, 97.9 before. AV1 CQ 34: 12.5 Mb/s, VMAF 97.7. |
+| Game FPS and smoothness per codec (`scripts/overhead-bench.py`, game proxy full screen, system audio, Balanced 1080p60) | H.264 2.9% FPS cost, 0.0% repeated frames; HEVC 4.4%, 0.0%; AV1 3.0%, 0.14%; AV1 High 3.9%, 0.0%. Saved clips verified and decodable. |
+| NVENC colour conversion (solid colours from system memory, CUDA and D3D11 frames; H.264, HEVC, AV1) | Always BT.601 matrix, limited range. Saved H.264/HEVC/AV1 clips from the real capture path now tagged `tv, smpte170m, bt709`. Quick Sync VPP: BT.709 (unchanged). |
+| Overlay excluded from capture (`replayx-cli overlay-test`, real Desktop Duplication frames saved losslessly) | Excluded vs hidden: mean pixel difference 0.0. Control with capture allowed: 77.0 (overlay clearly visible). Files and PNGs in `test-output/overlay/`. |
+| Mouse-wheel scrolling (`dev/scroll-check.mjs`, 7 pages × 3 window sizes) | 21/21 before the fix failed, 21/21 pass. |
+| Microphone processing chain (real FFmpeg, automated) | +24 dB boost of a 0.9 sine with compressor stays between −12 and −0.3 dBFS (limiter). |
+| Built app start-up with the user's real settings (`replayx.exe --background`) | Starts in the tray, responsive, 42 MB, 62 ms CPU over 5 s idle; encoder probes exit by themselves; no orphan processes after the test instance was stopped. |
+| HEVC/AV1 MP4 remux | `hvc1` / `av01` tags. |
+
+## Automated
+
+Rust 109 tests (new: codec mapping and fallback order, capped constant quality per codec, NVENC colour tags against a real encode, overlay states never claiming capture early, overlay items and placement, microphone chain order/limiter and a real-FFmpeg clipping test, separate audio/video graphs and lookahead kept), frontend 15 tests (rate mirrors match the engine, codec ids, storage estimate, microphone state), Clippy `-D warnings`, rustfmt, TypeScript, production build, `npm audit` 0 vulnerabilities, NSIS installer built.
+
+## Build artifacts (not installed)
+
+| File | Bytes | Version | SHA-256 |
+| --- | --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` | 15,186,944 | 0.2.2-alpha.1 | `98c137b770686703c27184bf9b69e17bd71bf239fdee95d4efb08d066b9cbf00` |
+| `src-tauri/target/release/replayx-cli.exe` | 1,765,376 | 0.2.2-alpha.1 | `9010f2516f1cc0a51ed6220e664a1100b1f930d53a4c603d1fb5a29abc36b347` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.2.2-alpha.1_x64-setup.exe` | 59,830,982 | 0.2.2-alpha.1 | `22215b2d95bfb4da7eb751dbfca133b6e35835c99f8d7b881149a351961ebf02` |
+
+## Not verified (needs the user)
+
+- Microphone: device test, listening to the processed result, boost and processing by ear, a real recording with the voice on its own track.
+- Real games: FPS and smoothness with the new presets and with AV1; picture quality by eye against GeForce.
+- The overlay over a real borderless/windowed game and that it stays out of a real game clip; how it looks at other DPI settings.
+- Tray: the menu, Quit while recording (confirmation), close to tray and the one-time notice. A graceful close request sent by `taskkill` did not reach the hidden window, so the app's own quit path was not exercised automatically.
+- Installing the NSIS installer over the existing version.
+
+---
+
 # Validation — 0.2.1-alpha.2 (November 7, 2026)
 
 Same laptop (Iris Xe drives the 2560×1600 @ 240 Hz panel; RTX 4070 Laptop). Roblox, Steam and the Epic launcher were open in the background; capture tests ran after the user approved about 12 minutes of silent capture (no microphone, nothing played; one 15 s run with system-audio loopback was approved separately). All runs used throw-away data folders under `test-output/`; the user's settings, clips and sessions were not touched.

@@ -1,6 +1,15 @@
-# Known limitations — 0.2.1-alpha.3
+# Known limitations — 0.2.2-alpha.1
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## New in 0.2.2-alpha.1
+
+- **Codecs.** AV1 needs a GPU with an AV1 encoder (NVIDIA RTX 40 and newer, Intel Arc/Core Ultra, AMD RX 7000). On hybrid laptops the codec must be encodable by the GPU that drives the display at that moment: with the desktop on an Intel GPU without AV1, an AV1 setting records H.264 (the app shows a warning). AV1 and HEVC files do not play in some older players, phones, TVs and editors; HEVC needs the HEVC Video Extension in some Windows apps.
+- **Constant quality** is used on NVENC only; Quick Sync, AMD and software encoders use VBR at the preset rate. File sizes in constant quality depend on the scene: the app's estimate is typical gameplay plus the cap for the worst case.
+- **HEVC** was not smaller than H.264 at equal quality on the RTX 4070 with REPLAYX's settings; it is offered for compatibility, not as a size saving.
+- **Overlay.** Not shown over exclusive full-screen games (Windows does not show desktop windows there). Exclusion from capture needs Windows 10 version 2004 or later; on older Windows the overlay is not shown at all. It is positioned on the monitor of the window in front; with several monitors it follows that window.
+- **Microphone processing** is light on purpose (no AI models): noise suppression reduces steady noise such as fans, not keyboard clicks or voices in the room. Changing boost or processing needs capture stopped; volume and mute work live.
+- **Tray.** Quit asks first while a recording or a save runs; Windows shutdown or a forced end of the process skips that (finished segments are recoverable as before).
 
 ## Game performance and smoothness (0.2.1-alpha.3)
 
