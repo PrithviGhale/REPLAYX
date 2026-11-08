@@ -535,7 +535,8 @@ fn audio_test(args: &[String]) -> Result<()> {
         audio_device_source(kind, &device)?
     };
     let name = source.name.clone();
-    let capture = replayx_core::audio::record_test(source, seconds, |_, _| {})?;
+    let never = std::sync::atomic::AtomicBool::new(false);
+    let capture = replayx_core::audio::record_test(source, seconds, &never, |_, _| {})?;
     let dir = std::env::current_dir()?.join("test-output").join(format!(
         "audio-test-{}-{}-{}",
         kind,

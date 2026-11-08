@@ -21,13 +21,14 @@ let emptyStatus = {} as Status;
 let previewSettings = {} as Settings;
 const scenario = new URLSearchParams(window.location.search).get('state') ?? 'replay';
 let settings = {} as Settings;
+const plain = { boost_db: 0, high_pass: false, noise_suppression: false, noise_gate: false, compressor: false };
 const initialSettings = (): Settings => ({
   ...previewSettings,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX',
   audio: [
-    { kind: 'application', device: '', pid: 29336, process_started: 1, name: 'Game', enabled: true, volume: 1, muted: false },
-    { kind: 'application', device: '', pid: 25872, process_started: 1, name: 'Discord', enabled: true, volume: 0.8, muted: false },
-    { kind: 'microphone', device: '', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false },
+    { kind: 'application', device: '', pid: 29336, process_started: 1, name: 'Game', enabled: true, volume: 1, muted: false, ...plain },
+    { kind: 'application', device: '', pid: 25872, process_started: 1, name: 'Discord', enabled: true, volume: 0.8, muted: false, ...plain },
+    { kind: 'microphone', device: 'b', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false, boost_db: 6, high_pass: true, noise_suppression: true, noise_gate: false, compressor: false },
   ],
 });
 const started = Date.now();
@@ -37,7 +38,7 @@ const status = (): Status => {
   return {
     ...emptyStatus,
     state: !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
-    encoder: on ? 'h264_qsv_lp' : '', encoder_label: on ? 'h264_qsv (low-power VDEnc)' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
+    encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
     target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,
     scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,
     buffer_seconds: on ? Math.min(60, 42 + t) : 0, buffer_bytes: on ? 71_000_000 : 0, free_bytes: 412 * 1024 ** 3,
@@ -47,6 +48,7 @@ const status = (): Status => {
     audio_packets: on ? [15400, 15388, 15402] : [], audio_discontinuities: on ? [0, 0, 0] : [], audio_drift_ppm: on ? [0.4, -1.2, 12.5] : [],
     audio_written_bytes: on ? [57e6, 57e6, 57e6] : [], audio_gaps: [0, 0, 0],
     geometry: { index: 0, device: '\\\\.\\DISPLAY1', adapter_luid: '0:1', left: 0, top: 0, desktop_width: 2560, desktop_height: 1600, active_width: 2560, active_height: 1600, rotation: 1, refresh_hz: 240 },
+    codec: on ? 'h264' : '', constant_quality: on ? 28 : null, cap_bitrate_mbps: on ? 24 : 0,
     scaling_detail: on ? 'GPU zero-copy (Direct3D 11) + h264_nvenc: Could not create the texture (80070057)' : null,
   };
 };
@@ -72,6 +74,7 @@ mockIPC((cmd, args) => {
     case 'set_mix': return null;
     case 'capabilities': return {
       encoders: [{ name: 'h264_nvenc', available: true, reason: '' }, { name: 'h264_amf', available: false, reason: '' }, { name: 'h264_qsv', available: true, reason: '' }, { name: 'libopenh264', available: true, reason: '' }, { name: 'mpeg4', available: true, reason: '' }],
+      codecs: [{ codec: 'h264', encoders: ['h264_nvenc'] }, { codec: 'hevc', encoders: ['hevc_nvenc'] }, { codec: 'av1', encoders: ['av1_nvenc'] }],
       media_error: null, updates_configured: false,
       displays: [status().geometry, { ...status().geometry!, index: 1, device: '\\\\.\\DISPLAY2', left: 2560, active_width: 1920, active_height: 1080, desktop_width: 1920, desktop_height: 1080, refresh_hz: 144 }],
       devices: [{ id: 'a', name: 'Speakers (Realtek(R) Audio)', kind: 'system' }, { id: 'b', name: 'Headset Microphone', kind: 'microphone' }],
@@ -83,6 +86,7 @@ mockIPC((cmd, args) => {
       { pid: 19036, name: 'Spotify.exe', path: '', started: 1, active: false }, { pid: 24240, name: 'Browser.exe', path: '', started: 1, active: false },
     ];
     case 'app_icon': return null;
+    case 'audio_test': return { seconds: 6.2, packets: 620, peak: 0.42, rms: 0.08, discontinuities: 0, device_glitches: 0, timestamp_errors: 0, drift_correction_ppm: 0, measured_device_clock_ppm: 0, endpoint_mix_format: '48000 Hz · 2 ch · float' };
     default: return null;
   }
 });

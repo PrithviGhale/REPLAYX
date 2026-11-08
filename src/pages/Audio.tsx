@@ -1,59 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
-import { AppWindow, Mic, Play, Plus, RefreshCw, Speaker, Trash2, Volume2, VolumeX, Waves } from 'lucide-react';
-import { api, errorText, native, type AudioKind, type AudioSource, type Session, type TestCapture } from '../api';
+import { AppWindow, Mic, Plus, RefreshCw, Speaker, Trash2, Volume2, VolumeX, Waves } from 'lucide-react';
+import { api, errorText, native, type AudioKind, type AudioSource, type Session } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { db } from '../format';
 import { Badge, Button, Card, Empty, Field, IconButton, Meter, Modal, Segmented, Toggle } from '../ui';
 import { Section, SourceIcon, feedIndex, kindLabel } from './shared';
-
-const identity = (a: AudioSource) => `${a.kind}|${a.device}|${a.pid}|${a.process_started}|${a.enabled}`;
-
-function TestPanel({ source, onClose }: { source: AudioSource; onClose: () => void }) {
-  const [level, setLevel] = useState({ peak: 0, elapsed: 0 });
-  const [result, setResult] = useState<TestCapture | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const seconds = 5;
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    let cancelled = false;
-    listen<[number, number]>('audio-test-level', e => { if (!cancelled) setLevel({ peak: e.payload[0], elapsed: e.payload[1] }); })
-      .then(u => { off = u; });
-    api.audioTest({ ...source, enabled: true, muted: false, volume: 1 }, seconds)
-      .then(r => { if (!cancelled) setResult(r); })
-      .catch(e => { if (!cancelled) setError(errorText(e)); });
-    return () => { cancelled = true; off?.(); };
-  }, [source]);
-  const quiet = result && result.peak < 0.003;
-  return (
-    <Modal title={`Test — ${source.name}`} onClose={onClose} actions={<>
-      <Button variant="ghost" onClick={onClose}>Close</Button>
-      <Button variant="primary" icon={Play} disabled={!result} onClick={() => api.playAudioTest().catch(e => setError(errorText(e)))}>Play recording</Button>
-    </>}>
-      {!result && !error && (
-        <>
-          <p>{source.kind === 'microphone' ? 'Speak normally for five seconds.' : 'Play some sound on this source for five seconds.'}</p>
-          <Meter peak={level.peak} active />
-          <div className="progress"><span style={{ width: `${Math.min(100, (level.elapsed / seconds) * 100)}%` }} /></div>
-        </>
-      )}
-      {error && <div className="banner bad">{error}</div>}
-      {result && (
-        <>
-          {quiet ? <div className="banner warn">Almost silent (peak {db(result.peak)}). Check the device, Windows privacy settings and any hardware mute.</div>
-            : <div className="banner ok">Captured {result.seconds} s · peak {db(result.peak)} · {result.discontinuities === 0 ? 'no discontinuities' : `${result.discontinuities} discontinuities`}.</div>}
-          <dl className="facts compact">
-            <div><dt>Device format</dt><dd>{result.endpoint_mix_format ?? 'Converted by Windows (per-app capture)'}</dd></div>
-            <div><dt>Packets</dt><dd>{result.packets}</dd></div>
-            <div><dt>Device glitches</dt><dd>{result.device_glitches}</dd></div>
-          </dl>
-          <p className="muted small">The recording is saved on this PC only and replaced by the next test.</p>
-        </>
-      )}
-    </Modal>
-  );
-}
+import { MicrophoneCard, SourceTest } from './Microphone';
+import { identity, micDefaults } from '../audio';
 
 function AppPicker({ mode, onPick, onClose }: { mode: 'application' | 'exclude'; onPick: (s: Session) => void; onClose: () => void }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
@@ -106,7 +59,7 @@ export function AudioPage() {
 
   const update = (i: number, p: Partial<AudioSource>) => patch({ audio: sources.map((a, n) => (n === i ? { ...a, ...p } : a)) });
   const add = (kind: AudioKind, extra: Partial<AudioSource> = {}) => patch({
-    audio: [...sources, { kind, device: '', pid: 0, process_started: 0, name: kindLabel[kind], enabled: true, volume: 1, muted: false, ...extra }],
+    audio: [...sources, { ...micDefaults(''), kind, name: kindLabel[kind], high_pass: kind === 'microphone', ...extra }],
   });
   const setVolume = (i: number, volume: number, muted: boolean) => (liveMix ? setMix(i, volume, muted) : update(i, { volume, muted }));
 
@@ -125,6 +78,8 @@ export function AudioPage() {
           {draft.separate_tracks && enabled.map((s, i) => <span className="track" key={i}><b>{i + 2}</b>{s.name}</span>)}
         </div>
       </Card>
+
+      <MicrophoneCard />
 
       {conflict && <div className="banner warn">System audio already contains every app's sound. Disable it (or the app sources) so audio isn't recorded twice — REPLAYX won't save this combination.</div>}
       {!liveMix && sources.length > 0 && <div className="banner info">Save your source changes to adjust volume live during capture.</div>}
@@ -191,7 +146,7 @@ export function AudioPage() {
         setPaths(p => ({ ...p, [s.pid]: s.path }));
         setPicker(null);
       }} />}
-      {testing && <TestPanel source={testing} onClose={() => setTesting(null)} />}
+      {testing && <SourceTest source={testing} onClose={() => setTesting(null)} />}
     </Section>
   );
 }

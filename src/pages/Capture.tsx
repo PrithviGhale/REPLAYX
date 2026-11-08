@@ -3,7 +3,7 @@ import { ChevronDown, Monitor, RefreshCw } from 'lucide-react';
 import type { CanvasMode, Rect } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { aspect, encoderName, outputWidth, plan, sourceRect, targetBitrate } from '../format';
+import { aspect, audioTrackCount, bytes, bytesPerSecond, codecName, codecOf, encoderName, outputWidth, plan, ratePlan, requestedCodec, sourceRect, targetBitrate } from '../format';
 import { Badge, Button, Card, Field, Segmented, Toggle } from '../ui';
 import { Section } from './shared';
 
@@ -22,11 +22,36 @@ const SIZES = [
 ];
 
 const PRESETS = [
-  { value: 'performance', label: 'Performance', text: 'Least encoder work and smaller files. Pick this if games lose FPS while recording.' },
-  { value: 'balanced', label: 'Balanced', text: 'Sharp 1080p60 at a moderate size. Recommended.' },
-  { value: 'quality', label: 'High quality', text: 'More bits and the higher-quality encoder modes, for fine detail and fast motion.' },
-  { value: 'custom', label: 'Custom', text: 'Choose the bitrate yourself.' },
+  { value: 'performance', label: 'Performance', text: 'Smallest files and the lightest encoder settings. Pick this if games lose FPS while recording.' },
+  { value: 'balanced', label: 'Balanced', text: 'Sharp 1080p60 at a moderate size (measured VMAF about 97-98 on real gameplay). Recommended.' },
+  { value: 'quality', label: 'High quality', text: 'More bits and slower encoder modes, for fine detail and fast motion.' },
+  { value: 'custom', label: 'Custom', text: 'A fixed average bitrate you choose (VBR, peaks up to 1.5x).' },
 ];
+
+const CODECS = [
+  { value: 'auto', label: 'Automatic (H.264)', text: 'Records H.264, which plays everywhere: Discord, phones, browsers and every video editor. REPLAYX never switches codec by itself.' },
+  { value: 'h264', label: 'H.264 · Maximum compatibility', text: 'Plays everywhere: Discord, phones, browsers and every video editor.' },
+  { value: 'hevc', label: 'HEVC (H.265)', text: 'Measured on NVIDIA RTX 40: about the same size as H.264 at equal quality. Some Windows players need the HEVC Video Extension. Choose it only if a device you share to prefers HEVC.' },
+  { value: 'av1', label: 'AV1 · Smaller files', text: 'About 25% smaller than H.264 at the same measured quality. Plays in Chrome, Edge, Firefox, Discord, VLC and Windows 11 (AV1 Video Extension); older phones, TVs and some editors cannot open it.' },
+] as const;
+
+/** Disk use for the current settings: typical gameplay, and the cap for very complex scenes. */
+function StorageEstimate({ target, cap, audioTracks, audioKbps, free }: {
+  target: number; cap: number; audioTracks: number; audioKbps: number; free: number;
+}) {
+  const typical = bytesPerSecond(target, audioTracks, audioKbps);
+  const peak = bytesPerSecond(cap, audioTracks, audioKbps);
+  const span = (n: number) => { const h = n / 3600; return h >= 1 ? `${h.toFixed(h >= 10 ? 0 : 1)} h` : `${Math.round(n / 60)} min`; };
+  return (
+    <div className="estimate" aria-label="Storage estimate">
+      <div><span>Per minute</span><strong>{bytes(typical * 60)}</strong><small>up to {bytes(peak * 60)}</small></div>
+      <div><span>Per hour</span><strong>{bytes(typical * 3600)}</strong><small>up to {bytes(peak * 3600)}</small></div>
+      <div><span>10-minute replay</span><strong>{bytes(typical * 600)}</strong><small>up to {bytes(peak * 600)}</small></div>
+      <div><span>Free space</span><strong>{free > 0 ? bytes(free) : '-'}</strong><small>recording drive</small></div>
+      <div><span>Recording time left</span><strong>{free > 0 ? span(free / typical) : '-'}</strong><small>{free > 0 ? `at least ${span(free / peak)}` : 'shown once REPLAYX runs'}</small></div>
+    </div>
+  );
+}
 
 function ModeDiagram({ mode, source, width, height }: { mode: CanvasMode; source: Rect; width: number; height: number }) {
   const p = plan(source, width, height, mode);
@@ -50,7 +75,7 @@ function ModeDiagram({ mode, source, width, height }: { mode: CanvasMode; source
 export function CapturePage() {
   const { draft, patch, caps, refreshCaps, run, busy } = useApp();
   const active = useStatus(activeOf);
-  const live = useStatus(x => ({ scaling: x.scaling, detail: x.scaling_detail, encoder: x.encoder, ow: x.output_width, oh: x.output_height }));
+  const live = useStatus(x => ({ scaling: x.scaling, detail: x.scaling_detail, encoder: x.encoder, ow: x.output_width, oh: x.output_height, codec: x.codec, cq: x.constant_quality, free: x.free_bytes }));
   const [advanced, setAdvanced] = useState(!!draft.source_rect);
   const displays = caps?.displays ?? [];
   const display = displays.find(d => d.index === draft.display);
@@ -61,6 +86,12 @@ export function CapturePage() {
   const sizeKey = native ? 'native' : SIZES.some(z => z.key === `${ow}x${draft.height}`) ? `${ow}x${draft.height}` : 'custom';
   const [customSize, setCustomSize] = useState(sizeKey === 'custom');
   const mbps = targetBitrate(draft.preset, draft.bitrate_mbps, draft.fps, p.width, p.height);
+  const codec = requestedCodec(draft.codec);
+  const rate = ratePlan(draft.preset, draft.bitrate_mbps, draft.fps, p.width, p.height, codec);
+  const codecAvailable = (c: string) => c === 'auto' || c === 'h264' || !caps?.codecs || caps.codecs.some(x => x.codec === c && x.encoders.length > 0);
+  const nvenc = draft.encoder === 'h264_nvenc' || (draft.encoder === 'auto' && !!caps?.encoders.find(e => e.name === 'h264_nvenc' && e.available));
+  const fellBack = active && !!live.codec && live.codec !== codec;
+  const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
   const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
   const displayHeight = Math.min(2304, src.height & ~1);
   const dda = draft.capture === 'desktop-duplication';
@@ -170,16 +201,25 @@ export function CapturePage() {
               {(caps?.encoders ?? []).map(e => <option key={e.name} value={e.name} disabled={!e.available}>{encoderName(e.name)}{e.available ? '' : ' — not available'}</option>)}
             </select>
           </Field>
-          <Field label="Quality">
-            <Segmented label="Quality preset" value={draft.preset} disabled={active}
-              onChange={v => patch(v === 'custom' ? { preset: v, bitrate_mbps: mbps } : { preset: v })}
-              options={PRESETS.map(x => ({ value: x.value, label: x.label, hint: x.text }))} />
+          <Field label="Video codec" hint={CODECS.find(c => c.value === draft.codec)?.text}>
+            <select value={draft.codec} disabled={active} onChange={e => patch({ codec: e.target.value as typeof draft.codec })}>
+              {CODECS.map(c => <option key={c.value} value={c.value} disabled={!codecAvailable(c.value)}>{c.label}{codecAvailable(c.value) ? '' : ' (not supported by this PC)'}</option>)}
+            </select>
           </Field>
         </div>
+        <Field label="Quality">
+          <Segmented label="Quality preset" value={draft.preset} disabled={active}
+            onChange={v => patch(v === 'custom' ? { preset: v, bitrate_mbps: mbps } : { preset: v })}
+            options={PRESETS.map(x => ({ value: x.value, label: x.label, hint: x.text }))} />
+        </Field>
+        {fellBack && <div className="banner warn">The GPU driving this display can't encode {codecName[codec]}, so this capture is recording {codecName[live.codec] ?? live.codec}. Choose H.264 to hide this message.</div>}
         <p className="preset-note">
-          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · H.264 · target {mbps} Mb/s, peaks up to {Math.round(mbps * 1.5)} · about {Math.round(mbps * 7.5)} MB per minute
+          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · {codecName[codec]} · {draft.preset !== 'custom' && nvenc
+            ? `constant quality on NVIDIA, typically about ${rate.target} Mb/s, never above ${rate.cap}`
+            : `average ${rate.target} Mb/s, peaks up to ${rate.cap}`}
           <span className="muted"> — {PRESETS.find(x => x.value === draft.preset)?.text}</span>
         </p>
+        <StorageEstimate target={rate.target} cap={rate.cap} audioTracks={audioTracks} audioKbps={draft.audio_bitrate_kbps} free={live.free} />
         {draft.preset === 'custom' && (
           <Field label="Video bitrate" hint={`≈ ${(draft.bitrate_mbps * 7.5).toFixed(0)} MB per minute of video.`}>
             <div className="range-row">
@@ -192,7 +232,7 @@ export function CapturePage() {
           description="Scale and convert frames on the GPU that owns the display. Turn off only to troubleshoot; the CPU path costs more." />
         <div className="path-box">
           <div><span className="muted small">Active path</span><strong>{active && live.scaling ? live.scaling : 'Selected when capture starts'}</strong></div>
-          {active && live.encoder && <Badge tone="accent">{encoderName(live.encoder)} · {live.ow}×{live.oh}</Badge>}
+          {active && live.encoder && <Badge tone="accent">{encoderName(live.encoder)} · {codecName[codecOf(live.encoder)]} · {live.ow}×{live.oh}{live.cq ? ` · CQ ${live.cq}` : ''}</Badge>}
           {active && live.detail && <details><summary>Why not a faster path?</summary><p className="mono small">{live.detail}</p></details>}
         </div>
       </Card>

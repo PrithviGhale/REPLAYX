@@ -225,35 +225,81 @@ impl Media {
             thread::sleep(Duration::from_millis(25));
         }
     }
+    /// Encode-probe several encoders at once (each is a short FFmpeg run).
+    fn probe_all(&self, names: &[String]) -> Vec<bool> {
+        thread::scope(|scope| {
+            let jobs: Vec<_> = names
+                .iter()
+                .map(|n| scope.spawn(move || self.encoder_probe(n)))
+                .collect();
+            jobs.into_iter()
+                .map(|j| j.join().unwrap_or(false))
+                .collect()
+        })
+    }
     pub fn encoders(&self) -> Vec<Encoder> {
-        ["h264_nvenc", "h264_amf", "h264_qsv", "libopenh264", "mpeg4"]
-            .iter()
-            .map(|n| {
-                let ok = self.encoder_probe(n);
-                Encoder {
-                    name: n.to_string(),
-                    available: ok,
-                    reason: if ok {
-                        "3-frame encode probe passed"
-                    } else {
-                        "Encoder probe unavailable or failed"
-                    }
-                    .into(),
+        let names: Vec<String> = H264_ENCODERS.iter().map(|n| n.to_string()).collect();
+        let ok = self.probe_all(&names);
+        names
+            .into_iter()
+            .zip(ok)
+            .map(|(name, ok)| Encoder {
+                name,
+                available: ok,
+                reason: if ok {
+                    "3-frame encode probe passed"
+                } else {
+                    "Encoder probe unavailable or failed"
                 }
+                .into(),
             })
             .collect()
     }
-    pub fn choose_encoder(&self, requested: &str) -> Result<String> {
-        if requested != "auto" {
-            if self.encoder_probe(requested) {
-                return Ok(requested.into());
-            }
-            bail!("Selected encoder failed its encode probe")
+    /// Which codecs this PC can record, and with which hardware encoders.
+    /// H.264 always has a software fallback; HEVC and AV1 need a GPU encoder
+    /// (NVIDIA RTX 40 and newer, Intel Arc/Core Ultra and AMD RX 7000 for AV1).
+    pub fn codecs(&self) -> Vec<CodecSupport> {
+        let names: Vec<String> = ["hevc", "av1"]
+            .iter()
+            .flat_map(|c| HW_FAMILIES.iter().map(move |f| format!("{c}_{f}")))
+            .collect();
+        let ok = self.probe_all(&names);
+        let mut out = vec![CodecSupport {
+            codec: "h264".into(),
+            encoders: H264_ENCODERS.iter().map(|n| n.to_string()).collect(),
+        }];
+        for codec in ["hevc", "av1"] {
+            out.push(CodecSupport {
+                codec: codec.into(),
+                encoders: names
+                    .iter()
+                    .zip(&ok)
+                    .filter(|(n, ok)| **ok && codec_of(n) == codec)
+                    .map(|(n, _)| n.clone())
+                    .collect(),
+            });
         }
-        for name in ["h264_nvenc", "h264_amf", "h264_qsv", "libopenh264", "mpeg4"] {
-            if self.encoder_probe(name) {
-                return Ok(name.into());
+        out
+    }
+    /// First encoder that passes its probe: the requested codec on each
+    /// encoder, then H.264 (see `codec_candidates`).
+    pub fn choose_encoder(&self, requested: &str, codec: &str) -> Result<String> {
+        let names: Vec<&str> = if requested == "auto" {
+            H264_ENCODERS.to_vec()
+        } else {
+            vec![requested]
+        };
+        let mut order: Vec<String> = names.iter().filter_map(|n| with_codec(n, codec)).collect();
+        if codec != "h264" {
+            order.extend(names.iter().map(|n| n.to_string()));
+        }
+        for name in order {
+            if self.encoder_probe(&name) {
+                return Ok(name);
             }
+        }
+        if requested != "auto" {
+            bail!("Selected encoder failed its encode probe")
         }
         bail!("No working video encoder")
     }
@@ -642,17 +688,72 @@ impl Scaler {
 /// also composites every game frame) free. The default Quick Sync path runs
 /// motion estimation on those cores. It is probed first and falls back.
 pub fn ffmpeg_encoder(id: &str) -> (&str, bool) {
-    match id {
-        "h264_qsv_lp" => ("h264_qsv", true),
-        other => (other, false),
+    match id.strip_suffix("_lp") {
+        Some(base) => (base, true),
+        None => (id, false),
     }
 }
 /// Human-readable encoder name for status and diagnostics.
 pub fn encoder_label(id: &str) -> String {
-    match id {
-        "h264_qsv_lp" => "h264_qsv (low-power VDEnc)".into(),
-        other => other.into(),
+    match id.strip_suffix("_lp") {
+        Some(base) => format!("{base} (low-power VDEnc)"),
+        None => id.into(),
     }
+}
+/// H.264 encoders in automatic preference order.
+pub const H264_ENCODERS: [&str; 5] = ["h264_nvenc", "h264_amf", "h264_qsv", "libopenh264", "mpeg4"];
+/// Hardware encoder families that also offer HEVC and AV1.
+const HW_FAMILIES: [&str; 3] = ["nvenc", "amf", "qsv"];
+#[derive(Debug, Clone, Serialize)]
+pub struct CodecSupport {
+    pub codec: String,
+    /// Encoders that passed an encode probe (H.264 lists every candidate).
+    pub encoders: Vec<String>,
+}
+/// The codec the user asked for. "auto" records H.264, which plays
+/// everywhere (Discord, browsers, editors, phones, older TVs); HEVC and AV1
+/// are explicit choices, so the codec never changes behind the user's back.
+pub fn requested_codec(s: &Settings) -> &'static str {
+    match s.codec.as_str() {
+        "hevc" => "hevc",
+        "av1" => "av1",
+        _ => "h264",
+    }
+}
+/// Codec an encoder id produces ("av1_nvenc" -> "av1").
+pub fn codec_of(id: &str) -> &'static str {
+    if id.starts_with("hevc_") {
+        "hevc"
+    } else if id.starts_with("av1_") {
+        "av1"
+    } else if id == "mpeg4" {
+        "mpeg4"
+    } else {
+        "h264"
+    }
+}
+/// The `codec` encoder on the same hardware as an H.264 encoder id
+/// (`h264_qsv_lp` -> `hevc_qsv_lp`). The CPU encoders only do H.264.
+pub fn with_codec(id: &str, codec: &str) -> Option<String> {
+    if codec == "h264" {
+        return Some(id.into());
+    }
+    let hw = id.strip_prefix("h264_")?;
+    matches!(hw, "nvenc" | "amf" | "qsv" | "qsv_lp").then(|| format!("{codec}_{hw}"))
+}
+/// Probe order for a codec: the requested codec on every path first, then
+/// H.264 on the same paths. A codec the display's GPU cannot encode falls
+/// back to H.264 instead of failing capture; the status reports the codec
+/// actually used and the app shows a warning, so it is never silent.
+pub fn codec_candidates(paths: &[(Scaler, &str)], codec: &str) -> Vec<(Scaler, String)> {
+    let mut out: Vec<(Scaler, String)> = paths
+        .iter()
+        .filter_map(|(s, e)| with_codec(e, codec).map(|e| (*s, e)))
+        .collect();
+    if codec != "h264" {
+        out.extend(paths.iter().map(|(s, e)| (*s, e.to_string())));
+    }
+    out
 }
 pub const VENDOR_INTEL: u32 = 0x8086;
 pub const VENDOR_NVIDIA: u32 = 0x10de;
@@ -736,9 +837,34 @@ pub fn filter_graphs(
         vec![format!("{video};{audio}")]
     }
 }
-/// Per-source audio processing in FFmpeg (none for most sources).
-pub fn source_chain(_source: &crate::model::AudioSource) -> String {
-    String::new()
+/// Per-source audio processing in FFmpeg, in this order: high-pass, noise
+/// reduction, gate, compressor, boost, limiter. Settings are conservative so
+/// speech never sounds metallic or pumping; every option is off unless the
+/// user turns it on, except the limiter, which runs whenever the source is
+/// louder than unity (boost, or volume above 100%) and keeps peaks under
+/// -0.5 dBFS instead of clipping. Measured cost: ~0.4% of one core.
+pub fn source_chain(source: &crate::model::AudioSource) -> String {
+    let mut f: Vec<String> = Vec::new();
+    if source.high_pass {
+        f.push("highpass=f=80".into());
+    }
+    if source.noise_suppression {
+        f.push("afftdn=nr=10:nf=-50:tn=1".into());
+    }
+    if source.noise_gate {
+        // Expander, not a hard gate: lowers by at most ~10 dB between words.
+        f.push("agate=threshold=0.008:ratio=2:attack=5:release=200:range=0.3".into());
+    }
+    if source.compressor {
+        f.push("acompressor=threshold=0.125:ratio=3:attack=10:release=150:makeup=1.5".into());
+    }
+    if source.boost_db > 0.05 {
+        f.push(format!("volume={:.1}dB", source.boost_db));
+    }
+    if source.boost_db > 0.05 || source.volume > 1.0 || source.compressor {
+        f.push("alimiter=limit=0.944:attack=4:release=60:level=0".into());
+    }
+    f.join(",")
 }
 /// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
 /// the defaults for benchmarking only (see scripts/overhead-bench.py).
@@ -812,7 +938,15 @@ pub fn tuning() -> Tuning {
 /// Quick Sync VPP converts RGB to limited-range BT.709 YUV (the matching tags
 /// are written by `encoding_args`), instead of a driver-chosen matrix.
 const QSV_709: &str = ":out_color_matrix=bt709:out_range=1";
-const BGRA_709: &str = "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709";
+/// Tags for BGRA frames handed to the encoder. NVENC converts RGB input with
+/// the BT.601 matrix into limited range, whatever the frame says (measured on
+/// this laptop for H.264, HEVC and AV1, from system memory, CUDA and D3D11
+/// frames: red -> Y 81, Cb 90, Cr 239; BT.709 would be 63/102/240). Decoding
+/// that as BT.709 turned pure green 192 into 159. The colours are sRGB, so
+/// primaries and transfer stay BT.709; only the matrix is BT.601 (SMPTE 170M).
+/// AMF follows the frame's matrix tag, so the same tags are correct there.
+const BGRA_TAGS: &str =
+    "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=smpte170m";
 /// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
 pub fn converts_bt709(scaler: Scaler) -> bool {
     !matches!(scaler, Scaler::D3d11 | Scaler::Cuda)
@@ -829,12 +963,12 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         .map(|p| format!(",{p}"))
         .unwrap_or_default();
     match scaler {
-        // BGRA frames go to the encoder, which converts them with BT.709 limited
-        // range: say so on the frames so the stream and container are tagged
-        // correctly (they were tagged full-range RGB).
-        Scaler::D3d11 => format!("setsar={}/{},{BGRA_709}", plan.sar.0, plan.sar.1),
+        // BGRA frames go to the encoder, which converts them to limited-range
+        // YUV (see BGRA_TAGS): say so on the frames so the stream and
+        // container are tagged correctly.
+        Scaler::D3d11 => format!("setsar={}/{},{BGRA_TAGS}", plan.sar.0, plan.sar.1),
         Scaler::Cuda => format!(
-            "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1,{BGRA_709}"
+            "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1,{BGRA_TAGS}"
         ),
         Scaler::QsvZeroCopy => {
             format!("hwmap=derive_device=qsv,format=qsv,vpp_qsv=w={iw}:h={ih}:format=nv12{vpp_mode}{QSV_709},setsar=1")
@@ -951,13 +1085,73 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
     let rate = (s.fps as f64 / 60.0).powf(0.75);
     (base * pixels.powf(0.9) * rate).round().clamp(4.0, 150.0) as u32
 }
+/// How a preset spends bits on one encoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RatePlan {
+    /// NVENC constant-quality level (lower is better); None for plain VBR.
+    pub cq: Option<u32>,
+    /// Average for VBR; for constant quality the expected average in typical
+    /// gameplay (measured), used for size estimates.
+    pub target_mbps: u32,
+    /// Hard peak: bounds file size and the replay buffer in complex scenes.
+    pub cap_mbps: u32,
+}
+/// Bits a codec needs relative to H.264 for the same picture quality,
+/// measured with VMAF on NVENC (RTX 4070 Laptop) on real Roblox gameplay
+/// and a synthetic game-like scene: AV1 about 25% fewer; HEVC within +-3%
+/// of H.264 with these settings, so it gets no discount (docs/PERFORMANCE.md).
+fn codec_factor(codec: &str) -> f64 {
+    if codec == "av1" {
+        0.75
+    } else {
+        1.0
+    }
+}
+/// NVENC constant-quality levels per preset. H.264 CQ 28 on real gameplay
+/// averaged 14.7 Mb/s at VMAF 97.6, matching the old 16 Mb/s VBR (97.9) at
+/// 12% less; AV1 CQ 34 gave VMAF 97.7 at 12.5 Mb/s (docs/PERFORMANCE.md).
+fn nvenc_cq(codec: &str, preset: &str) -> u32 {
+    match (codec, preset) {
+        ("av1", "performance") => 38,
+        ("av1", "quality") => 31,
+        ("av1", _) => 34,
+        (_, "performance") => 31,
+        (_, "quality") => 25,
+        _ => 28,
+    }
+}
+/// Rate control for a preset on an encoder at an output size. NVENC uses
+/// constant quality capped at 1.5x the preset rate: simple scenes cost
+/// less, complex ones get bits up to the cap. Other encoders use VBR around
+/// the preset rate. Custom is the user's rate, whatever the codec.
+pub fn rate_plan(s: &Settings, encoder: &str, width: u32, height: u32) -> RatePlan {
+    let h264 = target_bitrate_mbps(s, width, height);
+    if s.preset == "custom" {
+        return RatePlan {
+            cq: None,
+            target_mbps: h264,
+            cap_mbps: h264 * 3 / 2,
+        };
+    }
+    let codec = codec_of(encoder);
+    let k = codec_factor(codec);
+    RatePlan {
+        cq: ffmpeg_encoder(encoder)
+            .0
+            .ends_with("_nvenc")
+            .then(|| nvenc_cq(codec, &s.preset)),
+        target_mbps: ((h264 as f64) * k).round().max(2.0) as u32,
+        cap_mbps: ((h264 as f64) * 1.5 * k).round().max(3.0) as u32,
+    }
+}
 /// Encoder arguments. `size` is the encoded frame size; `bt709` says the
 /// scaler converted with BT.709 limited range, so the stream is tagged so.
 pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u32), bt709: bool) {
     let (ffmpeg_encoder, low_power) = ffmpeg_encoder(encoder);
-    let mbps = target_bitrate_mbps(s, size.0, size.1);
-    // VBR around the target with a 1.5x peak: action scenes get more bits than
-    // menus without unbounded replay-buffer growth.
+    let codec = codec_of(encoder);
+    let hw = ffmpeg_encoder.rsplit('_').next().unwrap_or_default();
+    let nvenc = hw == "nvenc";
+    let rate = rate_plan(s, encoder, size.0, size.1);
     c.args([
         "-c:v",
         ffmpeg_encoder,
@@ -965,29 +1159,45 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         &s.fps.to_string(),
         "-enc_time_base",
         &format!("1:{}", s.fps),
-        "-b:v",
-        &format!("{mbps}M"),
-        "-maxrate",
-        &format!("{}k", mbps * 1500),
-        "-bufsize",
-        &format!("{}k", mbps * 2000),
-        "-g",
-        &(s.fps * 2).to_string(),
-        "-bf",
-        "0",
     ]);
+    match rate.cq {
+        // Constant quality with a peak cap (as OBS recommends for recordings).
+        Some(cq) => c.args([
+            "-rc",
+            "vbr",
+            "-cq",
+            &cq.to_string(),
+            "-b:v",
+            "0",
+            "-maxrate",
+            &format!("{}k", rate.cap_mbps * 1000),
+            "-bufsize",
+            &format!("{}k", rate.cap_mbps * 2000),
+        ]),
+        // VBR around the target with a 1.5x peak: action scenes get more bits
+        // than menus without unbounded replay-buffer growth.
+        None => c.args([
+            "-b:v",
+            &format!("{}M", rate.target_mbps),
+            "-maxrate",
+            &format!("{}k", rate.cap_mbps * 1000),
+            "-bufsize",
+            &format!("{}k", rate.target_mbps * 2000),
+        ]),
+    };
+    c.args(["-g", &(s.fps * 2).to_string(), "-bf", "0"]);
     // Segments must start with IDR frames so each 2s file decodes on its own and
     // the segment muxer can split; QSV otherwise emits only one IDR per stream.
-    match ffmpeg_encoder {
-        "h264_nvenc" => {
+    match hw {
+        "nvenc" => {
             c.args(["-forced-idr", "1"]);
         }
-        "h264_qsv" | "h264_amf" => {
+        "qsv" | "amf" => {
             c.args(["-forced_idr", "1"]);
         }
         _ => {}
     }
-    if ffmpeg_encoder == "h264_nvenc" {
+    if nvenc {
         // NVENC runs on its own engine; presets trade encoder time, not game GPU time.
         c.args([
             "-preset",
@@ -1009,7 +1219,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
             c.args(["-rc-lookahead", &n.to_string()]);
         }
     }
-    if ffmpeg_encoder == "h264_amf" {
+    if hw == "amf" {
         c.args([
             "-quality",
             match s.preset.as_str() {
@@ -1019,7 +1229,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
             },
         ]);
     }
-    if ffmpeg_encoder == "h264_qsv" {
+    if hw == "qsv" {
         let t = tuning();
         match t.qsv_low_power {
             Some(lp) => {
@@ -1042,13 +1252,16 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
             },
         ]);
     }
-    if !bt709 && ffmpeg_encoder == "h264_nvenc" {
-        // NVENC converts BGRA input with BT.709 limited range (measured: red
-        // decodes to Y 62, Cb 103, Cr 239) but tags it full-range "GBR".
-        // Correct the stream's colour description.
+    if !bt709 && nvenc {
+        // NVENC converts BGRA input to limited-range BT.601-matrix YUV (see
+        // BGRA_TAGS) and may describe it as full-range RGB. Write the real
+        // colour description into the bitstream.
         c.args([
             "-bsf:v",
-            "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+            &match codec {
+                "av1" => "av1_metadata=color_range=tv:color_primaries=1:transfer_characteristics=1:matrix_coefficients=6".to_string(),
+                c => format!("{c}_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=6"),
+            },
         ]);
     }
     if bt709 {
@@ -1341,6 +1554,7 @@ mod tests {
         assert!(pair("-c:v", "h264_qsv") && pair("-low_power", "1"));
         assert!(pair("-colorspace", "bt709") && pair("-color_range", "tv"));
         assert!(pair("-b:v", "16M") && pair("-maxrate", "24000k"));
+        assert!(!pair("-cq", "28"), "Quick Sync keeps VBR");
         let mut c = command(Path::new("ffmpeg"));
         encoding_args(
             &mut c,
@@ -1396,6 +1610,174 @@ mod tests {
         assert!(g[1].contains("first_pts=0,highpass=f=80,asplit=2[m0][a0]"));
     }
     #[test]
+    fn codecs_map_onto_the_same_hardware_and_fall_back_to_h264() {
+        assert_eq!(
+            with_codec("h264_qsv_lp", "hevc").as_deref(),
+            Some("hevc_qsv_lp")
+        );
+        assert_eq!(
+            with_codec("h264_nvenc", "av1").as_deref(),
+            Some("av1_nvenc")
+        );
+        assert_eq!(with_codec("libopenh264", "av1"), None);
+        assert_eq!(ffmpeg_encoder("hevc_qsv_lp"), ("hevc_qsv", true));
+        assert_eq!(codec_of("av1_nvenc"), "av1");
+        assert_eq!(codec_of("h264_qsv_lp"), "h264");
+        let paths = [(Scaler::D3d11, "h264_nvenc"), (Scaler::Cuda, "h264_nvenc")];
+        let order = codec_candidates(&paths, "av1");
+        let names: Vec<&str> = order.iter().map(|c| c.1.as_str()).collect();
+        assert_eq!(
+            names,
+            ["av1_nvenc", "av1_nvenc", "h264_nvenc", "h264_nvenc"]
+        );
+        assert_eq!(codec_candidates(&paths, "h264").len(), 2);
+        // "auto" never picks anything but H.264.
+        let s = Settings::default();
+        assert_eq!(s.codec, "auto");
+        assert_eq!(requested_codec(&s), "h264");
+    }
+    #[test]
+    fn nvenc_uses_capped_constant_quality_per_codec() {
+        let s = Settings::default();
+        let h264 = rate_plan(&s, "h264_nvenc", 1920, 1080);
+        assert_eq!(
+            h264,
+            RatePlan {
+                cq: Some(28),
+                target_mbps: 16,
+                cap_mbps: 24
+            }
+        );
+        let av1 = rate_plan(&s, "av1_nvenc", 1920, 1080);
+        assert_eq!(
+            av1,
+            RatePlan {
+                cq: Some(34),
+                target_mbps: 12,
+                cap_mbps: 18
+            }
+        );
+        assert_eq!(rate_plan(&s, "h264_qsv", 1920, 1080).cq, None);
+        let custom = Settings {
+            preset: "custom".into(),
+            bitrate_mbps: 20,
+            ..Default::default()
+        };
+        assert_eq!(
+            rate_plan(&custom, "av1_nvenc", 1920, 1080),
+            RatePlan {
+                cq: None,
+                target_mbps: 20,
+                cap_mbps: 30
+            }
+        );
+        for (encoder, bsf) in [
+            ("h264_nvenc", "h264_metadata="),
+            ("hevc_nvenc", "hevc_metadata="),
+            ("av1_nvenc", "av1_metadata="),
+        ] {
+            let mut c = command(Path::new("ffmpeg"));
+            encoding_args(&mut c, &s, encoder, (1920, 1080), false);
+            let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+            let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
+            assert!(
+                pair("-c:v", encoder)
+                    && pair("-rc", "vbr")
+                    && pair("-b:v", "0")
+                    && pair("-forced-idr", "1"),
+                "{encoder}"
+            );
+            assert!(
+                pair("-rc-lookahead", "20") && pair("-spatial-aq", "1"),
+                "{encoder}"
+            );
+            assert!(
+                args.iter()
+                    .any(|a| a.starts_with(bsf) && a.contains("matrix_coefficients=6")),
+                "{encoder}"
+            );
+        }
+    }
+    /// Real encode: NVENC's RGB conversion must match the matrix we tag.
+    /// Skipped on PCs without NVENC.
+    #[test]
+    fn nvenc_colour_tags_match_its_conversion() {
+        let Ok(m) = Media::discover() else { return };
+        if !m.encoder_probe("h264_nvenc") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("replayx-colour-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] {
+            if !m.encoder_probe(encoder) {
+                continue;
+            }
+            let out = dir.join(format!("{encoder}.mkv"));
+            let mut c = command(&m.ffmpeg);
+            c.args([
+                "-hide_banner",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=0x00C000:s=1920x1080:r=60",
+                "-frames:v",
+                "3",
+                "-vf",
+            ]);
+            c.arg(format!("format=bgra,{BGRA_TAGS}"));
+            encoding_args(&mut c, &Settings::default(), encoder, (1920, 1080), false);
+            c.args(["-an"]).arg(&out);
+            assert!(c.status().unwrap().success(), "{encoder}");
+            // Decode with the tagged matrix: green must come back as green.
+            let rgb = command(&m.ffmpeg)
+                .args(["-hide_banner", "-v", "error", "-i"])
+                .arg(&out)
+                .args([
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=w=16:h=16:in_color_matrix=bt601:in_range=tv,format=rgb24",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ])
+                .output()
+                .unwrap()
+                .stdout;
+            let px = &rgb[(8 * 16 + 8) * 3..(8 * 16 + 8) * 3 + 3];
+            assert!(
+                px[0] < 8 && (184..=200).contains(&px[1]) && px[2] < 8,
+                "{encoder}: {px:?}"
+            );
+            let tags = command(&m.ffprobe)
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v",
+                    "-show_entries",
+                    "stream=color_space,color_range,color_primaries",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(&out)
+                .output()
+                .unwrap()
+                .stdout;
+            let tags = String::from_utf8_lossy(&tags);
+            assert!(
+                tags.contains("tv")
+                    && (tags.contains("smpte170m") || tags.contains("bt470bg"))
+                    && tags.contains("bt709"),
+                "{encoder}: {tags}"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
     fn nvenc_keeps_lookahead_so_video_never_runs_ahead_of_audio() {
         // Second half of the stutter fix: the encoder holds ~1/3 s of video.
         assert_eq!(Tuning::default().nvenc_lookahead, Some(20));
@@ -1411,5 +1793,92 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w[0] == "-rc-lookahead" && w[1] == "20"));
+    }
+    #[test]
+    fn microphone_chain_is_optional_ordered_and_always_limited_when_loud() {
+        use crate::model::AudioSource;
+        let mic = AudioSource {
+            kind: "microphone".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            source_chain(&mic),
+            "",
+            "raw capture unless the user enables something"
+        );
+        let loud = AudioSource {
+            boost_db: 12.0,
+            ..mic.clone()
+        };
+        assert_eq!(
+            source_chain(&loud),
+            "volume=12.0dB,alimiter=limit=0.944:attack=4:release=60:level=0"
+        );
+        let over = AudioSource {
+            volume: 1.5,
+            ..mic.clone()
+        };
+        assert!(
+            source_chain(&over).starts_with("alimiter"),
+            "above 100% is limited, not clipped"
+        );
+        let all = AudioSource {
+            high_pass: true,
+            noise_suppression: true,
+            noise_gate: true,
+            compressor: true,
+            boost_db: 6.0,
+            ..mic.clone()
+        };
+        let c = source_chain(&all);
+        let at = |f: &str| c.find(f).unwrap();
+        assert!(
+            at("highpass") < at("afftdn")
+                && at("afftdn") < at("agate")
+                && at("agate") < at("acompressor")
+                && at("acompressor") < at("volume")
+                && at("volume") < at("alimiter")
+        );
+        let bad = crate::model::Settings {
+            audio: vec![AudioSource {
+                boost_db: 30.0,
+                ..mic
+            }],
+            ..Default::default()
+        };
+        assert!(bad.validate().is_err());
+    }
+    #[test]
+    fn boosted_microphone_never_clips() {
+        // +24 dB on a near-full-scale tone through the real chain: the output
+        // stays below 0 dBFS (limiter), no hard clipping.
+        let Ok(media) = Media::discover() else { return };
+        let mic = crate::model::AudioSource {
+            kind: "microphone".into(),
+            boost_db: 24.0,
+            compressor: true,
+            high_pass: true,
+            ..Default::default()
+        };
+        let out = command(&media.ffmpeg)
+            .args([
+                "-hide_banner",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=f=220:r=48000:d=2,volume=0.9",
+                "-af",
+            ])
+            .arg(format!("{},astats=metadata=0", source_chain(&mic)))
+            .args(["-f", "null", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stderr);
+        let peak: f64 = text
+            .lines()
+            .filter_map(|l| l.split("Peak level dB:").nth(1))
+            .filter_map(|v| v.trim().parse().ok())
+            .fold(f64::MIN, f64::max);
+        assert!(peak < -0.3 && peak > -12.0, "peak {peak} dBFS");
     }
 }

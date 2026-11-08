@@ -448,6 +448,7 @@ pub struct TestCapture {
 pub fn record_test(
     source: AudioSource,
     seconds: u64,
+    stop: &std::sync::atomic::AtomicBool,
     mut on_level: impl FnMut(f32, f64),
 ) -> Result<TestCapture> {
     use std::io::Read;
@@ -459,7 +460,7 @@ pub fn record_test(
     let mut bytes = Vec::with_capacity(limit);
     let mut input = [0u8; 8192];
     let mut last_level = Instant::now();
-    while bytes.len() < limit {
+    while bytes.len() < limit && !stop.load(Ordering::Relaxed) {
         if let Some(error) = feed.meter.error.lock().unwrap().clone() {
             bail!("Audio capture error: {error}")
         }
@@ -780,7 +781,10 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                     };
                     let mut peak = 0f32;
                     for sample in chunk.iter_mut() {
-                        *sample = (*sample * gain).clamp(-1., 1.);
+                        // Float PCM keeps headroom above full scale: a source
+                        // turned above 100% is limited smoothly in FFmpeg
+                        // (media::source_chain) instead of hard-clipped here.
+                        *sample = (*sample * gain).clamp(-4., 4.);
                         peak = peak.max(sample.abs());
                     }
                     mt.peak.store(peak.to_bits(), Ordering::Relaxed);

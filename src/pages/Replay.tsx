@@ -3,7 +3,7 @@ import { HardDrive, LifeBuoy, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { bytes, duration, durationLabel } from '../format';
+import { audioTrackCount, bytes, bytesPerSecond as rateBytes, duration, durationLabel, outputWidth, ratePlan, requestedCodec } from '../format';
 import { Button, Card, Field, Kbd, Segmented } from '../ui';
 import { Section } from './shared';
 import { ReplaySwitch } from '../ReplaySwitch';
@@ -15,9 +15,12 @@ export function ReplayPage() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const active = useStatus(activeOf);
   const s = useStatus(x => ({ buffer: x.buffer_seconds, bytes: x.buffer_bytes, replay: x.replay, recovery: x.recovery_sessions }));
-  const tracks = draft.audio.filter(a => a.enabled).length;
-  const audioTracks = tracks === 0 ? 0 : draft.separate_tracks ? tracks + 1 : 1;
-  const bytesPerSecond = (draft.bitrate_mbps * 1e6 + audioTracks * draft.audio_bitrate_kbps * 1000) / 8 * 1.03;
+  const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
+  // Was draft.bitrate_mbps (the Custom slider) for every preset, which
+  // under-estimated Balanced buffers by a quarter.
+  const rate = ratePlan(draft.preset, draft.bitrate_mbps, draft.fps, outputWidth(draft.width, draft.height), draft.height, requestedCodec(draft.codec));
+  const bytesPerSecond = rateBytes(rate.target, audioTracks, draft.audio_bitrate_kbps);
+  const worstCovered = Math.floor((draft.buffer_mb * 1024 * 1024) / rateBytes(rate.cap, audioTracks, draft.audio_bitrate_kbps));
   const needed = bytesPerSecond * draft.replay_seconds;
   const budget = draft.buffer_mb * 1024 * 1024;
   const covered = Math.floor(budget / bytesPerSecond);
@@ -46,7 +49,7 @@ export function ReplayPage() {
         </Card>
 
         <Card title="Disk budget" subtitle="The rolling buffer lives on disk, not in memory.">
-          <Field label="Maximum buffer size" hint={`About ${bytes(needed)} needed for ${durationLabel(draft.replay_seconds)} at ${draft.bitrate_mbps} Mbps with ${audioTracks} audio track${audioTracks === 1 ? '' : 's'}.`}>
+          <Field label="Maximum buffer size" hint={`About ${bytes(needed)} needed for ${durationLabel(draft.replay_seconds)} at about ${rate.target} Mb/s with ${audioTracks} audio track${audioTracks === 1 ? '' : 's'}.`}>
             <div className="range-row">
               <input type="range" min={256} max={16384} step={256} value={Math.min(draft.buffer_mb, 16384)} disabled={active}
                 onChange={e => patch({ buffer_mb: Number(e.target.value) })} aria-label="Buffer size" />
@@ -58,6 +61,7 @@ export function ReplayPage() {
             {short ? `This budget holds only about ${duration(covered)}. Raise it or lower the bitrate to keep the full ${durationLabel(draft.replay_seconds)}.`
               : `Covers the full ${durationLabel(draft.replay_seconds)} (room for about ${duration(covered)}).`}
           </div>
+          {!short && worstCovered < draft.replay_seconds && <p className="muted small">In very detailed scenes video can use up to {rate.cap} Mb/s; then this budget keeps about {duration(worstCovered)}. The oldest buffered seconds go first; saved clips are never touched.</p>}
         </Card>
       </div>
 

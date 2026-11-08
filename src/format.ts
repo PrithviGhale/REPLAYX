@@ -14,19 +14,37 @@ export const bytes = (n: number) => {
 };
 export const db = (peak: number) => (peak <= 0.00001 ? '−∞ dB' : `${(20 * Math.log10(peak)).toFixed(1)} dB`);
 export const encoderName = (n: string) => ({
-  h264_nvenc: 'NVIDIA NVENC', h264_amf: 'AMD AMF', h264_qsv: 'Intel Quick Sync', h264_qsv_lp: 'Intel Quick Sync (low-power)', libopenh264: 'OpenH264 (CPU)',
+  nvenc: 'NVIDIA NVENC', amf: 'AMD AMF', qsv: 'Intel Quick Sync', qsv_lp: 'Intel Quick Sync (low-power)', libopenh264: 'OpenH264 (CPU)',
   mpeg4: 'MPEG-4 (CPU)', auto: 'Automatic',
-} as Record<string, string>)[n] ?? (n || '—');
+} as Record<string, string>)[n.replace(/^(h264|hevc|av1)_/, '')] ?? (n || '—');
 export const hotkeyLabel = (k: string) => k.split('+').map(p => (p === 'Control' ? 'Ctrl' : p)).join(' + ');
 export const canvasWidth = (h: number) => ({ 480: 854, 720: 1280, 1080: 1920, 1440: 2560, 2160: 3840 } as Record<number, number>)[h] ?? 0;
 
-/** Mirror of media::target_bitrate_mbps: preset bitrate at an output size and fps. */
+/** Mirror of media::target_bitrate_mbps: H.264 preset bitrate at an output size and fps. */
 export function targetBitrate(preset: string, custom: number, fps: number, width: number, height: number) {
   if (preset === 'custom') return custom;
-  const base = preset === 'performance' ? 16 : preset === 'quality' ? 45 : 28;
+  const base = preset === 'performance' ? 10 : preset === 'quality' ? 25 : 16;
   const pixels = (width * height) / (1920 * 1080);
   return Math.min(150, Math.max(4, Math.round(base * pixels ** 0.9 * (fps / 60) ** 0.75)));
 }
+export type Codec = 'h264' | 'hevc' | 'av1';
+export const codecName: Record<string, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', mpeg4: 'MPEG-4' };
+/** Codec the setting asks for: Automatic records H.264. */
+export const requestedCodec = (c: string): Codec => (c === 'hevc' || c === 'av1' ? c : 'h264');
+/** Codec an encoder id produces ("av1_nvenc" → "av1"). */
+export const codecOf = (encoder: string) => (encoder.startsWith('hevc_') ? 'hevc' : encoder.startsWith('av1_') ? 'av1' : encoder === 'mpeg4' ? 'mpeg4' : 'h264');
+/** Mirror of media::rate_plan: typical average and peak video rate (Mb/s). */
+export function ratePlan(preset: string, custom: number, fps: number, width: number, height: number, codec: Codec) {
+  const h264 = targetBitrate(preset, custom, fps, width, height);
+  if (preset === 'custom') return { target: h264, cap: Math.floor((h264 * 3) / 2) };
+  const k = codec === 'av1' ? 0.75 : 1;
+  return { target: Math.max(2, Math.round(h264 * k)), cap: Math.max(3, Math.round(h264 * 1.5 * k)) };
+}
+/** Bytes per second on disk for a video rate plus AAC tracks (+3% container overhead). */
+export const bytesPerSecond = (videoMbps: number, audioTracks: number, audioKbps: number) =>
+  ((videoMbps * 1e6 + audioTracks * audioKbps * 1000) / 8) * 1.03;
+/** Audio tracks a recording has: the mix plus one per source when separate. */
+export const audioTrackCount = (enabled: number, separate: boolean) => (enabled === 0 ? 0 : separate ? enabled + 1 : 1);
 /** Output width for settings (0 = 16:9 canvas for the height, as in older files). */
 export const outputWidth = (width: number, height: number) => width || canvasWidth(height);
 

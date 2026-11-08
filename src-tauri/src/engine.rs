@@ -75,8 +75,16 @@ pub struct Status {
     pub encoder_speed: f64,
     /// How far encoded video trails the wall clock since the first frame.
     pub video_lag_ms: u64,
-    /// Video bitrate the encoder targets (Mb/s).
+    /// Video bitrate the encoder targets (Mb/s); with constant quality, the
+    /// typical average.
     pub target_bitrate_mbps: u32,
+    /// Peak video bitrate (Mb/s).
+    pub cap_bitrate_mbps: u32,
+    /// NVENC constant-quality level, when used.
+    pub constant_quality: Option<u32>,
+    /// Codec actually being recorded ("h264", "hevc", "av1"); differs from
+    /// the setting when the GPU could not encode the chosen codec.
+    pub codec: String,
     /// Encoder in use, as a readable name (e.g. "h264_qsv (low-power VDEnc)").
     pub encoder_label: String,
     /// Game in front right now, also while not capturing (for the notice).
@@ -905,7 +913,7 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v3|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}",
+        "v4|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
         g.adapter_vendor,
         g.device,
         g.desktop_width,
@@ -914,6 +922,7 @@ fn remembered_key(
         s.display,
         plan,
         s.encoder,
+        s.codec,
         s.fps,
         s.preset,
         s.gpu_scaling,
@@ -973,7 +982,7 @@ fn select_video_path(
 ) -> Result<VideoPath> {
     let s = &req.settings;
     let (Some(g), Some(plan), false) = (geometry, plan, req.synthetic) else {
-        let key = format!("no-geometry|{}|{}", s.encoder, req.synthetic);
+        let key = format!("no-geometry|{}|{}|{}", s.encoder, s.codec, req.synthetic);
         if let Some((cached, scaler, encoder)) = &req.cache {
             if *cached == key {
                 return Ok(VideoPath {
@@ -985,7 +994,9 @@ fn select_video_path(
                 });
             }
         }
-        let encoder = req.media.choose_encoder(&s.encoder)?;
+        let encoder = req
+            .media
+            .choose_encoder(&s.encoder, media::requested_codec(s))?;
         return Ok(VideoPath {
             scaler: Scaler::Cpu,
             encoder: encoder.clone(),
@@ -995,8 +1006,8 @@ fn select_video_path(
         });
     };
     let key = format!(
-        "{}|{}|{:?}|{}|{}|{}|{}",
-        g.adapter_luid, s.display, plan, s.encoder, s.fps, s.preset, s.gpu_scaling
+        "{}|{}|{:?}|{}|{}|{}|{}|{}",
+        g.adapter_luid, s.display, plan, s.encoder, s.codec, s.fps, s.preset, s.gpu_scaling
     );
     if let Some((cached, scaler, encoder)) = &req.cache {
         if *cached == key {
@@ -1039,12 +1050,16 @@ fn select_video_path(
     }
     let mut rejected = Vec::new();
     let candidates = if s.gpu_scaling {
-        media::scaling_candidates(&s.encoder, g.adapter_vendor)
+        media::codec_candidates(
+            &media::scaling_candidates(&s.encoder, g.adapter_vendor),
+            media::requested_codec(s),
+        )
     } else {
         rejected.push("GPU scaling disabled in settings".into());
         Vec::new()
     };
     for (scaler, encoder) in candidates {
+        let encoder = encoder.as_str();
         if !scaler.supports(plan) {
             continue;
         }
@@ -1080,7 +1095,9 @@ fn select_video_path(
             Err(e) => rejected.push(format!("{} + {encoder}: {e}", scaler.label())),
         }
     }
-    let encoder = req.media.choose_encoder(&s.encoder)?;
+    let encoder = req
+        .media
+        .choose_encoder(&s.encoder, media::requested_codec(s))?;
     req.media
         .probe_video(s, Scaler::Cpu, &encoder, Some(plan))
         .map_err(|e| anyhow::anyhow!("Capture could not start with {encoder}: {e}"))?;
@@ -1776,8 +1793,9 @@ impl Inner {
         self.status.scaling_detail = p.scaling_detail;
         (self.status.output_width, self.status.output_height) =
             p.plan.map(|p| (p.width, p.height)).unwrap_or_default();
-        self.status.target_bitrate_mbps = media::target_bitrate_mbps(
+        let rate = media::rate_plan(
             &self.settings,
+            &self.status.encoder,
             if self.status.output_width > 0 {
                 self.status.output_width
             } else {
@@ -1789,6 +1807,10 @@ impl Inner {
                 self.settings.height
             },
         );
+        self.status.target_bitrate_mbps = rate.target_mbps;
+        self.status.cap_bitrate_mbps = rate.cap_mbps;
+        self.status.constant_quality = rate.cq;
+        self.status.codec = media::codec_of(&self.status.encoder).into();
         self.status.buffer_bytes = 0;
         self.status.buffer_seconds = 0.;
         self.status.start_timings = p.timings;

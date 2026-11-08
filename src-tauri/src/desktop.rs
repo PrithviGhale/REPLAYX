@@ -43,6 +43,8 @@ struct AppState {
     updating: Arc<Mutex<bool>>,
     icons: Arc<Mutex<HashMap<String, Option<String>>>>,
     testing_audio: Arc<Mutex<bool>>,
+    /// Set by "Stop test" to end a microphone/source test early.
+    test_stop: Arc<std::sync::atomic::AtomicBool>,
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
@@ -249,8 +251,8 @@ async fn capabilities() -> Reply<serde_json::Value> {
     tauri::async_runtime::spawn_blocking(||{
     let devices=crate::audio::devices().map_err(err)?;
     let available=Media::discover().and_then(|m|{m.preflight()?;Ok(m)});
-    let (encoders,media_error)=match available {Ok(m)=>(m.encoders(),None),Err(e)=>(Vec::new(),Some(format!("{e:#}")))};
-    Ok(serde_json::json!({"encoders":encoders,"media_error":media_error,"displays":crate::geometry::displays(),"devices":devices,"wgc":false,"pause_recording":false,"monitoring":false,"updates_configured":update_configured()}))
+    let (encoders,codecs,media_error)=match available {Ok(m)=>(m.encoders(),m.codecs(),None),Err(e)=>(Vec::new(),Vec::new(),Some(format!("{e:#}")))};
+    Ok(serde_json::json!({"encoders":encoders,"codecs":codecs,"media_error":media_error,"displays":crate::geometry::displays(),"devices":devices,"wgc":false,"pause_recording":false,"monitoring":false,"updates_configured":update_configured()}))
 }).await.map_err(err)?
 }
 #[tauri::command]
@@ -383,15 +385,40 @@ async fn audio_test(
         }
         *busy = true;
     }
-    let file = state.data_dir().join("tests").join("audio-test.wav");
+    let dir = state.data_dir().join("tests");
+    let file = dir.join("audio-test.wav");
     let flag = state.testing_audio.clone();
+    let stop = state.test_stop.clone();
+    stop.store(false, std::sync::atomic::Ordering::Relaxed);
+    let ffmpeg = Media::discover().ok().map(|m| m.ffmpeg);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let capture = audio::record_test(source, seconds.clamp(2, 15), |peak, elapsed| {
+        // The same processing the recording will use (boost, filters, limiter),
+        // so what the user hears is what gets recorded.
+        let chain = crate::media::source_chain(&source);
+        let capture = audio::record_test(source, seconds.clamp(2, 15), &stop, |peak, elapsed| {
             let _ = app.emit("audio-test-level", (peak, elapsed));
         })
         .map_err(err)?;
-        fs::create_dir_all(file.parent().unwrap()).map_err(err)?;
-        audio::write_wav16(&file, &capture.pcm).map_err(err)?;
+        fs::create_dir_all(&dir).map_err(err)?;
+        let raw = dir.join("audio-test-raw.wav");
+        audio::write_wav16(&raw, &capture.pcm).map_err(err)?;
+        let _ = fs::remove_file(&file);
+        match (&ffmpeg, chain.is_empty()) {
+            (Some(ffmpeg), false) => {
+                let status = command(ffmpeg)
+                    .args(["-hide_banner", "-v", "error", "-y", "-i"])
+                    .arg(&raw)
+                    .args(["-af", &chain, "-c:a", "pcm_s16le"])
+                    .arg(&file)
+                    .status()
+                    .map_err(err)?;
+                let _ = fs::remove_file(&raw);
+                if !status.success() {
+                    return Err("Could not apply the microphone processing to the test".into());
+                }
+            }
+            _ => fs::rename(&raw, &file).map_err(err)?,
+        }
         Ok(capture)
     })
     .await
@@ -399,13 +426,34 @@ async fn audio_test(
     *flag.lock().unwrap() = false;
     result?
 }
+/// End a running audio test early ("Stop test").
 #[tauri::command]
-fn play_audio_test(state: State<AppState>) -> Reply<()> {
+fn audio_test_stop(state: State<AppState>) {
+    state
+        .test_stop
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+/// The last test recording as a WAV data URL for in-app playback.
+#[tauri::command]
+async fn audio_test_data(state: State<'_, AppState>) -> Reply<String> {
     let file = state.data_dir().join("tests").join("audio-test.wav");
-    if !file.is_file() {
-        return Err("Run a test recording first".into());
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = fs::read(&file).map_err(|_| "Run a test recording first".to_string())?;
+        Ok(format!("data:audio/wav;base64,{}", winutil::base64(&bytes)))
+    })
+    .await
+    .map_err(err)?
+}
+/// Delete test recordings (closing the test, and at start-up): microphone
+/// tests are never kept.
+#[tauri::command]
+fn audio_test_discard(state: State<AppState>) {
+    discard_audio_tests(&state.data_dir());
+}
+fn discard_audio_tests(data: &std::path::Path) {
+    for name in ["audio-test.wav", "audio-test-raw.wav"] {
+        let _ = fs::remove_file(data.join("tests").join(name));
     }
-    open_local(&file)
 }
 #[tauri::command]
 fn open_folder(state: State<AppState>) -> Reply<()> {
@@ -753,12 +801,14 @@ pub fn run() {
                 app.path().app_local_data_dir()?
             };
             let settings = Settings::load(&data.join("settings.json"))?;
+            discard_audio_tests(&data);
             let engine = Engine::new(data.clone(), settings.clone())?;
             app.manage(AppState {
                 engine,
                 updating: Arc::new(Mutex::new(false)),
                 icons: Arc::new(Mutex::new(HashMap::new())),
                 testing_audio: Arc::new(Mutex::new(false)),
+                test_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 app: app.handle().clone(),
                 library: Arc::new(Mutex::new(Library {
                     index: library::Index::load(&data.join("library-index.json")),
@@ -969,7 +1019,9 @@ pub fn run() {
             app_icon,
             clip_thumbnail,
             audio_test,
-            play_audio_test,
+            audio_test_stop,
+            audio_test_data,
+            audio_test_discard,
             open_folder
         ])
         .run(tauri::generate_context!())

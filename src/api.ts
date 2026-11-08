@@ -7,6 +7,7 @@ export type AudioKind = 'system' | 'microphone' | 'application' | 'exclude';
 export type AudioSource = {
   kind: AudioKind; device: string; pid: number; process_started: number;
   name: string; enabled: boolean; volume: number; muted: boolean;
+  boost_db: number; high_pass: boolean; noise_suppression: boolean; noise_gate: boolean; compressor: boolean;
 };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Display = {
@@ -16,7 +17,7 @@ export type Display = {
 export type CanvasMode = 'stretch' | 'fit' | 'crop' | 'native';
 export type Settings = {
   capture: string; display: number; window_title: string; width: number; height: number; canvas_mode: CanvasMode;
-  source_rect: Rect | null; fps: number; encoder: string; preset: string; bitrate_mbps: number;
+  source_rect: Rect | null; fps: number; encoder: string; codec: 'auto' | 'h264' | 'hevc' | 'av1'; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string;
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
@@ -35,6 +36,7 @@ export type Status = {
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
   pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
   encoder_speed: number; video_lag_ms: number; target_bitrate_mbps: number; encoder_label: string; foreground_game: string | null; play_width: number; play_height: number;
+  cap_bitrate_mbps: number; constant_quality: number | null; codec: string;
 };
 export type Probe = {
   duration: number; bytes: number; video_codec: string; audio_tracks: number; width: number; height: number;
@@ -46,7 +48,7 @@ export type GameMapping = { exe: string; name: string };
 export type Encoder = { name: string; available: boolean; reason: string };
 export type Device = { id: string; name: string; kind: 'system' | 'microphone' };
 export type Caps = {
-  encoders: Encoder[]; media_error: string | null; displays: Display[]; devices: Device[]; updates_configured: boolean;
+  encoders: Encoder[]; codecs?: { codec: 'h264' | 'hevc' | 'av1'; encoders: string[] }[]; media_error: string | null; displays: Display[]; devices: Device[]; updates_configured: boolean;
 };
 export type Session = { pid: number; name: string; path: string; started: number; active: boolean };
 export type TestCapture = {
@@ -77,7 +79,9 @@ export const api = {
   clipAction: (id: string, operation: 'delete' | 'rename' | 'move' | 'folder' | 'play' | 'mp4', value?: string) =>
     call<string>('clip_action', { id, operation, value: value ?? null }),
   audioTest: (source: AudioSource, seconds: number) => call<TestCapture>('audio_test', { source, seconds }),
-  playAudioTest: () => call<void>('play_audio_test'),
+  audioTestStop: () => call<void>('audio_test_stop'),
+  audioTestData: () => call<string>('audio_test_data'),
+  audioTestDiscard: () => call<void>('audio_test_discard'),
   openFolder: () => call<void>('open_folder'),
   checkUpdate: () => call<UpdateInfo>('check_update'),
   installUpdate: () => call<void>('install_update'),
@@ -94,12 +98,13 @@ export const emptyStatus: Status = {
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],
   encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null, play_width: 0, play_height: 0,
+  cap_bitrate_mbps: 0, constant_quality: null, codec: '',
 };
 
 /** Browser-preview defaults; the native app always loads real settings. */
 export const previewSettings: Settings = {
   capture: 'desktop-duplication', display: 0, window_title: '', width: 1920, height: 1080, canvas_mode: 'stretch', source_rect: null,
-  fps: 60, encoder: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
+  fps: 60, encoder: 'auto', codec: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,

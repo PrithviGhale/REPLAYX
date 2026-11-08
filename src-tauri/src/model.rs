@@ -16,6 +16,18 @@ pub struct AudioSource {
     pub enabled: bool,
     pub volume: f32,
     pub muted: bool,
+    /// Extra gain for this source in dB (0-24), applied in FFmpeg and always
+    /// followed by a limiter, so a quiet microphone can be made louder without
+    /// harsh clipping. Windows' own microphone level is never changed.
+    pub boost_db: f32,
+    /// Remove rumble and handling noise below ~80 Hz (voice is unaffected).
+    pub high_pass: bool,
+    /// Light FFT noise reduction for steady background noise (fans, hum).
+    pub noise_suppression: bool,
+    /// Gentle expander that lowers the level between words.
+    pub noise_gate: bool,
+    /// Gentle compressor that evens out loud and quiet speech.
+    pub compressor: bool,
 }
 impl Default for AudioSource {
     fn default() -> Self {
@@ -28,6 +40,11 @@ impl Default for AudioSource {
             enabled: true,
             volume: 1.0,
             muted: false,
+            boost_db: 0.0,
+            high_pass: false,
+            noise_suppression: false,
+            noise_gate: false,
+            compressor: false,
         }
     }
 }
@@ -45,6 +62,10 @@ pub struct Settings {
     pub source_rect: Option<crate::geometry::CaptureRect>,
     pub fps: u32,
     pub encoder: String,
+    /// Video codec: "auto" (H.264), "h264", "hevc" or "av1". Never changed
+    /// automatically; if the GPU cannot encode it, capture uses H.264 and the
+    /// app shows a warning.
+    pub codec: String,
     pub preset: String,
     pub bitrate_mbps: u32,
     pub replay_seconds: u32,
@@ -94,6 +115,7 @@ impl Default for Settings {
             source_rect: None,
             fps: 60,
             encoder: "auto".into(),
+            codec: "auto".into(),
             preset: "balanced".into(),
             bitrate_mbps: 12,
             replay_seconds: 60,
@@ -185,6 +207,9 @@ impl Settings {
         {
             bail!("Unsupported encoder")
         }
+        if !["auto", "h264", "hevc", "av1"].contains(&self.codec.as_str()) {
+            bail!("Unsupported video codec")
+        }
         if ![128, 160, 192, 256, 320].contains(&self.audio_bitrate_kbps) {
             bail!("Unsupported audio bitrate")
         }
@@ -225,6 +250,8 @@ impl Settings {
             if !["system", "microphone", "application", "exclude"].contains(&s.kind.as_str())
                 || !s.volume.is_finite()
                 || !(0.0..=2.0).contains(&s.volume)
+                || !s.boost_db.is_finite()
+                || !(0.0..=24.0).contains(&s.boost_db)
             {
                 bail!("Invalid audio source")
             }
