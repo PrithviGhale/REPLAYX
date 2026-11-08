@@ -1,5 +1,21 @@
 # Performance evidence and pending benchmark
 
+## 0.2.1-alpha.2 — capture start
+
+Measured with `replayx-cli start-bench silent` (real capture of the 2560×1600 display to 1728×1080 60 fps, Quick Sync zero-copy) and in the real window with `scripts/ui-record-check.mjs`. Times are from the start request.
+
+| Start | Command returns | First frame encoded | *Recording* state |
+| --- | --- | --- | --- |
+| First start for this display (capture paths probed) | 1.1–2.4 s | 1.75–3.0 s | 1.8–3.0 s |
+| Same session, again (cached path) | 8–9 ms | 654–668 ms | 678–795 ms |
+| After a relaunch (path remembered on disk) | 9–20 ms | 403–681 ms | 406–812 ms |
+| Record while Instant Replay runs | 0 ms | already encoding | immediate |
+
+Peak CPU during a start 1.1–4.7% of all cores; peak memory of REPLAYX plus its encoder 267–292 MB. The bench above ran with a 0.25 s encoder progress interval; the released build uses 0.5 s (see VALIDATION.md), so it reports the first frame, and switches to *Recording*, up to 0.5 s after it happens. The start itself is not slower.
+
+Before (0.2.1-alpha.1): every first Record after launching the app probed capture paths and checked the media runtime again; launch-to-first-finished-segment was the same as this build's cold start (3.40–3.66 s against 3.47–3.81 s, `scripts/start-latency.py`, 3 interleaved runs each). Its in-app timings were not instrumented and are not available. In the real window, 0.2.1-alpha.1 froze instead of reaching *Recording* in 2 of 2 valid runs.
+
+
 ## 0.2.1-alpha.1
 
 **Smoothness (decoded motion, not FPS counters).** A silent full-screen pattern encodes a 60 Hz tick in on-screen bits; `scripts/motion-check.py` reads the tick from every decoded frame (validated against an independent numpy implementation). 20 s runs, 2560×1600 @ 240 Hz → 1920×1080, Quick Sync zero-copy:

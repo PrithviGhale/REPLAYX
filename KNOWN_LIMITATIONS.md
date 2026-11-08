@@ -1,6 +1,13 @@
-# Known limitations — 0.2.1-alpha.1
+# Known limitations — 0.2.1-alpha.2
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## Capture start (0.2.1-alpha.2)
+
+- The **first** start for a display and set of video settings probes capture paths (1–2.5 s on the development laptop). The result is remembered; later starts reach the first frame in about 0.4–0.7 s. If the remembered path stops working (driver change, MUX switch), that start fails over to probing automatically, taking a few seconds longer once.
+- *Recording* appears when FFmpeg reports its first encoded frame, which it does every 0.5 s; the label can lag the real start by up to 0.5 s.
+- A start that has not finished after 60 s is abandoned with an error.
+- Footage left by a crash or a forced close is kept and counted as an interrupted session until you recover or discard it (Instant Replay page). Discard moves it to the Recycle Bin.
 
 ## New in 0.2.1 and not yet verified on real hardware
 
@@ -44,7 +51,7 @@ REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md]
 
 ## Distribution
 
-- The 0.2.0-alpha.1 installer is built but **not yet installed and tested** (install, launch, record, upgrade, uninstall). Don't use the 0.1.x installers; they predate the fixes.
+- The 0.2.1-alpha.2 installer is built but **not yet installed and tested** (install, launch, record, upgrade, uninstall). The tested build is the executable in `src-tauri/target/release/replayx.exe`. Don't use the 0.1.x installers; they predate the fixes.
 - Binaries aren't Authenticode-signed, so Windows SmartScreen may warn.
 - In-app updates are disabled until a publisher signing key and release endpoint exist. The signed update path hasn't been exercised.
 - Before a public release, the FFmpeg corresponding source and the notices of its bundled libraries must be packaged with the release (see THIRD_PARTY_NOTICES.md). H.264/AAC patent questions are not resolved by the software license.

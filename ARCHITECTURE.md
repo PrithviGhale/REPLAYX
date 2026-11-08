@@ -64,6 +64,14 @@ Output is first written as `.partial.mkv`. Only after stream inspection, duratio
 
 A background thread checks process exit, encoded-frame progress, finalized segments, audio-source errors, and storage every 200ms. A six-second frame stall, eight-second finalized-segment stall, three-second PCM write stall after startup, missing microphone packets, audio queue overflow, or storage below a 128MiB reserve stops capture and exposes Error. Startup requires 256MiB free on both volumes. Healthy capture requires encoded frames and a probed finalized segment with the expected tracks and canvas dimensions. These are liveness checks, not proof of perceptual audio quality or synchronization.
 
+## Threads and the engine lock
+
+The engine state lives behind one mutex. Rule since 0.2.1-alpha.2: **the window's UI thread never waits for it.** Tauri runs synchronous commands on the UI thread, so `status` and `settings` read published snapshots (the tick republishes every 200 ms; actions publish when they change state). Every other command that touches the engine is async and runs on a worker. Nothing that can send a window message runs while the lock is held: the foreground-window sample is taken between ticks without the lock, and REPLAYX's own windows are skipped, because `GetWindowTextW` on a window of the calling process sends `WM_GETTEXT` to that window's thread. 0.2.1-alpha.1 broke both rules and deadlocked when Record was pressed.
+
+## Starting capture
+
+`Engine::start` takes the lock only to check state and record the intent (`Starting { recording, replay }`), then releases it while `prepare_pipeline` checks the media runtime (once per launch), measures the display, selects the capture path, opens audio devices and starts FFmpeg. It then re-takes the lock to install the encoder, or to discard it if Stop/Cancel cleared the intent meanwhile. A Record while capture already runs attaches to that encoder. The working GPU path is stored in `video-path.json` (keyed by display device, mode, plan and encoder settings, not by the per-boot adapter LUID) and reused without probing; a path that fails before its first valid segment is denied, forgotten and replaced by probing. A watchdog abandons starts that exceed 60 s. User stops delete the replay buffer they leave behind (marker file plus background retries for briefly locked segments); buffers left by crashes stay for recovery.
+
 ## Saving clips
 
 A save hard-links the selected finalized segments into a snapshot (milliseconds), then a worker joins them

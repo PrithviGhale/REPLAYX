@@ -1,3 +1,53 @@
+# Validation — 0.2.1-alpha.2 (November 7, 2026)
+
+Same laptop (Iris Xe drives the 2560×1600 @ 240 Hz panel; RTX 4070 Laptop). Roblox, Steam and the Epic launcher were open in the background; capture tests ran after the user approved about 12 minutes of silent capture (no microphone, nothing played; one 15 s run with system-audio loopback was approved separately). All runs used throw-away data folders under `test-output/`; the user's settings, clips and sessions were not touched.
+
+## The Record freeze
+
+| Evidence | Result |
+| --- | --- |
+| Windows error reports for the user's freezes | `AppHangB1`, `replayx.exe` 0.2.1.0 at `src-tauri\target\release\replayx.exe` (the 0.2.1-alpha.1 build, not an installed copy), 18:20:53 and 18:21:40. A 0.2.0.0 hang is also recorded at 16:13:37. |
+| User's data folder after the freezes | Each frozen session: a buffer folder full of 2 s segments (87 and 17) and an **empty** recording folder. Capture ran, but the engine's tick never reached the step that adds segments to the recording. |
+| In-process reproduction (`games::tests::sampling_own_window_never_waits_for_its_blocked_owner_thread`) | `GetWindowTextW` on a window owned by the calling process blocks while the window's thread waits on a mutex, and completes once it is released. The new `window_process` returns immediately for REPLAYX's own windows. |
+| Real window, 0.2.1-alpha.1 (`scripts/ui-record-check.mjs`, Record pressed in the page) | Froze in 2 of 2 valid runs: window stopped answering 1.4 s after Record (`IsHungAppWindow` true; force-closed after 6 s in one run, after more than 3 min in the other), status stuck on *Stopped*, recording folder empty. A third run lost the foreground at the click (another window was in front), so the deadlock could not occur; it stayed responsive. |
+| Real window, this build | 8 of 8 runs responsive: 5 × Record/Stop, 2 × Cancel while starting, 1 × Replay → Record → Stop → Save replay → Replay off. REPLAYX was in the foreground for over 99% of samples; worst time to answer a window message 6.3 ms (the frozen build: no answer within 1 s). |
+
+## Hardware tests run with this build
+
+| Test | Result |
+| --- | --- |
+| Record acknowledgment (real window) | *Starting recording…* shown 57–69 ms after the click (5 runs). |
+| Cold first start (new data folder; capture paths probed) | *Recording* shown 1.4–2.6 s after the click (5 runs). Bench: probing 1.1–2.4 s, first frame 1.75–3.0 s. |
+| Start after relaunch (remembered path) / same session | First frame encoded 403–681 ms / 654–668 ms after the request; the start command returns in 8–20 ms. |
+| Record while Instant Replay runs | Joins the running encoder (same process id), no capture gap; state *Recording* immediately. Stopping it kept replay buffering; *Save replay* afterwards worked. |
+| Cancel while starting (real window) | Back to *Stopped* about 0.6 s after Cancel; no clip, no session folder left (2 runs). |
+| Rapid start/stop, failures (automated, synthetic source) | No encoder or folder left behind; missing runtime, unusable buffer folder and audio-source failure return an error and allow a new attempt. |
+| Interrupted sessions | After every bench and UI run: 0 sessions left and no folders on disk. |
+| 60 fps smoothness (silent motion pattern, decoded per frame) | Replay save: 0.42% irregular after warm-up. Recording, final build: 0.09% and 0.17%; 0.2.1-alpha.1 on the same test: 0.06%, 0.17% and 1.17%. Warm-up (first 0.2 s) repeats as before. Builds with a 0.25 s progress interval measured 0.42%, 1.87% and 1.39%, so the interval was kept at 0.5 s. |
+| System audio (15 s, loopback only) | Two AAC tracks (*Playback mix*, *System audio*), 1,552 packets, 0 gaps, 0 discontinuities, 5.4 ppm drift correction. |
+| Stop → clip ready (6 s recordings) | 1.35–1.94 s (9 recordings; 2.2 s when replay keeps running) (waits for the segment containing the Stop moment; replay keeps running). A replay save made during another save got a collision-free name. |
+| Delete in the real Clips page (`scripts/ui-delete-check.mjs`, generated clips) | 10/10: the clicked clip is the one deleted, the dialog names it, it lands in the Recycle Bin from the test folder, the list updates, the other clips are untouched; a clip held open by another program is refused with Windows' reason and kept. |
+
+## Automated
+
+Rust 91 tests (13 new: status never waits for a busy engine, the deadlock mechanism, failed starts, the start watchdog, cancel during start, rapid start/stop, output-folder and audio failures, Record joining replay, session counting, busy-segment cleanup), frontend 10 tests (Record/Cancel/Stop mode, *Starting* until frames are written), Clippy `-D warnings`, rustfmt, TypeScript, production build, `npm ci` with 0 vulnerabilities.
+
+## Build artifacts (not installed)
+
+| File | Bytes | Version | SHA-256 |
+| --- | --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` | 14,855,168 | 0.2.1-alpha.2 | `2AE632A3FC4B6D1343901307379ADB79AD2FCA0C1484A7B502097ACEB30DAA45` |
+| `src-tauri/target/release/replayx-cli.exe` | 1,986,048 | 0.2.1-alpha.2 | `5F995B7E783198D8D37E537E7C42300651D2430289175A9449F3F79FA943997B` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.2.1-alpha.2_x64-setup.exe` | 59,691,411 | 0.2.1-alpha.2 | `B6C2FAA191B55C20DD6FAABF7EEE83499EFC87E3C5EF3809B15FC71E4C7181CE` |
+
+Smoke test of this exact `replayx.exe` in the real window: responsive (worst 0.8 ms), *Starting recording…* at 58 ms, *Recording* at 1.7 s (first start in a new data folder), clip ready 2.0 s after Stop, no session left.
+
+## Not verified
+
+Game detection while actually playing; in-game FPS impact; a 15-minute soak; microphone; the NSIS installer installed on this PC; stretched Valorant.
+
+---
+
 # Validation — 0.2.1-alpha.1 (November 7, 2026)
 
 Same laptop as below (Iris Xe drives the 2560×1600 @ 240 Hz panel; RTX 4070 Laptop). Roblox was open in the background for the whole session; capture tests ran only after the user approved them, while nobody was playing.
