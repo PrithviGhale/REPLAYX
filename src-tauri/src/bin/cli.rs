@@ -7,6 +7,9 @@ fn main() -> Result<()> {
     if action == "audio-test" {
         return audio_test(&args);
     }
+    if action == "start-bench" {
+        return start_bench(&args);
+    }
     if action == "displays" {
         println!(
             "{}",
@@ -312,7 +315,7 @@ fn main() -> Result<()> {
     ]
     .contains(&action)
     {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E bitrate=MBPS] | probe FILE | recover DATA_DIR");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -432,15 +435,27 @@ fn main() -> Result<()> {
             s.replay, s.state, frames_before, s.frames
         );
     }
-    let second = engine.save_replay()?;
+    // A concurrent replay save only exists while replay runs; stopping a
+    // recording-only capture discards its buffer.
+    let second = if engine.status().replay {
+        Some(engine.save_replay()?)
+    } else {
+        None
+    };
     let worker = thread::spawn(move || first.run());
-    let b = second.run();
-    engine.complete_save(&b);
+    let b = second.map(|job| {
+        let r = job.run();
+        engine.complete_save(&r);
+        r
+    });
     let a = worker.join().unwrap();
     engine.complete_save(&a);
     engine.shutdown()?;
     let (path, probe) = a?;
-    let (other, _) = b?;
+    let other = match b {
+        Some(r) => Some(r?.0),
+        None => None,
+    };
     println!(
         "first clip ready {} ms after the stop/save request",
         stop_started.elapsed().as_millis()
@@ -534,5 +549,155 @@ fn audio_test(args: &[String]) -> Result<()> {
     if packets == 0 {
         bail!("No real device packets received; saved samples may be idle-loopback silence")
     }
+    Ok(())
+}
+
+/// Real capture startup benchmark (captures the selected display; silent by
+/// default, `system` adds system-audio loopback; never the microphone).
+/// Cases: first start for this display (capture paths probed), start after a
+/// relaunch (remembered path), second start in the same session (cached), and
+/// Record while Instant Replay already runs (joins the encoder).
+fn start_bench(args: &[String]) -> Result<()> {
+    use replayx_core::engine::Status;
+    use std::time::Instant;
+    let audio = args.get(2).map(String::as_str).unwrap_or("silent");
+    let root = std::env::current_dir()?.join("test-output").join(format!(
+        "start-bench-{}",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    let data = root.join("data");
+    let mut settings = Settings {
+        output_dir: root.join("clips"),
+        ..Default::default()
+    };
+    if audio != "system" {
+        settings.audio.clear();
+    }
+    let wait = |engine: &Engine, timeout: Duration, f: &dyn Fn(&Status) -> bool| {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let s = engine.status();
+            if f(&s) || Instant::now() > deadline {
+                return s;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    };
+    // Peak CPU (all cores = 100 %) and memory of this process and its encoder.
+    let sample = |stop: std::sync::Arc<std::sync::atomic::AtomicBool>| {
+        thread::spawn(move || {
+            let own = sysinfo::Pid::from_u32(std::process::id());
+            let mut sys = sysinfo::System::new();
+            let cores = thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1) as f32;
+            let (mut cpu, mut mem) = (0f32, 0u64);
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                let family: Vec<_> = sys
+                    .processes()
+                    .iter()
+                    .filter(|(pid, p)| **pid == own || p.parent() == Some(own))
+                    .map(|(_, p)| (p.cpu_usage(), p.memory()))
+                    .collect();
+                cpu = cpu.max(family.iter().map(|f| f.0).sum::<f32>() / cores);
+                mem = mem.max(family.iter().map(|f| f.1).sum());
+                // sysinfo needs at least 200 ms between refreshes for CPU usage.
+                thread::sleep(Duration::from_millis(250));
+            }
+            (cpu, mem)
+        })
+    };
+    let mut report = Vec::new();
+    let mut case = |engine: &Engine, label: &str, replay_first: bool| -> Result<()> {
+        if replay_first {
+            engine.start_replay()?;
+            let s = wait(engine, Duration::from_secs(20), &|s| s.state == "Buffering");
+            if s.state != "Buffering" {
+                bail!("replay did not start: {} {:?}", s.state, s.error)
+            }
+            thread::sleep(Duration::from_secs(3));
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler = sample(stop.clone());
+        let t = Instant::now();
+        engine.start_recording()?;
+        let returned = t.elapsed().as_millis();
+        let s = wait(engine, Duration::from_secs(20), &|s| {
+            s.recording && s.state == "Recording"
+        });
+        let recording_ms = t.elapsed().as_millis();
+        if s.state != "Recording" {
+            bail!("recording did not start: {} {:?}", s.state, s.error)
+        }
+        let s = wait(engine, Duration::from_secs(10), &|s| {
+            replay_first
+                || s.start_timings
+                    .iter()
+                    .any(|t| t.stage.starts_with("First segment"))
+        });
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let (cpu, mem) = sampler.join().unwrap();
+        thread::sleep(Duration::from_secs(3));
+        let stop_at = Instant::now();
+        let job = engine.stop_recording()?;
+        let handover = stop_at.elapsed().as_millis();
+        let result = job.run();
+        engine.complete_save(&result);
+        let ready = stop_at.elapsed().as_millis();
+        let (clip, probe) = result?;
+        println!("\n== {label}");
+        println!("  start() returned           {returned:>6} ms");
+        println!("  state Recording            {recording_ms:>6} ms (status polled every 5 ms)");
+        if !replay_first {
+            for t in &s.start_timings {
+                println!("  {:<44} {:>6} ms", t.stage, t.elapsed_ms);
+            }
+        }
+        println!(
+            "  peak CPU during start      {cpu:>6.1} % of all cores; peak memory {} MB",
+            mem / 1_048_576
+        );
+        println!(
+            "  stop -> clip ready         {ready:>6} ms (handover {handover} ms), {:.1} s, {}",
+            probe.duration,
+            clip.display()
+        );
+        report.push(serde_json::json!({"case":label,"start_returned_ms":returned,"recording_state_ms":recording_ms,
+            "timings":s.start_timings,"peak_cpu_percent":cpu,"peak_memory_mb":mem / 1_048_576,"stop_handover_ms":handover,
+            "stop_ready_ms":ready,"clip_seconds":probe.duration,"encoder":s.encoder,"scaling":s.scaling}));
+        if replay_first {
+            engine.stop_replay()?;
+        }
+        Ok(())
+    };
+    {
+        let engine = Engine::new(data.clone(), settings.clone())?;
+        case(
+            &engine,
+            "First start for this display (capture paths probed)",
+            false,
+        )?;
+        case(&engine, "Second start, same session (cached path)", false)?;
+        engine.shutdown()?;
+    }
+    thread::sleep(Duration::from_millis(500));
+    {
+        let engine = Engine::new(data.clone(), settings.clone())?;
+        case(&engine, "Start after relaunch (remembered path)", false)?;
+        case(
+            &engine,
+            "Record while Instant Replay runs (joins encoder)",
+            true,
+        )?;
+        let s = engine.status();
+        println!("\nleftover interrupted sessions: {}", s.recovery_sessions);
+        engine.shutdown()?;
+    }
+    std::fs::write(
+        root.join("start-bench.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    println!("\nwrote {}", root.join("start-bench.json").display());
     Ok(())
 }
