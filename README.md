@@ -80,7 +80,7 @@ REPLAYX recognises 140 games (Fortnite, Roblox, Valorant, Minecraft, Counter-Str
 An optional, local playtime tracker: the **Games** page shows how long you played each game today, yesterday, this week, this month or any dates you choose, with a daily chart, your most-played games and a page per game with its sessions and clips. It counts only time while the game is the window in front and REPLAYX is running, skips idle stretches and sleep, and stays on your PC. Turn it on (or off, pause, exclude games, export or clear it) whenever you like.
 
 ### Status overlay
-Small icons in a corner of your screen show Instant Replay, your microphone and a red dot while recording, over games, apps and the desktop. You see them while you play; Windows keeps them **out of your recordings** (verified on captured frames). Corner, opacity and icons are configurable.
+Small icons in a corner of your screen show Instant Replay, your microphone and a red dot while recording, over games, apps and the desktop. You see them while you play; Windows keeps them **out of your recordings** (verified on captured frames). Corner, opacity and icons are configurable. A short pop-up also slides in when a recording starts and when an Instant Replay or recording is saved (it can be turned off).
 
 <p align="center">
   <img src="docs/images/settings-overlay.png" alt="Settings: status overlay with a preview of the icon stack" width="49%">

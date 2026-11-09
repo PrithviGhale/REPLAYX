@@ -60,6 +60,8 @@ struct AppState {
     playtime: Arc<Mutex<crate::playtime::Tracker>>,
     /// Executables seen per game (their icons are the game artwork).
     games_seen: Arc<Mutex<crate::game_art::Registry>>,
+    /// Native notices (game detected, capture events); excluded from capture.
+    notices: crate::overlay::Overlay,
     data_dir: PathBuf,
 }
 impl AppState {
@@ -112,7 +114,26 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
             let began = std::time::Instant::now();
             let emitter = state.clone();
             let save_id = id.clone();
+            let replay_save = name == "save_replay";
             let emit = move |stage: &str, clip: Option<library::Clip>, error: Option<String>| {
+                // A short bar on screen once the clip is really saved (or failed).
+                if emitter.engine.settings().capture_notices && matches!(stage, "Ready" | "Failed")
+                {
+                    use crate::overlay::{capture_notice, CaptureEvent};
+                    let event = match (stage, replay_save) {
+                        ("Failed", _) => CaptureEvent::SaveFailed,
+                        (_, true) => CaptureEvent::ReplaySaved,
+                        _ => CaptureEvent::RecordingSaved,
+                    };
+                    emitter.notices.show(capture_notice(
+                        event,
+                        clip.as_ref().map(|c| c.category.as_str()),
+                        clip.as_ref()
+                            .and_then(|c| c.probe.as_ref())
+                            .map(|p| p.duration),
+                        "",
+                    ));
+                }
                 let _ = emitter.app.emit(
                     "clip-save",
                     serde_json::json!({"id":save_id,"stage":stage,"clip":clip,"error":error,"elapsed_ms":began.elapsed().as_millis() as u64}),
@@ -1219,6 +1240,7 @@ pub fn run() {
                     &data.join("playtime"),
                 ))),
                 games_seen: Arc::new(Mutex::new(crate::game_art::Registry::open(&data))),
+                notices: crate::overlay::Overlay::spawn(),
                 data_dir: data.clone(),
             });
             // Keep the startup entry pointing at this executable if enabled.
@@ -1309,7 +1331,8 @@ pub fn run() {
                 let own = sysinfo::Pid::from_u32(std::process::id());
                 let mut family = vec![own];
                 let mut tick = 0u64;
-                let notices = crate::overlay::Overlay::spawn();
+                let notices = handle.state::<AppState>().notices.clone();
+                let mut recording_shown = false;
                 let status_overlay = crate::status_overlay::StatusOverlay::spawn();
                 // Audio device watcher: an endpoint list check every 2 s (a few
                 // ms of COM calls); the window gets the new list only on change.
@@ -1360,6 +1383,26 @@ pub fn run() {
                     // "Game detected" notice, from the same detector that files
                     // clips (sampled by the engine without its lock).
                     let settings = state.engine.settings();
+                    // "Recording started" once video is really being written.
+                    let recording_live = status.recording
+                        && status.state == "Recording"
+                        && !status.pending_recording
+                        && status.recording_elapsed > 0.0;
+                    if recording_live && !recording_shown && settings.capture_notices {
+                        notices.show(crate::overlay::capture_notice(
+                            crate::overlay::CaptureEvent::RecordingStarted,
+                            None,
+                            None,
+                            &settings.recording_hotkey,
+                        ));
+                    }
+                    // Reset only when the recording ends, so a capture restart
+                    // mid-recording doesn't announce it again.
+                    recording_shown = if status.recording {
+                        recording_shown || recording_live
+                    } else {
+                        false
+                    };
                     // Playtime: one sample per second, outside every engine lock.
                     {
                         let wall = chrono::Utc::now().timestamp_millis();
@@ -1428,6 +1471,7 @@ pub fn run() {
                             active: (status.replay && status.state == "Buffering")
                                 || (status.recording && status.state == "Recording"),
                             icon_exe,
+                            ..Default::default()
                         });
                         let _ = handle.emit("game-detected", serde_json::json!({"game": game}));
                     }
@@ -1480,13 +1524,12 @@ pub fn run() {
                     let _ = window.hide();
                     if !state.engine.settings().tray_hint_shown {
                         state.engine.mark_tray_hint_shown();
-                        // One-time explanation; the notice thread ends after it.
-                        let notice = crate::overlay::Overlay::spawn();
-                        notice.show(crate::overlay::Notice {
+                        // One-time explanation.
+                        state.notices.show(crate::overlay::Notice {
                             title: "REPLAYX is still running in the background.".into(),
                             subtitle: "Open it from the system tray.".into(),
                             active: true,
-                            icon_exe: None,
+                            ..Default::default()
                         });
                     }
                 } else {

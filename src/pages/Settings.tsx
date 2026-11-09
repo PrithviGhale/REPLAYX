@@ -222,6 +222,8 @@ function OverlayCard() {
     <Card tour="overlay" title="Status overlay" subtitle="Small icons in a corner of your screen, over every app, game and the desktop: Instant Replay, microphone, and a red dot while recording. Click-through, and never in your clips.">
       <Toggle label="Show the status overlay" checked={o.enabled} disabled={active} onChange={v => set({ enabled: v })}
         description="Visible to you while you record, invisible in the saved video. Windows hides desktop windows behind exclusive full-screen games." />
+      <Toggle label="Pop-up when recording starts or a clip is saved" checked={draft.capture_notices} disabled={active} onChange={v => patch({ capture_notices: v })}
+        description="A short bar slides in at the top-right for about 3 seconds: Recording started, Instant Replay saved, or Recording saved (with the game and length). Silent, click-through, and never in your clips." />
       <div className={`ov-settings ${o.enabled ? '' : 'off'}`}>
         <div className="ov-preview" aria-hidden="true">
           <div className={`ov-screen ${o.position}`}>

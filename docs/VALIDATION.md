@@ -1,3 +1,21 @@
+# Validation — 0.3.1-alpha.2 (November 8, 2026)
+
+Adds the capture pop-ups (Recording started, Instant Replay saved, Recording saved, Save failed). No game was running; builds ran at below-normal priority. No microphone was opened and no recordings were made or touched.
+
+| Check | Result |
+| --- | --- |
+| Pop-up text and colours | Unit test: titles, hotkey shown as Ctrl+…, game omitted for Desktop/Mixed/Unsorted, m:ss and h:mm:ss lengths, short hold. |
+| When they appear | Saves: from the shared clip-save path (hotkey, tray and app), only at *Ready* or *Failed*. Recording started: only once frames are being written (state *Recording*, not pending, elapsed > 0); shown once per recording, also across a capture restart. |
+| Setting | `capture_notices` defaults to on; older settings files load with it on. |
+| Not yet seen on a real screen | The pop-ups use the same notice window (and capture exclusion) as the game-detected notice, but were not shown on screen or checked against a recording in this session. |
+
+Automated: Rust 135 tests, frontend 34 tests, Clippy `-D warnings`, rustfmt, TypeScript, production build, NSIS installer.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` (ProductVersion 0.3.1-alpha.2) | 16,843,264 | `18fcbc85785a5f2449847596d568e0a413ed7cb2c251032df8aa5a823751672e` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.3.1-alpha.2_x64-setup.exe` | 60,729,743 | `e2d0dfcaf509baa90e5061daea5eae84072ea4f9b59d9cf7f380ba1aed07b5b4` |
+
 # Validation — 0.3.1-alpha.1 (November 8, 2026)
 
 Development laptop. Roblox was open during the final checks, so nothing that shows windows or takes the foreground was run then (no overlay test, no full-screen recording benchmark, no app launch); builds and tests ran at idle CPU priority. No microphone was opened. No recordings or recovery sessions were touched; test data lived in temporary folders.

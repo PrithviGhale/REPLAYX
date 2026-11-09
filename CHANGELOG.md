@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1-alpha.2 — Pop-ups for recording started and clips saved
+
+Not published.
+
+- **New: capture pop-ups.** A short bar slides in at the top-right for about 3 seconds when a recording starts (*Recording started* · *Ctrl+Shift+F9 stops and saves it*, shown once video is actually being written, not when the button is pressed), when an Instant Replay is saved (*Instant Replay saved* · game · length · in Clips) and when a recording is saved (*Recording saved*). A failed save says *Save failed* instead. Red for recording, green for saved. Silent, click-through, never takes focus, and excluded from your recordings like the overlay. It appears for saves from hotkeys, the tray and the app alike. Turn it off in Settings → Status overlay → *Pop-up when recording starts or a clip is saved*.
+- The game-detected notice, the tray hint and the new pop-ups now share one notice window instead of starting a thread each.
+
 ## 0.3.1-alpha.1 — Games and playtime, clip library, correct thumbnails, tray, Alt+F10
 
 Not published. User-facing notes: [docs/release-notes/v0.3.1-alpha.1.md](docs/release-notes/v0.3.1-alpha.1.md).

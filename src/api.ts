@@ -37,7 +37,7 @@ export type Settings = {
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
-  playtime: PlaytimeSettings;
+  playtime: PlaytimeSettings; capture_notices: boolean;
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
@@ -155,8 +155,8 @@ export const previewSettings: Settings = {
   close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 4, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
-  playtime: { enabled: false, paused: false, idle_minutes: 15, excluded: [] },
+  playtime: { enabled: false, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.1';
+export const VERSION = '0.3.1-alpha.2';

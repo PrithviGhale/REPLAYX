@@ -68,6 +68,87 @@ pub struct Notice {
     /// Positive state (replay ready / recording) gets the accent colour.
     pub active: bool,
     pub icon_exe: Option<PathBuf>,
+    /// Bar and badge colour (default violet).
+    pub accent: Option<(u8, u8, u8)>,
+    /// How long it stays fully visible.
+    pub hold_ms: u64,
+    /// Narrower bar for short capture events.
+    pub compact: bool,
+}
+impl Default for Notice {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            subtitle: String::new(),
+            active: false,
+            icon_exe: None,
+            accent: None,
+            hold_ms: 3600,
+            compact: false,
+        }
+    }
+}
+
+pub const REC_RED: (u8, u8, u8) = (255, 77, 94);
+pub const SAVED_GREEN: (u8, u8, u8) = (62, 214, 160);
+pub const REPLAY_VIOLET: (u8, u8, u8) = (139, 92, 246);
+
+/// Capture events announced with a short bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureEvent {
+    RecordingStarted,
+    ReplaySaved,
+    RecordingSaved,
+    SaveFailed,
+}
+/// Text and colour for a capture event. `game` is the clip's game folder
+/// (Desktop, Mixed and Unsorted are not named), `seconds` its length.
+pub fn capture_notice(
+    event: CaptureEvent,
+    game: Option<&str>,
+    seconds: Option<f64>,
+    stop_hotkey: &str,
+) -> Notice {
+    let length = seconds.map(|s| {
+        let s = s.round() as u64;
+        if s >= 3600 {
+            format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+        } else {
+            format!("{}:{:02}", s / 60, s % 60)
+        }
+    });
+    let game = game.filter(|g| !["Desktop", "Mixed", "Unsorted"].contains(g));
+    let detail = [game.map(str::to_owned), length, Some("in Clips".to_owned())]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let (title, subtitle, accent) = match event {
+        CaptureEvent::RecordingStarted => (
+            "Recording started".to_owned(),
+            format!(
+                "{} stops and saves it",
+                stop_hotkey.replace("Control", "Ctrl")
+            ),
+            REC_RED,
+        ),
+        CaptureEvent::ReplaySaved => ("Instant Replay saved".to_owned(), detail, SAVED_GREEN),
+        CaptureEvent::RecordingSaved => ("Recording saved".to_owned(), detail, SAVED_GREEN),
+        CaptureEvent::SaveFailed => (
+            "Save failed".to_owned(),
+            "Open REPLAYX for details".to_owned(),
+            REC_RED,
+        ),
+    };
+    Notice {
+        title,
+        subtitle,
+        active: true,
+        accent: Some(accent),
+        hold_ms: 2600,
+        compact: true,
+        ..Default::default()
+    }
 }
 
 #[derive(Clone)]
@@ -99,6 +180,7 @@ struct Paint {
     title: Vec<u16>,
     subtitle: Vec<u16>,
     active: bool,
+    accent: (u8, u8, u8),
     icon: Option<windows::Win32::UI::WindowsAndMessaging::HICON>,
     scale: f32,
 }
@@ -151,7 +233,7 @@ unsafe fn paint(
     let border = CreateSolidBrush(rgb(46, 47, 58));
     FrameRect(dc, &r, border);
     let _ = DeleteObject(border.into());
-    let accent = CreateSolidBrush(rgb(139, 92, 246));
+    let accent = CreateSolidBrush(rgb(p.accent.0, p.accent.1, p.accent.2));
     let bar = RECT {
         left: 0,
         top: 0,
@@ -168,7 +250,7 @@ unsafe fn paint(
             let _ = DrawIconEx(dc, ix, iy, icon, icon_size, icon_size, 0, None, DI_NORMAL);
         }
         None => {
-            let b = CreateSolidBrush(rgb(139, 92, 246));
+            let b = CreateSolidBrush(rgb(p.accent.0, p.accent.1, p.accent.2));
             let old = SelectObject(dc, b.into());
             let pen = SelectObject(dc, GetStockObject(NULL_PEN));
             let _ = Ellipse(dc, ix, iy, ix + icon_size, iy + icon_size);
@@ -270,7 +352,10 @@ fn show(n: &Notice) -> windows::core::Result<()> {
         };
         RegisterClassW(&wc); // Already registered on later notices: fine.
         let scale = GetDpiForSystem() as f32 / 96.0;
-        let (w, h) = ((360.0 * scale) as i32, (76.0 * scale) as i32);
+        let (w, h) = (
+            ((if n.compact { 320.0 } else { 360.0 }) * scale) as i32,
+            (76.0 * scale) as i32,
+        );
         let mut work = RECT::default();
         let _ = SystemParametersInfoW(
             SPI_GETWORKAREA,
@@ -296,6 +381,7 @@ fn show(n: &Notice) -> windows::core::Result<()> {
                 title: wide(&n.title),
                 subtitle: wide(&n.subtitle),
                 active: n.active,
+                accent: n.accent.unwrap_or((139, 92, 246)),
                 icon,
                 scale,
             })
@@ -351,7 +437,7 @@ fn show(n: &Notice) -> windows::core::Result<()> {
             }
             thread::sleep(Duration::from_millis(16));
         }
-        let hold = Instant::now() + Duration::from_millis(3600);
+        let hold = Instant::now() + Duration::from_millis(n.hold_ms.clamp(800, 10_000));
         while Instant::now() < hold {
             pump();
             thread::sleep(Duration::from_millis(50));
@@ -414,6 +500,38 @@ mod tests {
                 .as_deref(),
             Some("Roblox")
         );
+    }
+    #[test]
+    fn capture_events_name_what_happened() {
+        let started = capture_notice(
+            CaptureEvent::RecordingStarted,
+            None,
+            None,
+            "Control+Shift+F9",
+        );
+        assert_eq!(started.title, "Recording started");
+        assert_eq!(started.subtitle, "Ctrl+Shift+F9 stops and saves it");
+        assert_eq!(started.accent, Some(REC_RED));
+        let replay = capture_notice(CaptureEvent::ReplaySaved, Some("Roblox"), Some(60.2), "x");
+        assert_eq!(
+            (replay.title.as_str(), replay.subtitle.as_str()),
+            ("Instant Replay saved", "Roblox · 1:00 · in Clips")
+        );
+        let rec = capture_notice(
+            CaptureEvent::RecordingSaved,
+            Some("Desktop"),
+            Some(3725.0),
+            "x",
+        );
+        assert_eq!(
+            (rec.title.as_str(), rec.subtitle.as_str()),
+            ("Recording saved", "1:02:05 · in Clips")
+        );
+        assert_eq!(
+            capture_notice(CaptureEvent::SaveFailed, None, None, "x").title,
+            "Save failed"
+        );
+        assert!(replay.compact && replay.hold_ms < 3600, "short bar, brief");
     }
     #[test]
     fn the_notice_states_capture_truthfully() {

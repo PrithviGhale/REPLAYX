@@ -117,6 +117,8 @@ pub struct Settings {
     pub voice_presets: Vec<SavedVoice>,
     /// Local playtime tracking (opt-in).
     pub playtime: crate::playtime::PlaytimeSettings,
+    /// Short bar when a recording starts or a clip is saved.
+    pub capture_notices: bool,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -165,6 +167,7 @@ impl Default for Settings {
             tour_done: false,
             voice_presets: Vec::new(),
             playtime: Default::default(),
+            capture_notices: true,
             settings_version: SETTINGS_VERSION,
         }
     }
