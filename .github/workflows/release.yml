@@ -217,7 +217,8 @@ jobs:
           sha256sum *.exe ffmpeg-corresponding-source-*.tar > SHA256SUMS.txt
           cat SHA256SUMS.txt
           notes="../docs/release-notes/$TAG.md"; [[ -f "$notes" ]] || notes=../CHANGELOG.md
-          flags=(--draft --verify-tag --title "REPLAYX $TAG" --notes-file "$notes")
+          stage=""; [[ "$TAG" == *-alpha* ]] && stage=" — Alpha"; [[ "$TAG" == *-beta* ]] && stage=" — Beta"
+          flags=(--draft --verify-tag --title "REPLAYX $TAG$stage" --notes-file "$notes")
           [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
           files=(*.exe SHA256SUMS.txt ffmpeg-corresponding-source-*.tar)
           compgen -G "*.sig" >/dev/null && files+=(*.sig)

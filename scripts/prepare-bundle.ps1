@@ -26,7 +26,7 @@ Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg-lock.json') -Destination $
 if ($LASTEXITCODE) { throw 'Could not record FFmpeg build configuration' }
 & $ffmpeg.FullName -hide_banner -L 2>&1 | Out-File (Join-Path $mediaDir 'FFMPEG-LICENSE.txt') -Encoding utf8
 if ($LASTEXITCODE) { throw 'Could not record FFmpeg license' }
-foreach ($notice in @('LICENSE','PRIVACY.md','THIRD_PARTY_NOTICES.md','docs/KNOWN_LIMITATIONS.md','README.md','docs/VALIDATION.md')) {
+foreach ($notice in @('LICENSE','docs/PRIVACY.md','THIRD_PARTY_NOTICES.md','docs/KNOWN_LIMITATIONS.md','README.md','docs/VALIDATION.md')) {
     Copy-Item -LiteralPath (Join-Path $root $notice) -Destination $mediaDir -Force
 }
 Write-Host 'Local installer media resources prepared. Read THIRD_PARTY_NOTICES.md before public redistribution.'

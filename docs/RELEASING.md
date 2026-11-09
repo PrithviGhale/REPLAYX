@@ -12,6 +12,8 @@ Releases are cut by hand from `main`. GitHub Actions builds them, but nothing is
 | Beta | `0.3.0-beta.1` | Feature-complete for the line; bug fixing |
 | Stable | `1.0.0` | Supported release; settings and file layout are stable |
 
+The README's download button and install step name the newest release's installer directly (`.../releases/download/vX.Y.Z/REPLAYX_X.Y.Z_x64-setup.exe`). Update them when a release is **published**, not before: GitHub's "Latest" release and `/releases/latest` ignore pre-releases, so while REPLAYX is in alpha a `latest` link would not work.
+
 The version lives in six places that must match: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`, plus `VERSION` in `src/api.ts`. The release workflow refuses a tag that does not match `package.json`.
 
 ## Checklist

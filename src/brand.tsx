@@ -2,7 +2,7 @@ import logo from './assets/replayx-logo.png';
 
 /** REPLAYX branding in one place (see docs/BRANDING.md): this mark, the
  * BRAND-MARK block in index.html (startup screen), the app icons generated
- * from branding/replayx-logo-1024.png (`npx tauri icon`) and the README banner. */
+ * from assets/branding/replayx-logo-1024.png (`npx tauri icon`) and the README banner. */
 export const BRAND = {
   name: 'REPLAYX',
   tagline: 'Capture everything. Miss nothing.',

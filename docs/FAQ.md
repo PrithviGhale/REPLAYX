@@ -1,0 +1,34 @@
+# FAQ
+
+**Is REPLAYX free?**
+Yes. It's open source under the MIT licence, with no account, ads or subscriptions.
+
+**Is it safe to use with anti-cheat games?**
+REPLAYX records the screen through Windows (DXGI Desktop Duplication) and audio through WASAPI, the same system interfaces other recorders use. It never injects into games, reads their memory or hooks their graphics. Game detection uses only the name of the program in front.
+
+**Does it slow down my games?**
+While recording, about 3–4.5% FPS at 1080p60 in our measurements on an RTX 4070 laptop; less at lower settings. With capture off it does almost nothing. See [Performance](PERFORMANCE.md).
+
+**Where are my clips?**
+In `Videos\REPLAYX\<Game>\` by default; change it in **Settings**. Clips are `.mkv` files, which survive crashes and keep every audio track. Export any clip to MP4 from the library.
+
+**Does anything leave my PC?**
+No. There's no telemetry, analytics or upload. Playtime, settings and clips stay local. See [Privacy](PRIVACY.md).
+
+**Why is it called alpha?**
+REPLAYX works well on the machines it has been tested on, but it hasn't been used on many PCs yet. Read the [known limitations](KNOWN_LIMITATIONS.md) before relying on it for something you can't replay.
+
+**Why does Windows warn about the installer?**
+The builds aren't code-signed yet. Check the file against the release's `SHA256SUMS.txt` before choosing *Run anyway*.
+
+**What is the large `ffmpeg-corresponding-source` file on the release page?**
+The source code of the FFmpeg build REPLAYX ships, with the libraries built into it and their licence texts. Its licences require it to be published with each release. You don't need it to install or use REPLAYX.
+
+**Which GPUs are supported?**
+NVIDIA (NVENC), Intel (Quick Sync) and AMD (AMF) hardware encoders, with a CPU fallback. Only codecs your PC can actually encode are offered.
+
+**How do I quit REPLAYX completely?**
+Right-click the tray icon → **Quit**.
+
+**How do I stop it from starting with Windows?**
+Turn off **Settings → Start with Windows**. REPLAYX removes its startup entry right away.

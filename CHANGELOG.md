@@ -1,13 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.3.1-alpha.5 — Reliable Start with Windows, release pipeline, new project page
+
+User-facing notes: [docs/release-notes/v0.3.1-alpha.5.md](docs/release-notes/v0.3.1-alpha.5.md). The recording engine is unchanged from 0.3.1-alpha.4.
 
 - **Fixed: a blank Windows Terminal window at sign-in for developers.** *Start with Windows* registered whichever REPLAYX executable was running, so running a development (debug) build pointed the startup entry at it; debug builds are console programs, so Windows opened a terminal for it at every sign-in. Now only the installed app (a release build with its uninstaller beside it) registers itself, it re-points a stale entry at itself, it removes the entry when the setting is off, and development builds never register and clean up an entry left by an older development run. The installed app was not affected (it is a windowed program).
+- **Start with Windows** now always matches the setting: turning it off removes the startup entry right away, and the installed app repairs an entry that points somewhere else.
+- **Project page and documentation:** a short new README with a direct download; detailed guides moved to `docs/` (Getting started, Features, FAQ, Troubleshooting, Privacy); branding files in `assets/branding/`; `CODE_OF_CONDUCT.md` and `SECURITY.md` in `.github/`.
 - **GitHub Actions work from a clean checkout:** the source checks prepare the FFmpeg bundle folder themselves, the pinned FFmpeg download is retried and cached, and the release workflow builds test builds without creating a release, never rebuilds an existing release, and attaches the FFmpeg corresponding-source package to every draft.
 
 ## 0.3.1-alpha.4 — Game icons, open/hide shortcut, text that always fits
 
-Not published.
+Published on November 9, 2026 as the first public release (pre-release).
 
 - **Game icons for installed games.** Games now show their own icon even before REPLAYX has seen them running: it looks them up in Windows' list of installed apps (Steam, Roblox and most installers register there) and in the Epic Games Launcher's manifests, and uses the game's own executable icon. Read-only and local; nothing is downloaded. On the test PC this found 9 games (Fortnite, Counter-Strike 2, VALORANT, Apex Legends, PUBG, Genshin Impact, F1 25, Roblox, Roblox Studio) in about 0.02 s.
 - **New shortcut: Open / hide REPLAYX** (Ctrl+Shift+F11 by default, changeable in Settings → Hotkeys). Opens REPLAYX from anywhere, from the tray or over a game; press it again to hide it to the tray. If one of your shortcuts already uses Ctrl+Shift+F11, a free one is chosen instead.
