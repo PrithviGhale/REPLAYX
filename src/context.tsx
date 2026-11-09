@@ -120,7 +120,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ok = await run('Saving settings', async () => {
       const stored = await api.saveSettings(draft);
       // A shortcut another program owns was not taken: say which one stayed.
-      const keys = ['replay_hotkey', 'recording_hotkey', 'pause_hotkey', 'mute_hotkey'] as const;
+      const keys = ['replay_hotkey', 'recording_hotkey', 'pause_hotkey', 'mute_hotkey', 'window_hotkey'] as const;
       const refused = keys.filter(k => stored[k] !== draft[k]);
       if (refused.length) toast('error', `${refused.map(k => draft[k].replace('Control', 'Ctrl')).join(', ')} is already used by another application. Change that application's hotkey or choose another shortcut. Your previous shortcut still works.`);
       return true;

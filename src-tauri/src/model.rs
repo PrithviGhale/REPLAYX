@@ -87,6 +87,8 @@ pub struct Settings {
     pub recording_hotkey: String,
     pub mute_hotkey: String,
     pub pause_hotkey: String,
+    /// Opens REPLAYX, or hides it to the tray when it's in front.
+    pub window_hotkey: String,
     pub close_to_tray: bool,
     pub diagnostics: bool,
     pub check_updates: bool,
@@ -126,7 +128,7 @@ pub struct Settings {
 /// Current settings layout. 2: explicit output width (0.2.1-alpha.3).
 /// 3: a microphone source is always present (0.2.2-alpha.1).
 /// 4: closing the window minimizes to the tray by default (0.3.1-alpha.1).
-pub const SETTINGS_VERSION: u32 = 5;
+pub const SETTINGS_VERSION: u32 = 6;
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -152,6 +154,7 @@ impl Default for Settings {
             recording_hotkey: "Control+Shift+F9".into(),
             mute_hotkey: "Control+Shift+M".into(),
             pause_hotkey: "Control+Shift+F8".into(),
+            window_hotkey: "Control+Shift+F11".into(),
             close_to_tray: true,
             diagnostics: false,
             check_updates: false,
@@ -215,6 +218,22 @@ impl Settings {
         // in Settings and stays off).
         if self.settings_version < 5 {
             self.playtime.enabled = true;
+        }
+        // 6: new Open/hide shortcut; never one an action already uses.
+        if self.settings_version < 6 {
+            let used = [
+                &self.replay_hotkey,
+                &self.recording_hotkey,
+                &self.mute_hotkey,
+                &self.pause_hotkey,
+            ]
+            .map(|k| k.to_ascii_lowercase());
+            if let Some(free) = ["Control+Shift+F11", "Control+Shift+F7", "Control+Alt+F11"]
+                .into_iter()
+                .find(|k| !used.contains(&k.to_ascii_lowercase()))
+            {
+                self.window_hotkey = free.into();
+            }
         }
         self.settings_version = SETTINGS_VERSION;
         true
@@ -339,6 +358,7 @@ impl Settings {
             &self.recording_hotkey,
             &self.mute_hotkey,
             &self.pause_hotkey,
+            &self.window_hotkey,
         ];
         for (i, k) in keys.iter().enumerate() {
             if k.is_empty() || keys[..i].iter().any(|x| x.eq_ignore_ascii_case(k)) {
@@ -461,6 +481,18 @@ pub fn owned_session(root: &Path, dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn open_hide_shortcut_never_collides() {
+        let mut old = Settings {
+            settings_version: 5,
+            pause_hotkey: "Control+Shift+F11".into(),
+            ..Settings::default()
+        };
+        old.migrate();
+        assert_eq!(old.window_hotkey, "Control+Shift+F7");
+        assert!(old.validate().is_ok());
+        assert_eq!(Settings::default().window_hotkey, "Control+Shift+F11");
+    }
     #[test]
     fn playtime_is_switched_on_once() {
         let mut old = Settings {

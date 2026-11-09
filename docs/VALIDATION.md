@@ -1,3 +1,20 @@
+# Validation — 0.3.1-alpha.4 (November 9, 2026)
+
+Game icons for installed games, Open/hide shortcut, text-fit fixes. Builds ran at below-normal priority; the running app was not touched.
+
+| Check | Result |
+| --- | --- |
+| Installed-game icons | `replayx-cli game-icons` on this PC: 9 catalog games found with a usable 256 px icon (Fortnite, Counter-Strike 2, Valorant, Apex Legends, PUBG, Genshin Impact, F1 25, Roblox, Roblox Studio); 429 installed entries read in 16–34 ms. Unit tests: name matching (launcher suffixes, "for <user>", no fuzzy match for short names), `DisplayIcon` parsing (skips uninstallers), executable search. |
+| Open/hide shortcut | Registered with the other four (same refusal fallback); settings v6 picks a free key if Ctrl+Shift+F11 is taken (unit test). Pressing it on the real desktop is a user test. |
+| Text fit | `dev/text-fit-check.mjs`: every page and Settings tab at 1280, 1180, 1100, 1000, 900 and 820 px wide, normal and 130% text: no text clipped or spilling out of its card (before the fix: the Replay length cards at 1100–1280 px, and Performance values at 130%). Scroll check: all pages scroll. |
+
+Automated: Rust 140 tests, frontend 34 tests, Clippy `-D warnings`, rustfmt, TypeScript, production build, NSIS installer.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` (ProductVersion 0.3.1-alpha.4) | 16,984,064 | `24bc2a5372e1c9b82f3d823493060113948d3c8a306eabc391e31a7abddedb5a` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.3.1-alpha.4_x64-setup.exe` | 61,134,250 | `f1e218d14eb3eb0e4b9f1d4445dda3462a1d74506a7324f443a61c5e0b7da206` |
+
 # Validation — 0.3.1-alpha.3 (November 9, 2026)
 
 New logo, playtime on by default, lower background impact on games. No game was running; builds ran at below-normal priority; REPLAYX was not launched (the user's settings and data were not touched).

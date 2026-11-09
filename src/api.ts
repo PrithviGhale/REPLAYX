@@ -32,7 +32,7 @@ export type Settings = {
   capture: string; display: number; window_title: string; width: number; height: number; canvas_mode: CanvasMode;
   source_rect: Rect | null; fps: number; encoder: string; codec: 'auto' | 'h264' | 'hevc' | 'av1'; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
-  replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string;
+  replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string; window_hotkey: string;
   close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
@@ -151,12 +151,12 @@ export const previewSettings: Settings = {
   capture: 'desktop-duplication', display: 0, window_title: '', width: 1920, height: 1080, canvas_mode: 'stretch', source_rect: null,
   fps: 60, encoder: 'auto', codec: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
-  recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
+  recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8', window_hotkey: 'Control+Shift+F11',
   close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 5, scale_policy: 'smooth',
+  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 6, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
   playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.3';
+export const VERSION = '0.3.1-alpha.4';

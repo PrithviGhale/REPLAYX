@@ -13,16 +13,17 @@ import { Section } from './shared';
 import { VERSION } from '../api';
 
 type Tab = 'general' | 'hotkeys' | 'updates' | 'about';
-type HotkeyKey = 'replay_hotkey' | 'recording_hotkey' | 'pause_hotkey' | 'mute_hotkey';
+type HotkeyKey = 'replay_hotkey' | 'recording_hotkey' | 'pause_hotkey' | 'mute_hotkey' | 'window_hotkey';
 const HOTKEYS: { key: HotkeyKey; label: string; text: string }[] = [
   { key: 'replay_hotkey', label: 'Save instant replay', text: 'Saves the last replay window to Clips.' },
   { key: 'recording_hotkey', label: 'Start / stop recording', text: 'Stopping saves and verifies the recording.' },
   { key: 'pause_hotkey', label: 'Turn Instant Replay on / off', text: 'Starts or stops the rolling buffer.' },
   { key: 'mute_hotkey', label: 'Mute / unmute microphones', text: 'Toggles every microphone source.' },
+  { key: 'window_hotkey', label: 'Open / hide REPLAYX', text: 'Opens REPLAYX from anywhere, even from the tray or over a game. Press it again to hide it to the tray.' },
 ];
 /** Shortcuts people commonly use; picking from the list works even when
  * another program (for example NVIDIA's Alt+F10) swallows the key press. */
-const COMMON = ['Alt+F10', 'Alt+F9', 'Alt+F8', 'Alt+F12', 'Control+Shift+F10', 'Control+Shift+F9', 'Control+Shift+F8', 'Control+Shift+M', 'Control+Alt+R', 'Control+Alt+S', 'Alt+1', 'Alt+2'];
+const COMMON = ['Alt+F10', 'Alt+F9', 'Alt+F8', 'Alt+F12', 'Control+Shift+F10', 'Control+Shift+F9', 'Control+Shift+F8', 'Control+Shift+M', 'Control+Shift+F11', 'Control+Shift+F7', 'Control+Alt+R', 'Control+Alt+S', 'Alt+1', 'Alt+2'];
 
 function HotkeyRow({ item, value, onChange, disabled, duplicate }: { item: typeof HOTKEYS[number]; value: string; onChange: (v: string) => void; disabled: boolean; duplicate: boolean }) {
   const [listening, setListening] = useState(false);

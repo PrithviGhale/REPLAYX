@@ -304,6 +304,27 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if action == "game-icons" {
+        // Read-only: which catalog games get an icon from what is installed.
+        let started = std::time::Instant::now();
+        let listed = replayx_core::installed_games::entries().len();
+        let scan = started.elapsed();
+        let mut found = 0;
+        for g in &replayx_core::games::catalog().games {
+            if let Some(p) = replayx_core::installed_games::icon_source(&g.name) {
+                found += 1;
+                let ok = replayx_core::winutil::exe_icon_png_sized(&p, 256).is_some();
+                println!(
+                    "{:<32} {} {}",
+                    g.name,
+                    if ok { "icon" } else { "NO ICON" },
+                    p.display()
+                );
+            }
+        }
+        println!("{found} games with a local icon; {listed} installed entries read in {scan:?}; total {:?}", started.elapsed());
+        return Ok(());
+    }
     if action == "tick-cost" {
         // Read-only: CPU cost of the once-a-second background work while a
         // game is in front (foreground process, game classification, idle time).

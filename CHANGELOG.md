@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1-alpha.4 — Game icons, open/hide shortcut, text that always fits
+
+Not published.
+
+- **Game icons for installed games.** Games now show their own icon even before REPLAYX has seen them running: it looks them up in Windows' list of installed apps (Steam, Roblox and most installers register there) and in the Epic Games Launcher's manifests, and uses the game's own executable icon. Read-only and local; nothing is downloaded. On the test PC this found 9 games (Fortnite, Counter-Strike 2, VALORANT, Apex Legends, PUBG, Genshin Impact, F1 25, Roblox, Roblox Studio) in about 0.02 s.
+- **New shortcut: Open / hide REPLAYX** (Ctrl+Shift+F11 by default, changeable in Settings → Hotkeys). Opens REPLAYX from anywhere, from the tray or over a game; press it again to hide it to the tray. If one of your shortcuts already uses Ctrl+Shift+F11, a free one is chosen instead.
+- **Closing and the shortcut both hide REPLAYX to the tray** (Windows' hidden icons, the ^ next to the clock); it keeps running there with Instant Replay, shortcuts and playtime.
+- **Fixed: text cut off in a smaller window.** With the window restored from fullscreen, the Replay length cards were squeezed side by side and their text ("Balanced", *Recommended*, the size and description) ran out of the card. The cards now wrap to fewer per row when space is short and the badge moves to its own line. Performance page values with long labels no longer spill out either. A new check (`dev/text-fit-check.mjs`) tests every page and Settings tab at six window sizes, also with 130% text, for text cut off or spilling out of its card; it passes.
+
 ## 0.3.1-alpha.3 — New logo, playtime on by default, lighter on games
 
 Not published.

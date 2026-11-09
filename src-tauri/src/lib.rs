@@ -7,6 +7,7 @@ pub mod game_art;
 pub mod games;
 pub mod geometry;
 pub mod health;
+pub mod installed_games;
 pub mod library;
 pub mod media;
 pub mod model;

@@ -113,6 +113,7 @@ REPLAYX can live in the system tray: Instant Replay, recording and shortcuts kee
 | Start / stop recording | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> |
 | Instant Replay on / off | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F8</kbd> |
 | Mute microphone | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> |
+| Open / hide REPLAYX | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F11</kbd> |
 
 All shortcuts work in games and can be changed in **Settings → Hotkeys**.
 

@@ -197,26 +197,30 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
     };
     result.map(|_| serde_json::json!({"ok":true})).map_err(err)
 }
-const HOTKEY_LABELS: [&str; 4] = [
+const HOTKEYS: usize = 5;
+const HOTKEY_LABELS: [&str; HOTKEYS] = [
     "Save replay",
     "Start/stop recording",
     "Mute microphone",
     "Instant Replay on/off",
+    "Open/hide REPLAYX",
 ];
-fn hotkey_keys(s: &Settings) -> [String; 4] {
+fn hotkey_keys(s: &Settings) -> [String; HOTKEYS] {
     [
         s.replay_hotkey.clone(),
         s.recording_hotkey.clone(),
         s.mute_hotkey.clone(),
         s.pause_hotkey.clone(),
+        s.window_hotkey.clone(),
     ]
 }
-fn set_hotkey_keys(s: &mut Settings, k: [String; 4]) {
+fn set_hotkey_keys(s: &mut Settings, k: [String; HOTKEYS]) {
     [
         s.replay_hotkey,
         s.recording_hotkey,
         s.mute_hotkey,
         s.pause_hotkey,
+        s.window_hotkey,
     ] = k;
 }
 /// "Control+Alt+F10" as people write it.
@@ -233,13 +237,13 @@ pub fn hotkey_taken(k: &str) -> String {
 /// Decide each action's shortcut: the wanted one if it registers, otherwise
 /// the previous one (if it still registers). Pure; `register` tries one.
 pub fn plan_hotkeys(
-    wanted: &[String; 4],
-    previous: Option<&[String; 4]>,
+    wanted: &[String; HOTKEYS],
+    previous: Option<&[String; HOTKEYS]>,
     mut register: impl FnMut(&str) -> bool,
-) -> ([String; 4], Vec<String>) {
+) -> ([String; HOTKEYS], Vec<String>) {
     let mut effective = wanted.clone();
     let mut problems = Vec::new();
-    for i in 0..4 {
+    for i in 0..HOTKEYS {
         if register(&wanted[i]) {
             continue;
         }
@@ -586,16 +590,19 @@ async fn game_art(games: Vec<String>, state: State<'_, AppState>) -> Reply<serde
             let icon = if custom.is_some() {
                 None
             } else {
-                seen.get(&game).and_then(|s| {
-                    let key = format!("art256:{}", s.exe);
+                // The executable seen in front, else the installed game's own
+                // icon (Windows' installed-apps list, Epic manifests).
+                let source = seen
+                    .get(&game)
+                    .map(|s| std::path::PathBuf::from(&s.exe))
+                    .filter(|p| p.is_file())
+                    .or_else(|| crate::installed_games::icon_source(&game));
+                source.and_then(|p| {
+                    let key = format!("art256:{}", p.display());
                     if let Some(hit) = state.icons.lock().unwrap().get(&key) {
                         return hit.clone();
                     }
-                    let p = std::path::Path::new(&s.exe);
-                    let url = p
-                        .is_file()
-                        .then(|| winutil::exe_icon_png_sized(p, 256))
-                        .flatten()
+                    let url = winutil::exe_icon_png_sized(&p, 256)
                         .map(|png| format!("data:image/png;base64,{}", winutil::base64(&png)));
                     state.icons.lock().unwrap().insert(key, url.clone());
                     url
@@ -1065,6 +1072,40 @@ fn set_page_visible(w: &tauri::WebviewWindow, visible: bool) {
         let _ = if visible { page.show() } else { page.hide() };
     }
 }
+/// Close button, or the Open/hide shortcut: into the tray (the notification
+/// area's hidden icons), with a one-time explanation.
+fn hide_to_tray(app: &tauri::AppHandle) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = w.hide();
+    set_page_visible(&w, false);
+    let state = app.state::<AppState>();
+    if !state.engine.settings().tray_hint_shown {
+        state.engine.mark_tray_hint_shown();
+        state.notices.show(crate::overlay::Notice {
+            title: "REPLAYX is still running in the background.".into(),
+            subtitle: "Open it from the system tray or with your shortcut.".into(),
+            active: true,
+            ..Default::default()
+        });
+    }
+}
+/// The Open/hide shortcut: hide when REPLAYX is the window in use,
+/// otherwise bring it forward (from the tray, minimised or behind a game).
+fn toggle_main(app: &tauri::AppHandle) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    let in_use = w.is_visible().unwrap_or(false)
+        && !w.is_minimized().unwrap_or(false)
+        && w.is_focused().unwrap_or(false);
+    if in_use {
+        hide_to_tray(app);
+    } else {
+        show_main(app, None);
+    }
+}
 /// Bring the main window forward, optionally on a page.
 fn show_main(app: &tauri::AppHandle, page: Option<&str>) {
     if let Some(w) = app.get_webview_window("main") {
@@ -1203,6 +1244,8 @@ pub fn run() {
                                 "start_replay"
                             },
                         );
+                    } else if matches(&settings.window_hotkey) {
+                        toggle_main(app);
                     } else if matches(&settings.mute_hotkey) {
                         // This handler runs on the UI thread: change the mix on a worker.
                         let app = app.clone();
@@ -1545,20 +1588,7 @@ pub fn run() {
                 let state = window.state::<AppState>();
                 api.prevent_close();
                 if state.engine.settings().close_to_tray {
-                    let _ = window.hide();
-                    if let Some(w) = window.app_handle().get_webview_window("main") {
-                        set_page_visible(&w, false);
-                    }
-                    if !state.engine.settings().tray_hint_shown {
-                        state.engine.mark_tray_hint_shown();
-                        // One-time explanation.
-                        state.notices.show(crate::overlay::Notice {
-                            title: "REPLAYX is still running in the background.".into(),
-                            subtitle: "Open it from the system tray.".into(),
-                            active: true,
-                            ..Default::default()
-                        });
-                    }
+                    hide_to_tray(window.app_handle());
                 } else {
                     request_quit(window.app_handle().clone());
                 }
@@ -1611,7 +1641,7 @@ mod tests {
     #[test]
     fn a_taken_shortcut_keeps_the_previous_one_and_says_so() {
         let k = |a: &str, b: &str, c: &str, d: &str| {
-            [a.to_string(), b.to_string(), c.to_string(), d.to_string()]
+            [a, b, c, d, "Control+Shift+F11"].map(str::to_string)
         };
         let previous = k(
             "Control+Shift+F10",
@@ -1652,6 +1682,7 @@ mod tests {
             s.recording_hotkey,
             s.mute_hotkey,
             s.pause_hotkey,
+            s.window_hotkey,
         ];
         let parsed: Vec<_> = keys
             .iter()

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "REPLAYX",
-  "version": "0.3.1-alpha.3",
+  "version": "0.3.1-alpha.4",
   "identifier": "io.replayx.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
