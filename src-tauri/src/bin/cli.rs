@@ -750,16 +750,19 @@ fn overlay_test(args: &[String]) -> Result<()> {
                 icon: Icon::Replay,
                 color: (160, 146, 255),
                 slash: false,
+                text: None,
             },
             Tile {
                 icon: Icon::Mic,
                 color: (62, 214, 160),
                 slash: false,
+                text: None,
             },
             Tile {
                 icon: Icon::Record,
                 color: (255, 77, 94),
                 slash: false,
+                text: None,
             },
         ],
         position: "bottom-right".into(),
@@ -946,34 +949,47 @@ fn overlay_render(args: &[String]) -> Result<()> {
             icon: Icon::Replay,
             color: (160, 146, 255),
             slash: false,
+            text: None,
         },
         Tile {
             icon: Icon::Replay,
             color: (128, 128, 146),
             slash: true,
+            text: None,
         },
         Tile {
             icon: Icon::Mic,
             color: (62, 214, 160),
             slash: false,
+            text: None,
         },
         Tile {
             icon: Icon::Mic,
             color: (160, 146, 255),
             slash: false,
+            text: None,
         },
         Tile {
             icon: Icon::Mic,
             color: (245, 186, 84),
             slash: true,
+            text: None,
         },
         Tile {
             icon: Icon::Record,
             color: (255, 77, 94),
             slash: false,
+            text: None,
         },
     ];
-    let (w, h, px) = render(&all, scale, false);
+    let mut all = all.to_vec();
+    all.push(Tile {
+        icon: Icon::Record,
+        color: (255, 77, 94),
+        slash: false,
+        text: Some("12:34".into()),
+    });
+    let (w, h, px) = render(&all, scale, false, false);
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir)?;
     }

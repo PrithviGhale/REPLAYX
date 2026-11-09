@@ -21,7 +21,7 @@ use std::{
 };
 
 /// Overlay preferences (part of `Settings`). Older files' extra keys
-/// (compact, show_timer, games_only) are ignored.
+/// (compact, games_only) are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OverlaySettings {
@@ -32,6 +32,10 @@ pub struct OverlaySettings {
     pub opacity: u8,
     pub show_replay: bool,
     pub show_mic: bool,
+    /// Red dot while a recording is being written.
+    pub show_recording: bool,
+    /// Recording time next to the dot.
+    pub show_timer: bool,
 }
 impl Default for OverlaySettings {
     fn default() -> Self {
@@ -41,6 +45,8 @@ impl Default for OverlaySettings {
             opacity: 90,
             show_replay: true,
             show_mic: true,
+            show_recording: true,
+            show_timer: false,
         }
     }
 }
@@ -126,17 +132,33 @@ pub enum Icon {
     Record,
 }
 /// One icon tile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tile {
     pub icon: Icon,
     pub color: Rgb,
     /// Struck through (microphone off or muted).
     pub slash: bool,
+    /// Text after the icon (the recording timer), digits and ':' only.
+    pub text: Option<String>,
+}
+/// "1:05" / "1:02:05".
+pub fn clock(s: u64) -> String {
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
+    }
 }
 /// Tiles for a view, from the corner outwards: Instant Replay, microphone,
 /// then the recording dot (only while video is being written).
 pub fn tiles(v: &View, o: &OverlaySettings) -> Vec<Tile> {
     let mut out = Vec::new();
+    let tile = |icon, color, slash| Tile {
+        icon,
+        color,
+        slash,
+        text: None,
+    };
     if o.show_replay {
         let color = match v.replay {
             ReplayState::Off => GREY,
@@ -144,11 +166,7 @@ pub fn tiles(v: &View, o: &OverlaySettings) -> Vec<Tile> {
             ReplayState::On => VIOLET,
             ReplayState::Error => RED,
         };
-        out.push(Tile {
-            icon: Icon::Replay,
-            color,
-            slash: v.replay == ReplayState::Off,
-        });
+        out.push(tile(Icon::Replay, color, v.replay == ReplayState::Off));
     }
     if o.show_mic {
         let state = match v.mic {
@@ -160,37 +178,42 @@ pub fn tiles(v: &View, o: &OverlaySettings) -> Vec<Tile> {
             MicState::Error => Some((RED, true)),
         };
         if let Some((color, slash)) = state {
-            out.push(Tile {
-                icon: Icon::Mic,
-                color,
-                slash,
-            });
+            out.push(tile(Icon::Mic, color, slash));
         }
     }
-    if v.recording.is_some() {
+    if let (true, Some(s)) = (o.show_recording, v.recording) {
         out.push(Tile {
-            icon: Icon::Record,
-            color: RED,
-            slash: false,
+            text: o.show_timer.then(|| clock(s)),
+            ..tile(Icon::Record, RED, false)
         });
     }
     out
 }
 
-// ---- Drawing (tile units: a tile is 32 x 32 at 96 dpi) ----
+// ---- Drawing ----
+// Tiles are TILE x TILE display units at 96 dpi (26: about 19% smaller than
+// the first 32-unit design). Icon shapes are designed on a 32-unit grid.
 
-const TILE: f32 = 32.0;
-const GAP: f32 = 6.0;
-const MARGIN: f32 = 16.0;
+const TILE: f32 = 26.0;
+const ICON_GRID: f32 = 32.0;
+const GAP: f32 = 5.0;
+const MARGIN: f32 = 14.0;
+const RADIUS: f32 = 7.0;
+/// Seven-segment glyph cell (units) and stroke half-width.
+const GLYPH_H: f32 = 10.0;
+const DIGIT_W: f32 = 6.0;
+const COLON_W: f32 = 2.6;
+const STROKE: f32 = 0.75;
 
 fn seg(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     let (dx, dy) = (bx - ax, by - ay);
     let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
     ((px - ax - t * dx).powi(2) + (py - ay - t * dy).powi(2)).sqrt()
 }
-fn rounded_box(px: f32, py: f32, half: f32, r: f32) -> f32 {
-    let qx = (px - TILE / 2.0).abs() - (half - r);
-    let qy = (py - TILE / 2.0).abs() - (half - r);
+/// Signed distance to a rounded rectangle [0, w] x [0, h].
+fn rounded_rect(px: f32, py: f32, w: f32, h: f32, r: f32) -> f32 {
+    let qx = (px - w / 2.0).abs() - (w / 2.0 - r);
+    let qy = (py - h / 2.0).abs() - (h / 2.0 - r);
     (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r
 }
 /// Signed distance to a triangle (negative inside).
@@ -207,7 +230,7 @@ fn triangle(p: (f32, f32), a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> f32 {
         d
     }
 }
-/// Signed distance to the icon's ink at a point (tile units).
+/// Signed distance to the icon's ink (32-unit icon grid).
 fn icon_distance(icon: Icon, x: f32, y: f32) -> f32 {
     let (cx, cy) = (16.0, 16.0);
     match icon {
@@ -234,9 +257,8 @@ fn icon_distance(icon: Icon, x: f32, y: f32) -> f32 {
             } else {
                 (r - 8.6).abs() - 1.1
             };
-            let e = gap_to.to_radians();
+            let e = f32::to_radians(gap_to);
             let (ex, ey) = (cx + 8.6 * e.cos(), cy + 8.6 * e.sin());
-            // Tangent pointing into the gap (counter-clockwise on screen).
             let (tx, ty) = (e.sin(), -e.cos());
             let (nx, ny) = (e.cos(), e.sin());
             let tip = (ex + tx * 3.4, ey + ty * 3.4);
@@ -248,54 +270,137 @@ fn icon_distance(icon: Icon, x: f32, y: f32) -> f32 {
         }
     }
 }
+/// Distance to one seven-segment character in its own cell (origin top-left).
+fn glyph_distance(ch: char, x: f32, y: f32) -> f32 {
+    if ch == ':' {
+        let c = COLON_W / 2.0;
+        let d1 = ((x - c).powi(2) + (y - 3.2).powi(2)).sqrt();
+        let d2 = ((x - c).powi(2) + (y - 6.8).powi(2)).sqrt();
+        return d1.min(d2) - 0.85;
+    }
+    // Segments a b c d e f g as bit flags.
+    let mask: u8 = match ch {
+        '0' => 0b0111111,
+        '1' => 0b0000110,
+        '2' => 0b1011011,
+        '3' => 0b1001111,
+        '4' => 0b1100110,
+        '5' => 0b1101101,
+        '6' => 0b1111101,
+        '7' => 0b0000111,
+        '8' => 0b1111111,
+        '9' => 0b1101111,
+        _ => 0,
+    };
+    let (l, r, t, m, b) = (0.9, DIGIT_W - 0.9, 0.8, GLYPH_H / 2.0, GLYPH_H - 0.8);
+    let segs = [
+        (l, t, r, t), // a
+        (r, t, r, m), // b
+        (r, m, r, b), // c
+        (l, b, r, b), // d
+        (l, m, l, b), // e
+        (l, t, l, m), // f
+        (l, m, r, m), // g
+    ];
+    let mut d = f32::MAX;
+    for (i, s) in segs.iter().enumerate() {
+        if mask & (1 << i) != 0 {
+            d = d.min(seg(x, y, s.0, s.1, s.2, s.3) - STROKE);
+        }
+    }
+    d
+}
+fn text_width(text: &str) -> f32 {
+    text.chars()
+        .map(|c| if c == ':' { COLON_W } else { DIGIT_W + 1.2 })
+        .sum::<f32>()
+}
+/// Width of a tile in display units.
+fn tile_width(t: &Tile) -> f32 {
+    match &t.text {
+        Some(s) if !s.is_empty() => TILE - 3.0 + text_width(s) + 7.0,
+        _ => TILE,
+    }
+}
 fn coverage(distance: f32, scale: f32) -> f32 {
     (0.5 - distance * scale).clamp(0.0, 1.0)
 }
 /// Render the stack as top-down BGRA, premultiplied alpha (for
-/// `UpdateLayeredWindow`). `upward`: the first tile is at the bottom.
-pub fn render(tiles: &[Tile], scale: f32, upward: bool) -> (i32, i32, Vec<u8>) {
+/// `UpdateLayeredWindow`). `upward`: the first tile is at the bottom;
+/// `right`: tiles of different widths line up on the right edge.
+pub fn render(tiles: &[Tile], scale: f32, upward: bool, right: bool) -> (i32, i32, Vec<u8>) {
     let tile_px = (TILE * scale).round() as i32;
     let gap_px = (GAP * scale).round() as i32;
     let n = tiles.len() as i32;
-    let (w, h) = (tile_px, (n * tile_px + (n - 1).max(0) * gap_px).max(1));
+    let widths: Vec<i32> = tiles
+        .iter()
+        .map(|t| (tile_width(t) * scale).round() as i32)
+        .collect();
+    let w = widths.iter().copied().max().unwrap_or(tile_px).max(1);
+    let h = (n * tile_px + (n - 1).max(0) * gap_px).max(1);
     let mut px = vec![0u8; (w * h * 4) as usize];
+    let k = ICON_GRID / TILE;
     for (i, tile) in tiles.iter().enumerate() {
         let slot = if upward { n - 1 - i as i32 } else { i as i32 };
         let top = slot * (tile_px + gap_px);
+        let tw = widths[i];
+        let left = if right { w - tw } else { 0 };
+        let tw_units = tw as f32 / scale;
+        let color = (
+            tile.color.0 as f32,
+            tile.color.1 as f32,
+            tile.color.2 as f32,
+        );
+        let text_left = TILE - 3.0;
+        let glyph_top = (TILE - GLYPH_H) / 2.0;
         for yy in 0..tile_px {
-            for xx in 0..tile_px {
-                // Sample at the pixel centre, in tile units.
+            for xx in 0..tw {
+                // Pixel centre in display units within this tile.
                 let (x, y) = ((xx as f32 + 0.5) / scale, (yy as f32 + 0.5) / scale);
-                let body = rounded_box(x, y, 15.5, 8.0);
+                let body = rounded_rect(x, y, tw_units - 0.2, TILE - 0.2, RADIUS);
                 let fill = coverage(body, scale);
                 if fill <= 0.0 {
                     continue;
                 }
-                // Background, a soft border, then the icon.
+                // Translucent background, a soft violet edge, then the ink.
                 let mut c = (14.0f32, 14.0f32, 21.0f32);
-                let mut a = 0.82 * fill;
-                let border = coverage(body.abs() - 0.5, scale) * 0.6;
+                let mut a = 0.74 * fill;
+                let border = coverage(body.abs() - 0.45, scale) * 0.55;
                 c = mix(c, (88.0, 78.0, 150.0), border);
                 a = a.max(border * fill);
-                let mut ink = coverage(icon_distance(tile.icon, x, y), scale);
-                if tile.icon == Icon::Record {
-                    // Soft glow ring around the dot.
-                    let r = ((x - 16.0).powi(2) + (y - 16.0).powi(2)).sqrt();
-                    ink = ink.max(coverage((r - 9.0).abs() - 0.6, scale) * 0.45);
+                let (u, v) = (x * k, y * k);
+                let mut ink = if x < TILE {
+                    coverage(icon_distance(tile.icon, u, v) / k, scale)
+                } else {
+                    0.0
+                };
+                if tile.icon == Icon::Record && x < TILE {
+                    let r = ((u - 16.0).powi(2) + (v - 16.0).powi(2)).sqrt();
+                    ink = ink.max(coverage(((r - 9.0).abs() - 0.6) / k, scale) * 0.45);
                 }
                 if tile.slash {
-                    let d = seg(x, y, 9.5, 9.5, 22.5, 22.5);
-                    ink *= 1.0 - coverage(d - 2.3, scale);
-                    ink = ink.max(coverage(d - 1.05, scale));
+                    let d = seg(u, v, 9.5, 9.5, 22.5, 22.5) / k;
+                    ink *= 1.0 - coverage(d - 1.9, scale);
+                    ink = ink.max(coverage(d - 0.85, scale));
                 }
-                let color = (
-                    tile.color.0 as f32,
-                    tile.color.1 as f32,
-                    tile.color.2 as f32,
-                );
                 c = mix(c, color, ink);
                 a = a.max(ink * fill);
-                let o = (((top + yy) * w + xx) * 4) as usize;
+                // Timer digits (light text).
+                if let Some(text) = &tile.text {
+                    let mut gx = text_left;
+                    let mut d = f32::MAX;
+                    for ch in text.chars() {
+                        let cw = if ch == ':' { COLON_W } else { DIGIT_W + 1.2 };
+                        if x >= gx - 1.0 && x <= gx + cw + 1.0 {
+                            d = d.min(glyph_distance(ch, x - gx, y - glyph_top));
+                        }
+                        gx += cw;
+                    }
+                    let t = coverage(d, scale);
+                    c = mix(c, (238.0, 238.0, 244.0), t);
+                    a = a.max(t * fill);
+                }
+                let o = (((top + yy) * w + left + xx) * 4) as usize;
                 px[o] = (c.2 * a).round() as u8;
                 px[o + 1] = (c.1 * a).round() as u8;
                 px[o + 2] = (c.0 * a).round() as u8;
@@ -550,8 +655,12 @@ fn run(rx: mpsc::Receiver<Option<Frame>>) {
                             .is_some_and(|(f, a, d)| *f == frame && *a == area && *d == dpi);
                         if !unchanged {
                             let scale = dpi as f32 / 96.0;
-                            let image =
-                                render(&frame.tiles, scale, frame.position.starts_with("bottom"));
+                            let image = render(
+                                &frame.tiles,
+                                scale,
+                                frame.position.starts_with("bottom"),
+                                frame.position.ends_with("right"),
+                            );
                             let pos = place(
                                 area,
                                 (image.0, image.1),
@@ -677,11 +786,11 @@ mod tests {
         );
     }
     #[test]
-    fn tiles_stack_replay_mic_then_recording() {
+    fn tiles_stack_replay_mic_then_recording_with_optional_timer() {
         let o = OverlaySettings::default();
         let v = View {
             replay: ReplayState::On,
-            recording: Some(12),
+            recording: Some(65),
             mic: MicState::Live,
         };
         let t = tiles(&v, &o);
@@ -690,6 +799,23 @@ mod tests {
             [Icon::Replay, Icon::Mic, Icon::Record]
         );
         assert_eq!((t[0].color, t[1].color, t[2].color), (VIOLET, GREEN, RED));
+        assert_eq!(t[2].text, None, "timer off by default");
+        let timed = tiles(
+            &v,
+            &OverlaySettings {
+                show_timer: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(timed[2].text.as_deref(), Some("1:05"));
+        let no_rec = tiles(
+            &v,
+            &OverlaySettings {
+                show_recording: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(no_rec.len(), 2);
         let idle = View {
             replay: ReplayState::Off,
             recording: None,
@@ -698,15 +824,15 @@ mod tests {
         let t = tiles(&idle, &o);
         assert_eq!(t.len(), 2, "no recording tile while not recording");
         assert!(t[0].slash && t[1].slash);
-        let none = tiles(
+        assert!(tiles(
             &idle,
             &OverlaySettings {
                 show_replay: false,
                 show_mic: false,
                 ..Default::default()
-            },
-        );
-        assert!(none.is_empty());
+            }
+        )
+        .is_empty());
         assert!(
             visible(&o)
                 && !visible(&OverlaySettings {
@@ -714,31 +840,29 @@ mod tests {
                     ..Default::default()
                 })
         );
+        assert_eq!(clock(3725), "1:02:05");
     }
     #[test]
-    fn icons_render_crisp_tiles_with_a_gap() {
+    fn icons_render_smaller_crisp_tiles_with_a_gap() {
+        let tile = |icon, color, slash| Tile {
+            icon,
+            color,
+            slash,
+            text: None,
+        };
         let t = [
-            Tile {
-                icon: Icon::Replay,
-                color: VIOLET,
-                slash: false,
-            },
-            Tile {
-                icon: Icon::Mic,
-                color: GREEN,
-                slash: true,
-            },
+            tile(Icon::Replay, VIOLET, false),
+            tile(Icon::Mic, GREEN, true),
         ];
-        let (w, h, px) = render(&t, 1.0, true);
-        assert_eq!((w, h), (32, 70));
+        let (w, h, px) = render(&t, 1.0, true, true);
+        assert_eq!((w, h), (26, 57), "about 19% smaller than the 32 px design");
         let alpha = |x: i32, y: i32| px[((y * w + x) * 4 + 3) as usize];
         assert_eq!(alpha(0, 0), 0, "rounded corner is transparent");
-        assert_eq!(alpha(16, 34), 0, "gap between tiles is transparent");
-        assert!(alpha(16, 4) > 180, "tile body is mostly opaque");
-        // Icon ink is brighter than the background in each tile.
+        assert_eq!(alpha(13, 28), 0, "gap between tiles is transparent");
+        assert!(alpha(13, 3) > 150, "tile body is visible");
         let bright = |y0: i32| {
-            (y0..y0 + 32)
-                .flat_map(|y| (0..32).map(move |x| (x, y)))
+            (y0..y0 + 26)
+                .flat_map(|y| (0..26).map(move |x| (x, y)))
                 .map(|(x, y)| {
                     let o = ((y * w + x) * 4) as usize;
                     px[o].max(px[o + 1]).max(px[o + 2]) as u32
@@ -746,20 +870,33 @@ mod tests {
                 .max()
                 .unwrap()
         };
-        assert!(bright(0) > 180 && bright(38) > 180);
-        // Premultiplied: colour never exceeds alpha.
-        assert!(px
-            .chunks(4)
-            .all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
-        // High DPI scales the tile.
-        let (w2, _, _) = render(&t, 1.5, true);
-        assert_eq!(w2, 48);
+        assert!(bright(0) > 170 && bright(31) > 170);
+        assert!(
+            px.chunks(4)
+                .all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]),
+            "premultiplied"
+        );
+        // The timer widens only its own tile, aligned to the corner.
+        let timed = [
+            tile(Icon::Mic, GREEN, false),
+            Tile {
+                text: Some("12:34".into()),
+                ..tile(Icon::Record, RED, false)
+            },
+        ];
+        let (w2, _, px2) = render(&timed, 1.0, true, true);
+        assert!(w2 > 50, "{w2}");
+        // Bottom tile (mic) is right-aligned: its left part is empty.
+        let a2 = |x: i32, y: i32| px2[((y * w2 + x) * 4 + 3) as usize];
+        assert_eq!(a2(2, 44), 0);
+        assert!(a2(w2 - 13, 44) > 150);
+        assert_eq!(render(&t, 1.5, true, true).0, 39, "scales with DPI");
     }
     #[test]
     fn placement_hugs_the_chosen_corner() {
         let area = (0, 0, 1920, 1080);
-        assert_eq!(place(area, (32, 70), "bottom-right", 16), (1872, 994));
-        assert_eq!(place(area, (32, 70), "top-left", 16), (16, 16));
+        assert_eq!(place(area, (26, 57), "bottom-right", 14), (1880, 1009));
+        assert_eq!(place(area, (26, 57), "top-left", 14), (14, 14));
         assert_eq!(
             place((1920, 0, 3840, 1040), (32, 32), "bottom-left", 16),
             (1936, 992)

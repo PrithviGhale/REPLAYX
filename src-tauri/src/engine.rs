@@ -439,6 +439,18 @@ impl Engine {
         let _ = i.settings.save(&i.data_dir.join("settings.json"));
         self.publish(&i);
     }
+    /// Change playtime settings at once (also during capture: they don't
+    /// touch the recording pipeline).
+    pub fn set_playtime(&self, p: crate::playtime::PlaytimeSettings) -> Result<()> {
+        let mut i = self.0.lock().unwrap();
+        let mut next = i.settings.clone();
+        next.playtime = p;
+        next.validate()?;
+        next.save(&i.data_dir.join("settings.json"))?;
+        i.settings = next;
+        self.publish(&i);
+        Ok(())
+    }
     /// Mutate engine state with the lock held, then publish the result.
     pub fn update(&self, f: impl FnOnce(&mut Inner)) {
         let mut i = self.0.lock().unwrap();
@@ -1650,7 +1662,10 @@ impl Inner {
     pub fn activity_due(&mut self) -> Option<Vec<crate::games::GameMapping>> {
         let now = Instant::now();
         let capturing = self.pipeline.as_ref().is_some_and(|p| !p.synthetic);
-        let idle_watch = self.pipeline.is_none() && self.settings.game_notifications;
+        // While idle, the game-detected notice and playtime tracking need to
+        // know what is in front.
+        let idle_watch = self.pipeline.is_none()
+            && (self.settings.game_notifications || self.settings.playtime.enabled);
         if !(capturing || idle_watch) {
             // Nobody samples: never leave a stale game behind (it would keep
             // the overlay up after leaving the game).

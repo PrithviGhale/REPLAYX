@@ -56,6 +56,10 @@ struct AppState {
     app: tauri::AppHandle,
     library: Arc<Mutex<Library>>,
     thumbnail_gate: Arc<Mutex<()>>,
+    /// Local playtime tracker (fed by the 1 s loop; never under engine locks).
+    playtime: Arc<Mutex<crate::playtime::Tracker>>,
+    /// Executables seen per game (their icons are the game artwork).
+    games_seen: Arc<Mutex<crate::game_art::Registry>>,
     data_dir: PathBuf,
 }
 impl AppState {
@@ -172,13 +176,72 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
     };
     result.map(|_| serde_json::json!({"ok":true})).map_err(err)
 }
-fn bind_hotkeys(app: &tauri::AppHandle, s: &Settings) -> Reply<Option<String>> {
-    let keys = [
-        &s.replay_hotkey,
-        &s.recording_hotkey,
-        &s.mute_hotkey,
-        &s.pause_hotkey,
-    ];
+const HOTKEY_LABELS: [&str; 4] = [
+    "Save replay",
+    "Start/stop recording",
+    "Mute microphone",
+    "Instant Replay on/off",
+];
+fn hotkey_keys(s: &Settings) -> [String; 4] {
+    [
+        s.replay_hotkey.clone(),
+        s.recording_hotkey.clone(),
+        s.mute_hotkey.clone(),
+        s.pause_hotkey.clone(),
+    ]
+}
+fn set_hotkey_keys(s: &mut Settings, k: [String; 4]) {
+    [
+        s.replay_hotkey,
+        s.recording_hotkey,
+        s.mute_hotkey,
+        s.pause_hotkey,
+    ] = k;
+}
+/// "Control+Alt+F10" as people write it.
+pub fn hotkey_label(k: &str) -> String {
+    k.replace("Control", "Ctrl").replace("Super", "Win")
+}
+/// The message when Windows refuses a shortcut (another program owns it).
+pub fn hotkey_taken(k: &str) -> String {
+    format!(
+        "{} is already used by another application. Change that application's hotkey or choose another shortcut.",
+        hotkey_label(k)
+    )
+}
+/// Decide each action's shortcut: the wanted one if it registers, otherwise
+/// the previous one (if it still registers). Pure; `register` tries one.
+pub fn plan_hotkeys(
+    wanted: &[String; 4],
+    previous: Option<&[String; 4]>,
+    mut register: impl FnMut(&str) -> bool,
+) -> ([String; 4], Vec<String>) {
+    let mut effective = wanted.clone();
+    let mut problems = Vec::new();
+    for i in 0..4 {
+        if register(&wanted[i]) {
+            continue;
+        }
+        let mut message = format!("{}: {}", HOTKEY_LABELS[i], hotkey_taken(&wanted[i]));
+        if let Some(prev) = previous.map(|p| &p[i]).filter(|p| **p != wanted[i]) {
+            if register(prev) {
+                effective[i] = prev.clone();
+                message += &format!(" {} stays on {}.", HOTKEY_LABELS[i], hotkey_label(prev));
+            }
+        }
+        problems.push(message);
+    }
+    (effective, problems)
+}
+/// Register the shortcuts in `wanted`; refused ones keep `previous` when it
+/// works. Returns the settings with the shortcuts actually active, and a
+/// warning for the UI.
+fn bind_hotkeys_keeping(
+    app: &tauri::AppHandle,
+    wanted: &Settings,
+    previous: Option<&Settings>,
+) -> Reply<(Settings, Option<String>)> {
+    let keys = hotkey_keys(wanted);
     let shortcuts: Vec<_> = keys
         .iter()
         .map(|key| Shortcut::from_str(key).map_err(err))
@@ -191,30 +254,49 @@ fn bind_hotkeys(app: &tauri::AppHandle, s: &Settings) -> Reply<Option<String>> {
         }
     }
     app.global_shortcut().unregister_all().map_err(err)?;
-    let labels = [
-        "Save replay",
-        "Start/stop recording",
-        "Mute microphone",
-        "Start/stop replay",
-    ];
-    let mut conflicts = Vec::new();
-    for (index, shortcut) in shortcuts.into_iter().enumerate() {
-        if app.global_shortcut().register(shortcut).is_err() {
-            conflicts.push(format!("{} ({})", labels[index], keys[index]));
-        }
+    let prev = previous.map(hotkey_keys);
+    let (effective, problems) = plan_hotkeys(&keys, prev.as_ref(), |k| {
+        Shortcut::from_str(k).is_ok_and(|s| app.global_shortcut().register(s).is_ok())
+    });
+    let mut out = wanted.clone();
+    set_hotkey_keys(&mut out, effective);
+    Ok((out, (!problems.is_empty()).then(|| problems.join(" "))))
+}
+/// Can this shortcut be registered right now? REPLAYX's own shortcuts count
+/// as available. Never keeps a registration.
+#[tauri::command]
+fn test_hotkey(combo: String, app: tauri::AppHandle) -> Reply<()> {
+    let shortcut = Shortcut::from_str(&combo)
+        .map_err(|_| format!("{} is not a valid shortcut", hotkey_label(&combo)))?;
+    let gs = app.global_shortcut();
+    if gs.is_registered(shortcut) {
+        return Ok(());
     }
-    Ok(if conflicts.is_empty() {
-        None
-    } else {
-        Some(format!("{} unavailable. Other shortcuts and the on-screen buttons still work. Change the conflicting keys in Settings.", conflicts.join(", ")))
+    gs.register(shortcut).map_err(|_| hotkey_taken(&combo))?;
+    let _ = gs.unregister(shortcut);
+    Ok(())
+}
+/// Try the saved shortcuts again (after freeing one in another program).
+#[tauri::command]
+async fn retry_hotkeys(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<Option<String>> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let current = state.engine.settings();
+        let (_, warning) = bind_hotkeys_keeping(&app, &current, None)?;
+        state
+            .engine
+            .update(|i| i.status.hotkey_error = warning.clone());
+        Ok(warning)
     })
+    .await
+    .map_err(err)?
 }
 #[tauri::command]
 async fn save_settings(
     settings: Settings,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Reply<()> {
+) -> Reply<Settings> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || save_settings_blocking(settings, &app, &state))
         .await
@@ -224,12 +306,14 @@ fn save_settings_blocking(
     settings: Settings,
     app: &tauri::AppHandle,
     state: &AppState,
-) -> Reply<()> {
+) -> Reply<Settings> {
     settings.validate().map_err(err)?;
     let previous = state.engine.settings();
     let mut settings = settings;
     settings.tray_hint_shown |= previous.tray_hint_shown;
     settings.tour_done |= previous.tour_done;
+    // Playtime has its own live command (also during capture).
+    settings.playtime = previous.playtime.clone();
     if state.engine.status().replay
         || state.engine.status().recording
         || state.engine.status().saving > 0
@@ -241,13 +325,15 @@ fn save_settings_blocking(
     {
         winutil::set_autostart(settings.launch_at_startup).map_err(err)?;
     }
-    let warning = bind_hotkeys(app, &settings)?;
-    if let Err(e) = state.engine.set_settings(settings) {
-        let _ = bind_hotkeys(app, &previous);
+    // A shortcut another program owns is refused; that action keeps its
+    // previous working shortcut, and the saved settings say so.
+    let (settings, warning) = bind_hotkeys_keeping(app, &settings, Some(&previous))?;
+    if let Err(e) = state.engine.set_settings(settings.clone()) {
+        let _ = bind_hotkeys_keeping(app, &previous, None);
         return Err(err(e));
     }
     state.engine.update(|i| i.status.hotkey_error = warning);
-    Ok(())
+    Ok(settings)
 }
 #[tauri::command]
 async fn set_mix(index: usize, volume: f32, muted: bool, state: State<'_, AppState>) -> Reply<()> {
@@ -463,6 +549,107 @@ async fn voice_sample_render(
     })
     .await
     .map_err(err)?
+}
+/// Artwork for games: a custom image if the user chose one, otherwise the
+/// icon of the game's executable (as seen on this PC), otherwise none (the
+/// app draws a default tile). Nothing is downloaded.
+#[tauri::command]
+async fn game_art(games: Vec<String>, state: State<'_, AppState>) -> Reply<serde_json::Value> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = state.data_dir();
+        let seen = state.games_seen.lock().unwrap().seen.clone();
+        let mut out = serde_json::Map::new();
+        for game in games.into_iter().take(500) {
+            let custom = crate::game_art::custom_data_url(&data, &game);
+            let icon = if custom.is_some() {
+                None
+            } else {
+                seen.get(&game).and_then(|s| {
+                    let key = format!("art256:{}", s.exe);
+                    if let Some(hit) = state.icons.lock().unwrap().get(&key) {
+                        return hit.clone();
+                    }
+                    let p = std::path::Path::new(&s.exe);
+                    let url = p
+                        .is_file()
+                        .then(|| winutil::exe_icon_png_sized(p, 256))
+                        .flatten()
+                        .map(|png| format!("data:image/png;base64,{}", winutil::base64(&png)));
+                    state.icons.lock().unwrap().insert(key, url.clone());
+                    url
+                })
+            };
+            let id = crate::games::catalog().by_name(&game).map(|g| g.id.clone());
+            out.insert(
+                game,
+                serde_json::json!({"custom": custom, "icon": icon, "id": id}),
+            );
+        }
+        Ok(serde_json::Value::Object(out))
+    })
+    .await
+    .map_err(err)?
+}
+/// Use an image the user picked (data URL from a file input) for a game.
+#[tauri::command]
+fn game_art_set(game: String, image: String, state: State<AppState>) -> Reply<()> {
+    let b64 = image.split_once(',').map(|x| x.1).ok_or("Not an image")?;
+    let bytes = winutil::base64_decode(b64).ok_or("Not an image")?;
+    crate::game_art::set_custom(&state.data_dir(), &game, &bytes).map_err(err)
+}
+#[tauri::command]
+fn game_art_clear(game: String, state: State<AppState>) {
+    crate::game_art::clear_custom(&state.data_dir(), &game);
+}
+/// Playtime sessions, the session being tracked now, and the settings.
+#[tauri::command]
+fn playtime_data(state: State<AppState>) -> serde_json::Value {
+    let dir = state.data_dir().join("playtime");
+    let current = state.playtime.lock().unwrap().current();
+    serde_json::json!({
+        "sessions": crate::playtime::sessions(&dir),
+        "current": current.map(|(game, start, seconds)| serde_json::json!({"game": game, "start": start, "seconds": seconds})),
+        "settings": state.engine.settings().playtime,
+    })
+}
+/// Change playtime settings at once (opt-in, pause, idle, exclusions).
+#[tauri::command]
+fn playtime_configure(
+    settings: crate::playtime::PlaytimeSettings,
+    state: State<AppState>,
+) -> Reply<()> {
+    if !settings.enabled || settings.paused {
+        state.playtime.lock().unwrap().stop();
+    }
+    state.engine.set_playtime(settings).map_err(err)
+}
+/// Write the playtime history as CSV into the Downloads folder.
+#[tauri::command]
+fn playtime_export(state: State<AppState>) -> Reply<String> {
+    let csv = crate::playtime::export_csv(&state.data_dir().join("playtime"));
+    let dir = std::env::var_os("USERPROFILE")
+        .map(|h| PathBuf::from(h).join("Downloads"))
+        .filter(|d| d.is_dir())
+        .unwrap_or_else(|| state.data_dir());
+    let file = dir.join(format!(
+        "REPLAYX-playtime-{}.csv",
+        chrono::Local::now().format("%Y-%m-%d")
+    ));
+    fs::write(&file, csv).map_err(err)?;
+    let _ = command("explorer.exe").arg("/select,").arg(&file).spawn();
+    Ok(file.display().to_string())
+}
+/// Clear the playtime history (after the user confirmed): the file goes to
+/// the Recycle Bin, so it can still be restored.
+#[tauri::command]
+fn playtime_clear(state: State<AppState>) -> Reply<()> {
+    state.playtime.lock().unwrap().stop();
+    let file = state.data_dir().join("playtime").join("sessions.jsonl");
+    if file.is_file() {
+        winutil::recycle(&file).map_err(err)?;
+    }
+    Ok(())
 }
 /// The first-run tour was finished or skipped.
 #[tauri::command]
@@ -903,11 +1090,17 @@ fn request_quit(app: tauri::AppHandle) {
             );
             return;
         }
-        match state.engine.shutdown() {
+        match shutdown(&state) {
             Ok(()) => app.exit(0),
             Err(e) => state.report(err(e)),
         }
     });
+}
+/// Stop everything before exiting: the playtime session is saved, capture
+/// stopped, the recording finalized and the encoder ended.
+fn shutdown(state: &AppState) -> anyhow::Result<()> {
+    state.playtime.lock().unwrap().stop();
+    state.engine.shutdown()
 }
 #[tauri::command]
 async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<()> {
@@ -917,7 +1110,7 @@ async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<()
             return Err("Wait for clip verification to finish".into());
         }
         // Finalizing a recording can take seconds: never on the UI thread.
-        state.engine.shutdown().map_err(err)?;
+        shutdown(&state).map_err(err)?;
         app.exit(0);
         Ok(())
     })
@@ -1022,6 +1215,10 @@ pub fn run() {
                     last_index_ms: 0,
                 })),
                 thumbnail_gate: Arc::new(Mutex::new(())),
+                playtime: Arc::new(Mutex::new(crate::playtime::Tracker::open(
+                    &data.join("playtime"),
+                ))),
+                games_seen: Arc::new(Mutex::new(crate::game_art::Registry::open(&data))),
                 data_dir: data.clone(),
             });
             // Keep the startup entry pointing at this executable if enabled.
@@ -1034,8 +1231,8 @@ pub fn run() {
                     let _ = w.show();
                 }
             }
-            let hotkeys = match bind_hotkeys(app.handle(), &settings) {
-                Ok(warning) => warning,
+            let hotkeys = match bind_hotkeys_keeping(app.handle(), &settings, None) {
+                Ok((_, warning)) => warning,
                 Err(error) => Some(error),
             };
             app.state::<AppState>()
@@ -1048,7 +1245,7 @@ pub fn run() {
             let recording =
                 MenuItem::with_id(app, "recording", "Start recording", true, None::<&str>)?;
             let mic = MenuItem::with_id(app, "mic", "Microphone: not added", false, None::<&str>)?;
-            let clips = MenuItem::with_id(app, "clips", "Open clips folder", true, None::<&str>)?;
+            let clips = MenuItem::with_id(app, "clips", "Open Clips", true, None::<&str>)?;
             let open_settings =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit REPLAYX", true, None::<&str>)?;
@@ -1073,15 +1270,22 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("REPLAYX — Stopped")
                 .menu(&menu)
+                // Left click opens REPLAYX; right click shows the menu.
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main(tray.app_handle(), None);
+                    }
+                })
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app, None),
                     "settings" => show_main(app, Some("settings")),
-                    "clips" => {
-                        let root = app.state::<AppState>().engine.settings().output_dir;
-                        if fs::create_dir_all(&root).is_ok() {
-                            let _ = command("explorer.exe").arg(&root).spawn();
-                        }
-                    }
+                    "clips" => show_main(app, Some("clips")),
                     "save" => background_action(app.clone(), "save_replay"),
                     "replay" => background_action(
                         app.clone(),
@@ -1129,6 +1333,7 @@ pub fn run() {
                     });
                 }
                 let mut tray_shown = Default::default();
+                let mut last_game: Option<String> = None;
                 let mut overlay_frame: Option<crate::status_overlay::Frame> = None;
                 let mut announcer = crate::overlay::Announcer::default();
                 loop {
@@ -1155,6 +1360,33 @@ pub fn run() {
                     // "Game detected" notice, from the same detector that files
                     // clips (sampled by the engine without its lock).
                     let settings = state.engine.settings();
+                    // Playtime: one sample per second, outside every engine lock.
+                    {
+                        let wall = chrono::Utc::now().timestamp_millis();
+                        let game = status.foreground_game.as_deref();
+                        let idle = if settings.playtime.enabled {
+                            crate::playtime::idle_seconds()
+                        } else {
+                            0
+                        };
+                        state.playtime.lock().unwrap().tick(
+                            std::time::Instant::now(),
+                            wall,
+                            game,
+                            idle,
+                            &settings.playtime,
+                        );
+                        // Remember the game's executable (its icon is the
+                        // tile art) when the game in front changes.
+                        if game != last_game.as_deref() {
+                            if let (Some(g), Some((_, path, _))) =
+                                (game, game.and(crate::games::foreground_process()))
+                            {
+                                state.games_seen.lock().unwrap().note(g, &path, wall);
+                            }
+                            last_game = game.map(str::to_owned);
+                        }
+                    }
                     // In-game status overlay: only sent when what it shows changes.
                     let frame = crate::status_overlay::visible(&settings.overlay)
                         .then(|| crate::status_overlay::Frame {
@@ -1251,8 +1483,8 @@ pub fn run() {
                         // One-time explanation; the notice thread ends after it.
                         let notice = crate::overlay::Overlay::spawn();
                         notice.show(crate::overlay::Notice {
-                            title: "REPLAYX is still running".into(),
-                            subtitle: "In the tray. Right-click its icon to quit.".into(),
+                            title: "REPLAYX is still running in the background.".into(),
+                            subtitle: "Open it from the system tray.".into(),
                             active: true,
                             icon_exe: None,
                         });
@@ -1280,6 +1512,15 @@ pub fn run() {
             clip_thumbnail,
             audio_test_stop,
             voice_sample_record,
+            game_art,
+            game_art_set,
+            game_art_clear,
+            playtime_data,
+            playtime_configure,
+            playtime_export,
+            playtime_clear,
+            test_hotkey,
+            retry_hotkeys,
             voice_presets,
             mark_tour_done,
             voice_sample_render,
@@ -1297,6 +1538,42 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_taken_shortcut_keeps_the_previous_one_and_says_so() {
+        let k = |a: &str, b: &str, c: &str, d: &str| {
+            [a.to_string(), b.to_string(), c.to_string(), d.to_string()]
+        };
+        let previous = k(
+            "Control+Shift+F10",
+            "Control+Shift+F9",
+            "Control+Shift+M",
+            "Control+Shift+F8",
+        );
+        let wanted = k(
+            "Alt+F10",
+            "Control+Shift+F9",
+            "Control+Shift+M",
+            "Control+Shift+F8",
+        );
+        // NVIDIA owns Alt+F10.
+        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous), |s| s != "Alt+F10");
+        assert_eq!(
+            effective[0], "Control+Shift+F10",
+            "previous working shortcut kept"
+        );
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("Alt+F10 is already used by another application. Change that application's hotkey or choose another shortcut."));
+        assert!(problems[0].contains("stays on Ctrl+Shift+F10"));
+        // Free: Alt+F10 is used.
+        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous), |_| true);
+        assert_eq!(effective[0], "Alt+F10");
+        assert!(problems.is_empty());
+        // Nothing to fall back to (first start): reported, nothing claimed.
+        let (_, problems) = plan_hotkeys(&wanted, None, |s| s != "Alt+F10");
+        assert_eq!(problems.len(), 1);
+        assert!(Shortcut::from_str("Alt+F10").is_ok(), "Alt+F10 parses");
+        assert_eq!(hotkey_label("Control+Alt+F10"), "Ctrl+Alt+F10");
+    }
     #[test]
     fn recommended_shortcuts_parse_and_are_distinct() {
         let s = Settings::default();

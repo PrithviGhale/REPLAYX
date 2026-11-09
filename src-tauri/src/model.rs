@@ -115,13 +115,16 @@ pub struct Settings {
     pub tour_done: bool,
     /// Voice Enhancer presets saved by the user.
     pub voice_presets: Vec<SavedVoice>,
+    /// Local playtime tracking (opt-in).
+    pub playtime: crate::playtime::PlaytimeSettings,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
 }
 /// Current settings layout. 2: explicit output width (0.2.1-alpha.3).
 /// 3: a microphone source is always present (0.2.2-alpha.1).
-pub const SETTINGS_VERSION: u32 = 3;
+/// 4: closing the window minimizes to the tray by default (0.3.1-alpha.1).
+pub const SETTINGS_VERSION: u32 = 4;
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -147,7 +150,7 @@ impl Default for Settings {
             recording_hotkey: "Control+Shift+F9".into(),
             mute_hotkey: "Control+Shift+M".into(),
             pause_hotkey: "Control+Shift+F8".into(),
-            close_to_tray: false,
+            close_to_tray: true,
             diagnostics: false,
             check_updates: false,
             gpu_scaling: true,
@@ -161,6 +164,7 @@ impl Default for Settings {
             tray_hint_shown: false,
             tour_done: false,
             voice_presets: Vec::new(),
+            playtime: Default::default(),
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -197,6 +201,12 @@ impl Settings {
             && self.audio.len() < 5
         {
             self.audio.push(AudioSource::microphone());
+        }
+        // 4: REPLAYX keeps running in the tray when the window closes, so
+        // Instant Replay, hotkeys and playtime keep working (once; the user
+        // can turn it off again in Settings).
+        if self.settings_version < 4 {
+            self.close_to_tray = true;
         }
         self.settings_version = SETTINGS_VERSION;
         true
@@ -258,6 +268,9 @@ impl Settings {
         }
         for p in &self.voice_presets {
             p.voice.validate()?;
+        }
+        if self.playtime.idle_minutes > 240 || self.playtime.excluded.len() > 500 {
+            bail!("Invalid playtime settings")
         }
         if !["auto", "h264", "hevc", "av1"].contains(&self.codec.as_str()) {
             bail!("Unsupported video codec")
@@ -489,6 +502,23 @@ mod tests {
         assert!(s.audio[1].voice.preset == "clear" && s.audio[1].device.is_empty());
         s.validate().unwrap();
         assert!(!s.migrate(), "runs once");
+        // Version 4: minimize to tray on close, once.
+        let mut v3 = Settings {
+            settings_version: 3,
+            close_to_tray: false,
+            ..Default::default()
+        };
+        assert!(v3.migrate());
+        assert!(v3.close_to_tray);
+        let mut chose_off = Settings {
+            close_to_tray: false,
+            ..Default::default()
+        };
+        assert!(
+            !chose_off.migrate(),
+            "a current file keeps the user's choice"
+        );
+        assert!(!chose_off.close_to_tray);
         // An existing microphone is not duplicated.
         let mut s = Settings {
             settings_version: 2,

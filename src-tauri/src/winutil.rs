@@ -125,11 +125,28 @@ pub fn audio_sessions() -> Result<Vec<AudioSession>> {
 
 /// The executable's first large icon as PNG bytes.
 pub fn exe_icon_png(path: &Path) -> Option<Vec<u8>> {
+    exe_icon_png_sized(path, 0)
+}
+/// The executable's icon at up to `size` pixels (0 = Windows' large icon
+/// size, usually 32). Game tiles ask for 256 so the art stays sharp.
+pub fn exe_icon_png_sized(path: &Path, size: u32) -> Option<Vec<u8>> {
     let file = wide(&path.to_string_lossy());
     unsafe {
         let mut icon = HICON::default();
-        if ExtractIconExW(PCWSTR(file.as_ptr()), 0, Some(&mut icon), None, 1) == 0
-            || icon.is_invalid()
+        let sized = size > 0
+            && windows::Win32::UI::Shell::SHDefExtractIconW(
+                PCWSTR(file.as_ptr()),
+                0,
+                0,
+                Some(&mut icon),
+                None,
+                size.min(256),
+            )
+            .is_ok()
+            && !icon.is_invalid();
+        if !sized
+            && (ExtractIconExW(PCWSTR(file.as_ptr()), 0, Some(&mut icon), None, 1) == 0
+                || icon.is_invalid())
         {
             return None;
         }
@@ -419,5 +436,63 @@ mod tests {
         }
         let sessions = audio_sessions().unwrap();
         assert!(sessions.iter().all(|s| s.pid != 0 && !s.name.is_empty()));
+    }
+}
+
+/// Decode standard Base64 (padding optional); None on any invalid input.
+pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let value = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let bytes: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
+    let body = bytes
+        .strip_suffix(b"==")
+        .or_else(|| bytes.strip_suffix(b"="))
+        .unwrap_or(&bytes);
+    if body.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() * 3 / 4);
+    for chunk in body.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= value(*c)? << (18 - 6 * i);
+        }
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod base64_tests {
+    #[test]
+    fn base64_round_trips() {
+        for data in [
+            &b""[..],
+            b"f",
+            b"fo",
+            b"foo",
+            b"foob",
+            b"\x89PNG\r\n\x1a\n\x00\xff",
+        ] {
+            assert_eq!(
+                super::base64_decode(&super::base64(data)).as_deref(),
+                Some(data)
+            );
+        }
+        assert!(super::base64_decode("not*base64").is_none());
     }
 }

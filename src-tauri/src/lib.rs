@@ -3,6 +3,7 @@ pub mod buffer;
 #[cfg(feature = "desktop")]
 pub mod desktop;
 pub mod engine;
+pub mod game_art;
 pub mod games;
 pub mod geometry;
 pub mod health;
@@ -10,6 +11,7 @@ pub mod library;
 pub mod media;
 pub mod model;
 pub mod overlay;
+pub mod playtime;
 pub mod process_job;
 pub mod status_overlay;
 pub mod voice;
