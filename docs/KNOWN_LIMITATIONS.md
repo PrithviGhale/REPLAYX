@@ -4,6 +4,7 @@ REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md]
 
 ## New in 0.3.0-alpha.1
 
+- **120 fps is not smooth yet in our benchmark.** With REPLAYX's GPU-heavy test window (about 900 FPS, full screen, 250 Hz display), 120 fps recordings repeated 43-45% of frames, the same with and without audio and unchanged by longer encoder look-ahead (45%) or oversampled capture (38%); 60 fps under the same load repeated 0.56%. Not yet tested with a real game at 120 fps. Use 60 fps until this is resolved.
 - **Voice Enhancer** quality has been measured with synthetic speech and noise only. Whether it makes a real headset sound better is a listening test still to be done, and it has not been compared with Voicemod on the same recording.
 - Noise suppression removes steady noise (fans, hum, hiss, room noise) well; short sounds such as keyboard clicks and mouse clicks are only partly reduced.
 - If you record a virtual microphone (for example Voicemod's), REPLAYX processes audio that is already processed. Choose your real microphone, or the **Off** preset.

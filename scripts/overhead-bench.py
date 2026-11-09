@@ -44,6 +44,8 @@ CONFIGS = {
     "wallclock": ([], "audio_wallclock=1"),
     "split": ([], "split_graphs=1"),
     "la20": ([], "nvenc_lookahead=20"),
+    "la32": ([], "nvenc_lookahead=32"),
+    "la40": ([], "nvenc_lookahead=40"),
     "split-la20": ([], "split_graphs=1,nvenc_lookahead=20"),
     "split-wallclock": ([], "split_graphs=1,audio_wallclock=1"),
     "split-il0": ([], "split_graphs=1,interleave_delta=0"),

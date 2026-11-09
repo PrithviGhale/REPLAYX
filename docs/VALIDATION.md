@@ -1,3 +1,42 @@
+# Validation — 0.3.0-alpha.1 (November 8, 2026)
+
+Same laptop (RTX 4070 Laptop GPU driving the 250 Hz panel during these tests). The user was away for the unattended parts. **No microphone was opened** during development or testing: voice processing was evaluated with Windows text-to-speech and synthetic noise. No game was launched or touched; capture tests used REPLAYX's own game proxy and throw-away folders. The user's settings file was backed up before each start-up test and is byte-identical afterwards.
+
+## Measured
+
+| Test | Result |
+| --- | --- |
+| Previous noise suppression (FFmpeg `afftdn`, as shipped) | Removed 2.2 dB of steady pink (fan-like) noise at −48 dBFS. |
+| Voice Enhancer noise suppression (`scripts/voice-eval.ps1`, TTS speech + noise) | Fan: Light −9.5, Balanced −17.0, Strong −25.0 dB, Noise-Free preset −28.6 dB. Hiss: −10.0 / −18.4 / −28.0 / −32.3 dB. Clean speech level change ≤0.3 dB. Keyboard clicks only partly reduced. |
+| Voice Enhancer cost | 0.5–1.0% of one CPU core (release build); 11 ms added latency with suppression (RNNoise 480 samples, measured by cross-correlation and asserted by a test; limiter 1 ms). |
+| Startup (`dev/startup-bench.mjs`, warm medians, back to back) | Interface mounted 455 ms (0.2.2-alpha.2) vs 427 ms (0.3.0-alpha.1); app ready 483 ms; splash adds no delay. Cold first launch 1.5–2.4 s in both. |
+| Recording regression, 60 fps, system audio, game proxy | 4.0% game-FPS cost, 0.56% repeated frames (the stutter fix's established range is 0–0.6%). |
+| Recording, 120 fps, game proxy | **Not smooth:** 43% repeated frames with audio, 45% silent, 45% with 32-frame look-ahead, 38% with oversampled capture. Independent of audio and of this release's changes; listed in KNOWN_LIMITATIONS. |
+| Mouse-wheel scrolling (`dev/scroll-check.mjs`) | 21/21 page/size combinations scroll. |
+| Git history (38 commits) | No keys, tokens, passwords, recordings, audio, settings files, personal paths or e-mail addresses. |
+| Final build smoke test | Starts tray-only, reports ready, no orphan processes after closing; user settings unchanged. |
+
+## Automated
+
+Rust 121 tests (new: Voice Enhancer presets, raw pass-through, RNNoise delay, suppression strengths and Off, quiet speech through the expander, no clipping at +24 dB for every preset, compressor level spread, level matching, garbage input, 10 ms frame budget, tour/tray-hint persistence, FFmpeg only limiting loud sources), frontend 20 tests (splash lifecycle and reduced motion, tour steps/placement/auto-start, rate mirrors, microphone defaults), Clippy `-D warnings`, rustfmt, TypeScript, production build, `npm audit` 0 vulnerabilities, NSIS installer built.
+
+## Build artifacts (not installed, not published)
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` | 16,443,904 | `833a0a43f5956d1048b5d018cff602be899a750526240a14452ecb5b1be83b02` |
+| `src-tauri/target/release/replayx-cli.exe` | 3,302,400 | `49b8b88fd20541b14bed9a35a68207cd17e8e1c5518854229bb09968ce0775fc` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.3.0-alpha.1_x64-setup.exe` | 60,630,748 | `9489c307ea2afeb287e666d5a0063a579e9b3e0529f61082ea917c1996409e49` |
+
+## Not verified (needs the user)
+
+- Listening: every Voice Enhancer preset and suppression strength on the user's headset; Test mic Enhanced/Original; Compare; a recording with the microphone; a fair comparison with Voicemod on the same recording.
+- The splash and tour in the real window (first launch shows the tour; Skip, Esc, Replay tutorial).
+- 120 fps with a real game; overlay over a real game; tray Quit while recording; installing the installer over an existing version.
+- Release gate: corresponding source for each LGPL library bundled with FFmpeg (FFmpeg itself and the FFmpeg-Builds recipes are prepared in `release/ffmpeg-source/`).
+
+---
+
 # Validation — 0.2.2-alpha.1 (November 8, 2026)
 
 Same laptop (RTX 4070 Laptop GPU drove the panel during these tests: Advanced Optimus, DISPLAY5). The user was away. No microphone was opened (no microphone test was run), nothing was played, no game was launched or touched; capture tests used REPLAYX's own game proxy and throw-away folders under `test-output/`. The user's settings file was backed up before the start-up smoke test and is byte-identical afterwards.
