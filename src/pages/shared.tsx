@@ -1,28 +1,38 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppWindow, Film, Mic, Speaker, VolumeX } from 'lucide-react';
 import { api, native, type AudioSource, type Clip } from '../api';
+import { applies, cachedThumb, loadThumb, thumbKey } from '../thumbs';
 
-const thumbs = new Map<string, string>();
-/** Clip still, requested only once visible and cached for the session. */
+/** Clip still, requested only once visible. The image always belongs to the
+ * clip shown: switching clips shows a placeholder until the new clip's own
+ * image arrives, and a late answer for a previous clip is ignored. */
 export function Thumb({ clip, className = '' }: { clip: Clip; className?: string }) {
-  const key = `${clip.id}:${clip.modified}:${clip.bytes}`;
-  const [url, setUrl] = useState<string | undefined>(thumbs.get(key));
-  const [failed, setFailed] = useState(false);
+  const key = thumbKey(clip);
+  const [shown, setShown] = useState<{ key: string; url?: string; failed?: boolean }>(() => ({ key, url: cachedThumb(key) }));
+  const current = useRef(key);
+  current.current = key;
   const ref = useRef<HTMLDivElement>(null);
+  // A different clip: never keep the previous clip's image on screen.
+  const state = shown.key === key ? shown : { key, url: cachedThumb(key) };
   useEffect(() => {
-    if (url || failed || !native || !ref.current) return;
+    if (shown.key !== key) setShown({ key, url: cachedThumb(key) });
+  }, [key, shown.key]);
+  useEffect(() => {
+    if (state.url || state.failed || !native || !ref.current) return;
     const el = ref.current;
     const io = new IntersectionObserver(entries => {
       if (!entries.some(e => e.isIntersecting)) return;
       io.disconnect();
-      api.thumbnail(clip.id).then(u => { thumbs.set(key, u); setUrl(u); }).catch(() => setFailed(true));
+      loadThumb(key, () => api.thumbnail(clip.id))
+        .then(url => { if (applies(key, current.current)) setShown({ key, url }); })
+        .catch(() => { if (applies(key, current.current)) setShown({ key, failed: true }); });
     }, { rootMargin: '200px' });
     io.observe(el);
     return () => io.disconnect();
-  }, [clip.id, key, url, failed]);
+  }, [clip.id, key, state.url, state.failed]);
   return (
-    <div ref={ref} className={`thumb ${className}`}>
-      {url ? <img src={url} alt="" draggable={false} /> : <Film size={26} className={failed ? '' : 'pulse'} />}
+    <div ref={ref} className={`thumb ${className}`} data-clip={clip.id}>
+      {state.url ? <img key={key} src={state.url} alt="" draggable={false} /> : <Film size={26} className={state.failed ? '' : 'pulse'} />}
     </div>
   );
 }

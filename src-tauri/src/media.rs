@@ -582,7 +582,14 @@ impl Media {
     }
     /// JPEG still from roughly a third of the way into the clip.
     pub fn thumbnail(&self, path: &Path, duration: f64, width: u32) -> Result<Vec<u8>> {
-        let at = (duration / 3.).clamp(0., 5.);
+        // Start about a third in (never the black first frames), at most a
+        // minute in, then let FFmpeg's `thumbnail` filter pick the most
+        // representative of the next 30 frames.
+        let at = if duration > 1.0 {
+            (duration * 0.35).min(60.0).min(duration - 0.5)
+        } else {
+            0.0
+        };
         let out = command(&self.ffmpeg)
             .args([
                 "-hide_banner",
@@ -600,9 +607,11 @@ impl Media {
                 "-frames:v",
                 "1",
                 "-vf",
-                &format!("scale={width}:-2"),
+                // Square pixels first (Smooth-mode files carry a pixel aspect
+                // ratio), so the still is never squashed.
+                &format!("thumbnail=n=30,scale=trunc(iw*sar/2)*2:ih,setsar=1,scale={width}:-2:flags=lanczos"),
                 "-q:v",
-                "4",
+                "3",
                 "-f",
                 "image2pipe",
                 "-c:v",

@@ -23,64 +23,73 @@ pub struct GameMapping {
     pub name: String,
 }
 
-/// Known game executables (lower-case file name → display name).
-const KNOWN: &[(&str, &str)] = &[
-    ("fortniteclient-win64-shipping.exe", "Fortnite"),
-    ("fortniteclient-win64-shipping_eac_eos.exe", "Fortnite"),
-    ("fortniteclient-win64-shipping_be.exe", "Fortnite"),
-    ("robloxplayerbeta.exe", "Roblox"),
-    ("robloxstudiobeta.exe", "Roblox Studio"),
-    ("valorant-win64-shipping.exe", "Valorant"),
-    ("minecraft.windows.exe", "Minecraft"),
-    ("cs2.exe", "Counter-Strike 2"),
-    ("csgo.exe", "Counter-Strike Global Offensive"),
-    ("league of legends.exe", "League of Legends"),
-    ("r5apex.exe", "Apex Legends"),
-    ("r5apex_dx12.exe", "Apex Legends"),
-    ("gta5.exe", "Grand Theft Auto V"),
-    ("gta5_enhanced.exe", "Grand Theft Auto V"),
-    ("rocketleague.exe", "Rocket League"),
-    ("overwatch.exe", "Overwatch 2"),
-    ("dota2.exe", "Dota 2"),
-    ("rainbowsix.exe", "Rainbow Six Siege"),
-    ("rainbowsix_vulkan.exe", "Rainbow Six Siege"),
-    ("destiny2.exe", "Destiny 2"),
-    ("eldenring.exe", "Elden Ring"),
-    ("marvel-win64-shipping.exe", "Marvel Rivals"),
-    ("escapefromtarkov.exe", "Escape from Tarkov"),
-    ("deadlock.exe", "Deadlock"),
-    ("tslgame.exe", "PUBG Battlegrounds"),
-    ("cod.exe", "Call of Duty"),
-    ("fifa23.exe", "EA Sports FC"),
-    ("fc25.exe", "EA Sports FC"),
-    ("rust.exe", "Rust"),
-    ("terraria.exe", "Terraria"),
-    ("geometrydash.exe", "Geometry Dash"),
-    ("osu!.exe", "osu!"),
-];
-
-/// Launchers, overlays and helpers that are never the game being played.
-const NOT_GAMES: &[&str] = &[
-    "epicgameslauncher.exe",
-    "fortnitelauncher.exe",
-    "robloxplayerlauncher.exe",
-    "robloxcrashhandler.exe",
-    "riotclientservices.exe",
-    "riotclientux.exe",
-    "riotclientuxrender.exe",
-    "minecraftlauncher.exe",
-    "steam.exe",
-    "steamwebhelper.exe",
-    "battle.net.exe",
-    "eadesktop.exe",
-    "galaxyclient.exe",
-    "upc.exe",
-    "discord.exe",
-    "explorer.exe",
-    "nvidia overlay.exe",
-    "gamebar.exe",
-    "replayx.exe",
-];
+/// One game in the catalog (src/game_catalog.json, compiled in: detection
+/// works offline).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CatalogGame {
+    /// Stable identifier (artwork, playtime).
+    pub id: String,
+    /// Display name, also the clip folder name.
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
+    /// Lower-case executable file names.
+    #[serde(default)]
+    pub exe: Vec<String>,
+    /// Lower-case path fragments; one must appear in the executable's path.
+    #[serde(default)]
+    pub path: Vec<String>,
+}
+#[derive(Deserialize)]
+struct CatalogFile {
+    games: Vec<CatalogGame>,
+    not_games: Vec<String>,
+}
+pub struct Catalog {
+    pub games: Vec<CatalogGame>,
+    by_exe: HashMap<String, Vec<usize>>,
+    not_games: std::collections::HashSet<String>,
+}
+/// The built-in game catalog, parsed once.
+pub fn catalog() -> &'static Catalog {
+    static CATALOG: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| {
+        let file: CatalogFile = serde_json::from_str(include_str!("game_catalog.json"))
+            .expect("game_catalog.json is valid (tested)");
+        let mut by_exe: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, g) in file.games.iter().enumerate() {
+            for exe in &g.exe {
+                by_exe.entry(exe.clone()).or_default().push(i);
+            }
+        }
+        // Entries that also require a folder are tried before plain ones
+        // sharing the same executable name (Path of Exile 2 vs 1).
+        for list in by_exe.values_mut() {
+            list.sort_by_key(|i| file.games[*i].path.is_empty());
+        }
+        Catalog {
+            games: file.games,
+            by_exe,
+            not_games: file.not_games.into_iter().collect(),
+        }
+    })
+}
+impl Catalog {
+    /// The catalog game an executable belongs to, if any.
+    pub fn lookup(&self, file: &str, lower_path: &str) -> Option<&CatalogGame> {
+        self.by_exe
+            .get(file)?
+            .iter()
+            .map(|i| &self.games[*i])
+            .find(|g| g.path.is_empty() || g.path.iter().any(|f| lower_path.contains(f.as_str())))
+    }
+    /// The catalog entry for a display name (clip folder / playtime name).
+    pub fn by_name(&self, name: &str) -> Option<&CatalogGame> {
+        self.games
+            .iter()
+            .find(|g| g.name.eq_ignore_ascii_case(name))
+    }
+}
 
 /// Store install roots: the next path component is the game's folder name.
 const STORE_ROOTS: &[&str] = &[
@@ -128,11 +137,12 @@ pub fn classify(exe_path: &str, title: &str, overrides: &[GameMapping]) -> Foreg
             Foreground::Game(name.to_string())
         };
     }
-    if NOT_GAMES.contains(&file.as_str()) {
+    let cat = catalog();
+    if cat.not_games.contains(&file) {
         return Foreground::App;
     }
-    if let Some((_, name)) = KNOWN.iter().find(|(exe, _)| *exe == file) {
-        return Foreground::Game((*name).to_string());
+    if let Some(game) = cat.lookup(&file, &lower) {
+        return Foreground::Game(game.name.clone());
     }
     // Roblox from the Microsoft Store runs as a generic UWP host.
     if file == "windows10universal.exe" && lower.contains("robloxcorporation") {
@@ -141,7 +151,7 @@ pub fn classify(exe_path: &str, title: &str, overrides: &[GameMapping]) -> Foreg
     // Minecraft Java Edition runs in a generic Java VM; only its window title
     // distinguishes it from other Java programs.
     if (file == "javaw.exe" || file == "java.exe") && title.trim_start().starts_with("Minecraft") {
-        return Foreground::Game("Minecraft".into());
+        return Foreground::Game("Minecraft Java Edition".into());
     }
     for root in STORE_ROOTS {
         if let Some(pos) = lower.find(root) {
@@ -383,6 +393,151 @@ mod tests {
     }
 
     #[test]
+    fn catalog_entries_are_valid_and_safe() {
+        let cat = catalog();
+        assert!(cat.games.len() >= 120, "{} games", cat.games.len());
+        let mut ids = std::collections::HashSet::new();
+        // Short executable names identify a game only when reviewed as
+        // distinctive; anything else must name its folder too.
+        let reviewed = [
+            "arma3.exe",
+            "bf1.exe",
+            "bf6.exe",
+            "bfv.exe",
+            "bg3.exe",
+            "bh3.exe",
+            "cod.exe",
+            "cs2.exe",
+            "csgo.exe",
+            "dota2.exe",
+            "f1_24.exe",
+            "f1_25.exe",
+            "fc24.exe",
+            "fc25.exe",
+            "fc26.exe",
+            "gmod.exe",
+            "gowr.exe",
+            "gta5.exe",
+            "gtaiv.exe",
+            "mk12.exe",
+            "osu!.exe",
+            "rdr2.exe",
+        ];
+        for g in &cat.games {
+            assert!(ids.insert(g.id.clone()), "duplicate id {}", g.id);
+            assert!(!g.name.trim().is_empty(), "{}", g.id);
+            assert!(
+                !g.name
+                    .contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|']),
+                "folder-safe name: {}",
+                g.name
+            );
+            for exe in &g.exe {
+                assert_eq!(exe, &exe.to_lowercase(), "{exe}");
+                assert!(exe.ends_with(".exe"), "{exe}");
+                assert!(
+                    !cat.not_games.contains(exe),
+                    "{exe} is also listed as not a game"
+                );
+                let stem = exe.trim_end_matches(".exe");
+                if stem.len() <= 5 || ["discovery", "dungeons", "kingdomcome"].contains(&stem) {
+                    assert!(
+                        !g.path.is_empty() || reviewed.contains(&exe.as_str()),
+                        "{exe} ({}) needs a path requirement",
+                        g.name
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn catalog_disambiguates_by_folder_and_maps_aliases() {
+        let none: Vec<GameMapping> = Vec::new();
+        let game = |n: &str| Foreground::Game(n.into());
+        // Several executables, one game.
+        assert_eq!(
+            classify(
+                r"C:\Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe",
+                "",
+                &none
+            ),
+            game("Valorant")
+        );
+        assert_eq!(
+            classify(
+                r"D:\Steam\steamapps\common\Apex Legends\r5apex_dx12.exe",
+                "",
+                &none
+            ),
+            game("Apex Legends")
+        );
+        assert_eq!(
+            classify(r"C:\Games\Genshin Impact Game\YuanShen.exe", "", &none),
+            game("Genshin Impact")
+        );
+        // Same executable name, folder decides.
+        assert_eq!(
+            classify(
+                r"C:\Steam\steamapps\common\Path of Exile 2\PathOfExileSteam.exe",
+                "",
+                &none
+            ),
+            game("Path of Exile 2")
+        );
+        assert_eq!(
+            classify(
+                r"C:\Steam\steamapps\common\Path of Exile\PathOfExileSteam.exe",
+                "",
+                &none
+            ),
+            game("Path of Exile")
+        );
+        // Generic names need their folder.
+        assert_eq!(
+            classify(
+                r"C:\Steam\steamapps\common\THE FINALS\Discovery.exe",
+                "",
+                &none
+            ),
+            game("The Finals")
+        );
+        assert_eq!(
+            classify(r"C:\Tools\discovery\Discovery.exe", "", &none),
+            Foreground::App
+        );
+        assert_eq!(
+            classify(r"C:\Program Files\Speaker Tools\peak.exe", "", &none),
+            Foreground::App
+        );
+        // Launchers and helpers are never the game.
+        for launcher in [
+            r"C:\Program Files\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
+            r"C:\Riot Games\Riot Client\RiotClientServices.exe",
+            r"C:\Windows\SystemApps\LockApp.exe",
+            r"C:\Program Files\NVIDIA Corporation\NVIDIA App\NVIDIA App.exe",
+        ] {
+            assert_eq!(classify(launcher, "", &none), Foreground::App, "{launcher}");
+        }
+        // Unknown game in a store folder: named after its folder.
+        assert_eq!(
+            classify(
+                r"E:\SteamLibrary\steamapps\common\Some Indie Game\bin\indie.exe",
+                "",
+                &none
+            ),
+            game("Some Indie Game")
+        );
+        // Unknown program elsewhere: not a game.
+        assert_eq!(
+            classify(r"C:\Program Files\Tool\tool.exe", "", &none),
+            Foreground::App
+        );
+        assert_eq!(
+            catalog().by_name("roblox").map(|g| g.id.as_str()),
+            Some("roblox")
+        );
+    }
+    #[test]
     fn known_games_are_recognised_by_process_identity() {
         let none = [];
         let c = |p: &str| classify(p, "", &none);
@@ -462,7 +617,7 @@ mod tests {
                 "Minecraft 1.21.4",
                 &none
             ),
-            game("Minecraft")
+            game("Minecraft Java Edition")
         );
         assert_eq!(
             classify(

@@ -316,18 +316,9 @@ async fn clip_thumbnail(id: String, state: State<'_, AppState>) -> Reply<String>
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let stem: String = id
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .take(100)
-            .collect();
-        let file = cache.join(format!("{stem}-{modified}-{}.jpg", meta.len()));
+        // Cache key: the clip's identity (full id hash, so long ids never
+        // collide), size and modification time, plus the generator version.
+        let file = cache.join(library::thumbnail_file_name(&id, meta.len(), modified));
         if let Ok(bytes) = fs::read(&file) {
             return Ok(format!(
                 "data:image/jpeg;base64,{}",
@@ -351,7 +342,7 @@ async fn clip_thumbnail(id: String, state: State<'_, AppState>) -> Reply<String>
             .and_then(|c| c.probe)
             .map(|p| p.duration)
             .unwrap_or(0.);
-        let bytes = media.thumbnail(&path, duration, 480).map_err(err)?;
+        let bytes = media.thumbnail(&path, duration, 640).map_err(err)?;
         fs::create_dir_all(&cache).map_err(err)?;
         prune_cache(&cache, 400);
         fs::write(&file, &bytes).map_err(err)?;

@@ -668,3 +668,62 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+/// Thumbnail cache file for a clip: readable prefix, a hash of the full id
+/// (two clips never share a file), size and modification time (a replaced or
+/// re-saved clip gets a new image), and the generator version.
+pub fn thumbnail_file_name(id: &str, size: u64, modified: u64) -> String {
+    // FNV-1a 64: stable across runs and builds (unlike the std hasher).
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    let prefix: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(40)
+        .collect();
+    format!("v2-{prefix}-{h:016x}-{modified}-{size}.jpg")
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::thumbnail_file_name;
+    #[test]
+    fn thumbnail_cache_names_follow_clip_identity() {
+        let long_a = format!("Roblox/{}A.mkv", "x".repeat(120));
+        let long_b = format!("Roblox/{}B.mkv", "x".repeat(120));
+        assert_ne!(
+            thumbnail_file_name(&long_a, 10, 1),
+            thumbnail_file_name(&long_b, 10, 1),
+            "long ids never collide"
+        );
+        assert_ne!(
+            thumbnail_file_name("a.mkv", 10, 1),
+            thumbnail_file_name("a.mkv", 11, 1),
+            "re-saved file, new image"
+        );
+        assert_ne!(
+            thumbnail_file_name("a.mkv", 10, 1),
+            thumbnail_file_name("a.mkv", 10, 2),
+            "modified file, new image"
+        );
+        assert_ne!(
+            thumbnail_file_name("Roblox/a.mkv", 10, 1),
+            thumbnail_file_name("Fortnite/a.mkv", 10, 1),
+            "moved to another game"
+        );
+        assert_eq!(
+            thumbnail_file_name("a.mkv", 10, 1),
+            thumbnail_file_name("a.mkv", 10, 1)
+        );
+        assert!(thumbnail_file_name("Roblox/a b.mkv", 1, 1).starts_with("v2-Roblox_a_b_mkv-"));
+    }
+}
