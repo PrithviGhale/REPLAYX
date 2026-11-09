@@ -219,7 +219,8 @@ jobs:
           notes="../docs/release-notes/$TAG.md"; [[ -f "$notes" ]] || notes=../CHANGELOG.md
           stage=""; [[ "$TAG" == *-alpha* ]] && stage=" — Alpha"; [[ "$TAG" == *-beta* ]] && stage=" — Beta"
           flags=(--draft --verify-tag --title "REPLAYX $TAG$stage" --notes-file "$notes")
-          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+          # Not marked pre-release: GitHub only shows a "Latest" release card for
+          # regular releases. The title and tag still say Alpha/Beta.
           files=(*.exe SHA256SUMS.txt ffmpeg-corresponding-source-*.tar)
           compgen -G "*.sig" >/dev/null && files+=(*.sig)
           [[ -f latest.json ]] && files+=(latest.json)

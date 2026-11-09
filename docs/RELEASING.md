@@ -12,7 +12,7 @@ Releases are cut by hand from `main`. GitHub Actions builds them, but nothing is
 | Beta | `0.3.0-beta.1` | Feature-complete for the line; bug fixing |
 | Stable | `1.0.0` | Supported release; settings and file layout are stable |
 
-The README's download button and install step name the newest release's installer directly (`.../releases/download/vX.Y.Z/REPLAYX_X.Y.Z_x64-setup.exe`). Update them when a release is **published**, not before: GitHub's "Latest" release and `/releases/latest` ignore pre-releases, so while REPLAYX is in alpha a `latest` link would not work.
+The README's download button and install step name the newest release's installer directly (`.../releases/download/vX.Y.Z/REPLAYX_X.Y.Z_x64-setup.exe`). Update them when a release is **published**, not before. (GitHub's "Latest" release and `/releases/latest` ignore releases marked *pre-release*; REPLAYX releases are published as regular releases titled "— Alpha", so they do appear as Latest.)
 
 The version lives in six places that must match: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`, plus `VERSION` in `src/api.ts`. The release workflow refuses a tag that does not match `package.json`.
 
@@ -22,9 +22,9 @@ The version lives in six places that must match: `package.json`, `package-lock.j
 2. **Hardware.** Run the checklist in [VALIDATION.md](VALIDATION.md) on real hardware: record, replay save, audio playback, repeated Record/Stop, Delete, and the game-FPS comparison. Record the results and every untested item in `VALIDATION.md` and `KNOWN_LIMITATIONS.md`.
 3. **Notes.** Add a section to `CHANGELOG.md`. Describe only measured improvements.
 4. **Tag.** `git tag -a v0.2.1-alpha.3 -m "REPLAYX 0.2.1-alpha.3"` and `git push origin v0.2.1-alpha.3`.
-5. **Build.** The *Release (draft)* workflow builds the NSIS installer with the pinned FFmpeg runtime, runs all checks, builds the FFmpeg corresponding-source package (`scripts/ffmpeg-source/build-package.ps1`), writes `SHA256SUMS.txt` for both and creates a **draft** release (marked pre-release for `-alpha`/`-beta` tags). It refuses to run if a release for the tag already exists, so a published release is never rebuilt or overwritten; to rebuild a draft, delete the draft first. Before tagging, you can run the workflow by hand **without a tag** on any branch: that is a test build whose installer and source report are kept as workflow artifacts, and it creates no release.
+5. **Build.** The *Release (draft)* workflow builds the NSIS installer with the pinned FFmpeg runtime, runs all checks, builds the FFmpeg corresponding-source package (`scripts/ffmpeg-source/build-package.ps1`), writes `SHA256SUMS.txt` for both and creates a **draft** release titled `REPLAYX vX.Y.Z — Alpha` (or `— Beta`). It is not marked *pre-release*, so once published GitHub shows it as the **Latest** release in the repository sidebar; the title and version keep its alpha/beta status clear. It refuses to run if a release for the tag already exists, so a published release is never rebuilt or overwritten; to rebuild a draft, delete the draft first. Before tagging, you can run the workflow by hand **without a tag** on any branch: that is a test build whose installer and source report are kept as workflow artifacts, and it creates no release.
 6. **Verify the artifact.** Download the installer from the draft, compare its SHA-256, install it on a test machine, launch it, record, save a replay, play the clip, uninstall. Scan it with Windows Security.
-7. **Publish.** Edit the draft notes (download link, requirements, known limitations), keep **pre-release** ticked for alpha/beta, and publish.
+7. **Publish.** Check the draft notes (download link, requirements, known limitations) and publish. Leave *Set as a pre-release* unticked so the release shows as Latest; the title already says Alpha or Beta.
 
 ## FFmpeg and licences
 
