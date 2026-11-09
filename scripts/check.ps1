@@ -1,6 +1,9 @@
 $ErrorActionPreference='Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
+    # Tauri's build step needs src-tauri/media (generated, git-ignored), so a
+    # fresh checkout prepares it from the pinned runtime (scripts/setup-media.ps1).
+    if (!(Test-Path 'src-tauri/media/ffmpeg.exe')) { & (Join-Path $PSScriptRoot 'prepare-bundle.ps1') }
     npm.cmd ci
     if ($LASTEXITCODE) { throw 'npm ci failed' }
     npm.cmd run build
