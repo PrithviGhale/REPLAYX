@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Compass, Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
 import { startTour } from '../Tour';
-import { api, type Settings, type UpdateInfo } from '../api';
+import { comboFrom } from '../hotkeys';
+import { BRAND, BrandMark } from '../brand';
+export { comboFrom };
+import { api, errorText, native, type PlaytimeData, type PlaytimeSettings, type Settings, type UpdateInfo } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
-import { Badge, Button, Card, Field, Kbd, Segmented, Toggle } from '../ui';
+import { Badge, Button, Card, Field, Kbd, Modal, Segmented, Toggle } from '../ui';
 import type { OverlayPosition, OverlaySettings } from '../api';
 import { Section } from './shared';
 import { VERSION } from '../api';
@@ -17,21 +20,19 @@ const HOTKEYS: { key: HotkeyKey; label: string; text: string }[] = [
   { key: 'pause_hotkey', label: 'Turn Instant Replay on / off', text: 'Starts or stops the rolling buffer.' },
   { key: 'mute_hotkey', label: 'Mute / unmute microphones', text: 'Toggles every microphone source.' },
 ];
-const MODS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
-
-/** Build a global-shortcut string ("Control+Shift+F10") from a key event. */
-export function comboFrom(e: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean; key: string; code: string }) {
-  if (MODS.has(e.key)) return null;
-  const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean) as string[];
-  const code = e.code.startsWith('Key') ? e.code.slice(3) : e.code.startsWith('Digit') ? e.code.slice(5) : e.code;
-  const isF = /^F\d{1,2}$/.test(code);
-  if (!mods.length && !isF) return { error: 'Add Ctrl, Alt or Shift so normal typing is not captured.' };
-  return { combo: [...mods, code].join('+') };
-}
+/** Shortcuts people commonly use; picking from the list works even when
+ * another program (for example NVIDIA's Alt+F10) swallows the key press. */
+const COMMON = ['Alt+F10', 'Alt+F9', 'Alt+F8', 'Alt+F12', 'Control+Shift+F10', 'Control+Shift+F9', 'Control+Shift+F8', 'Control+Shift+M', 'Control+Alt+R', 'Control+Alt+S', 'Alt+1', 'Alt+2'];
 
 function HotkeyRow({ item, value, onChange, disabled, duplicate }: { item: typeof HOTKEYS[number]; value: string; onChange: (v: string) => void; disabled: boolean; duplicate: boolean }) {
   const [listening, setListening] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [taken, setTaken] = useState<string | null>(null);
+  // Check right away whether Windows will give REPLAYX this shortcut.
+  const choose = (combo: string) => {
+    onChange(combo); setListening(false); setHint(null); setTaken(null);
+    if (native) api.testHotkey(combo).catch(e => setTaken(errorText(e)));
+  };
   useEffect(() => {
     if (!listening) return;
     const key = (e: KeyboardEvent) => {
@@ -40,16 +41,20 @@ function HotkeyRow({ item, value, onChange, disabled, duplicate }: { item: typeo
       const r = comboFrom(e);
       if (!r) return;
       if ('error' in r) { setHint(r.error ?? null); return; }
-      onChange(r.combo); setListening(false); setHint(null);
+      choose(r.combo);
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
-  }, [listening, onChange]);
+  }, [listening, onChange]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className={`hotkey-row ${duplicate ? 'bad' : ''}`}>
-      <div><strong>{item.label}</strong><small>{hint ?? (duplicate ? 'Used by another action.' : item.text)}</small></div>
+      <div><strong>{item.label}</strong><small className={taken ? 'warn-text' : ''}>{taken ?? hint ?? (duplicate ? 'Used by another action.' : item.text)}</small></div>
       {listening ? <span className="listening">Press keys… <small>Esc to cancel</small></span> : <Kbd combo={value} />}
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setListening(l => !l)}>{listening ? 'Cancel' : 'Change'}</Button>
+      <select className="hotkey-common" aria-label={`Common shortcuts for ${item.label}`} value="" disabled={disabled} onChange={e => e.target.value && choose(e.target.value)}>
+        <option value="">Common…</option>
+        {COMMON.map(c => <option key={c} value={c}>{c.replace('Control', 'Ctrl')}</option>)}
+      </select>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setListening(l => !l)}>{listening ? 'Cancel' : 'Record keys'}</Button>
     </div>
   );
 }
@@ -105,6 +110,7 @@ export function SettingsPage() {
             </div>
           </Card>
           <OverlayCard />
+          <PlaytimeCard />
           <Card tour="tray" title="Startup and window">
             <Toggle label="Start with Windows" checked={draft.launch_at_startup} disabled={active} onChange={v => patch({ launch_at_startup: v })}
               description="Opens REPLAYX in the system tray when you sign in. Capture never starts on its own." />
@@ -119,10 +125,11 @@ export function SettingsPage() {
 
       {tab === 'hotkeys' && (
         <Card title="Global hotkeys" subtitle="Work in games and on the desktop. Applied when you save.">
-          {hotkeyError && <div className="banner warn">{hotkeyError}</div>}
+          {hotkeyError && <div className="banner warn">{hotkeyError}
+            <Button size="sm" variant="ghost" disabled={!native} onClick={() => run('Retrying shortcuts', async () => { await api.retryHotkeys(); })}>Try again</Button></div>}
           {HOTKEYS.map(h => <HotkeyRow key={h.key} item={h} value={draft[h.key]} disabled={active} duplicate={counts[draft[h.key].toLowerCase()] > 1}
             onChange={v => patch({ [h.key]: v } as Partial<Settings>)} />)}
-          <p className="muted small">If another app (for example GeForce Experience) already owns a shortcut, REPLAYX reports it here after saving; the on-screen buttons keep working.</p>
+          <p className="muted small">Press <b>Record keys</b> and the combination, or pick one from <b>Common…</b>. If another app already owns a shortcut (NVIDIA uses Alt+F10 for its own Instant Replay), REPLAYX says so and keeps your previous shortcut working until the new one is free. Shortcuts keep working while REPLAYX is in the tray.</p>
         </Card>
       )}
 
@@ -152,7 +159,7 @@ export function SettingsPage() {
 
       {tab === 'about' && (
         <Card className="about">
-          <div className="about-brand"><span className="brand-mark big" /><div><h2>REPLAY<b>X</b></h2><p>Capture everything. Miss nothing.</p></div><Badge tone="warn">Alpha · v{VERSION}</Badge></div>
+          <div className="about-brand"><BrandMark size={48} /><div><h2>REPLAY<b>X</b></h2><p>{BRAND.tagline}</p></div><Badge tone="warn">Alpha · v{VERSION}</Badge></div>
           <ul className="principles">
             <li><ShieldCheck size={16} />Free and open source. No accounts, ads, subscriptions or telemetry.</li>
             <li><ShieldCheck size={16} />Everything stays on this PC. Capture only runs when you turn it on, and is always shown.</li>
@@ -208,7 +215,7 @@ function OverlayCard() {
   const stack = [
     o.show_replay && <OverlayIcon key="r" icon="replay" color="#a092ff" />,
     o.show_mic && <OverlayIcon key="m" icon="mic" color="#3ed6a0" />,
-    <OverlayIcon key="c" icon="rec" color="#ff4d5e" />,
+    o.show_recording && <span key="c" className="ov-rec"><OverlayIcon icon="rec" color="#ff4d5e" />{o.show_timer && <b>12:34</b>}</span>,
   ].filter(Boolean);
   const bottom = o.position.startsWith('bottom');
   return (
@@ -236,10 +243,58 @@ function OverlayCard() {
             <input type="range" min={30} max={100} step={5} value={o.opacity} disabled={active || !o.enabled} aria-label="Overlay opacity" onChange={e => set({ opacity: Number(e.target.value) })} />
           </Field>
           <Toggle label="Instant Replay icon" checked={o.show_replay} disabled={active || !o.enabled} onChange={v => set({ show_replay: v })} />
-          <Toggle label="Microphone icon" checked={o.show_mic} disabled={active || !o.enabled} onChange={v => set({ show_mic: v })}
-            description="The red recording dot always appears while a recording is being written." />
+          <Toggle label="Microphone icon" checked={o.show_mic} disabled={active || !o.enabled} onChange={v => set({ show_mic: v })} />
+          <Toggle label="Recording indicator" checked={o.show_recording} disabled={active || !o.enabled} onChange={v => set({ show_recording: v })}
+            description="A red dot, shown only while a recording is being written." />
+          <Toggle label="Recording timer" checked={o.show_timer} disabled={active || !o.enabled || !o.show_recording} onChange={v => set({ show_timer: v })}
+            description="How long the recording has been running, next to the red dot." />
         </div>
       </div>
+    </Card>
+  );
+}
+
+/** Playtime tracking: opt-in, pause, idle limit, exclusions, export, clear. */
+function PlaytimeCard() {
+  const { run, toast } = useApp();
+  const [data, setData] = useState<PlaytimeData | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const load = () => { if (native) api.playtimeData().then(setData).catch(() => undefined); };
+  useEffect(load, []);
+  const p = data?.settings;
+  const set = (x: Partial<PlaytimeSettings>) => p && run('Saving', async () => { await api.playtimeConfigure({ ...p, ...x }); load(); });
+  const count = data?.sessions.length ?? 0;
+  return (
+    <Card title="Playtime tracking" subtitle="Optional. Counts how long each game is the window in front while REPLAYX runs. Stored only on this PC, never uploaded.">
+      {!native && <p className="muted small">Available in the desktop app.</p>}
+      {p && <>
+        <Toggle label="Track playtime" checked={p.enabled} onChange={v => set({ enabled: v, paused: false })}
+          description="Only time while REPLAYX is running and tracking is on is counted. Nothing from before is ever added." />
+        <Toggle label="Pause tracking" checked={p.paused} disabled={!p.enabled} onChange={v => set({ paused: v })} />
+        <Field label="Stop counting when idle" hint="Without keyboard or mouse input for this long, the idle time is not counted. Controller-only play may not count as input; choose Never if you mostly use a controller.">
+          <select value={p.idle_minutes} disabled={!p.enabled} onChange={e => set({ idle_minutes: Number(e.target.value) })}>
+            {[0, 5, 10, 15, 30, 60].map(m => <option key={m} value={m}>{m === 0 ? 'Never' : `After ${m} minutes`}</option>)}
+          </select>
+        </Field>
+        {p.excluded.length > 0 && (
+          <div className="chip-row" aria-label="Games not tracked">
+            {p.excluded.map(g => <button key={g} className="chip" title="Track again" onClick={() => set({ excluded: p.excluded.filter(x => x !== g) })}>{g} ×</button>)}
+          </div>
+        )}
+        <div className="row-actions">
+          <span className="muted small">{count} sessions stored.</span>
+          <Button size="sm" icon={Download} disabled={!count} onClick={() => run('Exporting', async () => { const f = await api.playtimeExport(); toast('success', `Saved ${f}`); })}>Export CSV</Button>
+          <Button size="sm" variant="danger" disabled={!count} onClick={() => setConfirm(true)}>Clear history…</Button>
+        </div>
+      </>}
+      {confirm && (
+        <Modal title="Clear playtime history?" onClose={() => setConfirm(false)} actions={<>
+          <Button variant="ghost" onClick={() => setConfirm(false)}>Keep</Button>
+          <Button variant="danger" onClick={() => run('Clearing', async () => { await api.playtimeClear(); setConfirm(false); load(); }, 'Playtime history moved to the Recycle Bin.')}>Clear history</Button>
+        </>}>
+          <p>All {count} tracked sessions will be removed from REPLAYX. The file goes to the Recycle Bin, so you can still restore it. Clips are not affected.</p>
+        </Modal>
+      )}
     </Card>
   );
 }

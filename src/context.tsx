@@ -117,7 +117,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const patch = useCallback((p: Partial<Settings>) => setDraft(d => ({ ...d, ...p })), []);
   const discard = useCallback(() => setDraft(saved), [saved]);
   const save = useCallback(async () => {
-    const ok = await run('Saving settings', async () => { await api.saveSettings(draft); return true; }, 'Settings saved.');
+    const ok = await run('Saving settings', async () => {
+      const stored = await api.saveSettings(draft);
+      // A shortcut another program owns was not taken: say which one stayed.
+      const keys = ['replay_hotkey', 'recording_hotkey', 'pause_hotkey', 'mute_hotkey'] as const;
+      const refused = keys.filter(k => stored[k] !== draft[k]);
+      if (refused.length) toast('error', `${refused.map(k => draft[k].replace('Control', 'Ctrl')).join(', ')} is already used by another application. Change that application's hotkey or choose another shortcut. Your previous shortcut still works.`);
+      return true;
+    }, 'Settings saved.');
     if (ok) {
       // Re-read so the UI reflects exactly what the engine stored.
       const fresh = await api.settings().catch(() => draft);

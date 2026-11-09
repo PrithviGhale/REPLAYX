@@ -9,6 +9,13 @@ import { Section } from './shared';
 import { ReplaySwitch } from '../ReplaySwitch';
 
 const LENGTHS = [30, 60, 180, 300, 600, 900, 1800];
+/** Replay presets: length plus a disk budget with 30% headroom. */
+const REPLAY_PRESETS = [
+  { id: 'short', label: 'Short clips', seconds: 30, text: 'The last 30 seconds: quick highlights, least disk space.' },
+  { id: 'balanced', label: 'Balanced', seconds: 120, text: 'The last 2 minutes: enough for most plays.', recommended: true },
+  { id: 'long', label: 'Long sessions', seconds: 600, text: 'The last 10 minutes: whole rounds and matches. Needs more disk space.' },
+] as const;
+const budgetFor = (bytes: number) => Math.min(102400, Math.max(512, Math.ceil((bytes * 1.3) / (256 * 1024 * 1024)) * 256));
 
 export function ReplayPage() {
   const { draft, patch, run, refreshClips, busy } = useApp();
@@ -39,7 +46,21 @@ export function ReplayPage() {
       </Card>
       <div className="grid-2">
         <Card title="Replay length" subtitle="How much of the past a single save keeps.">
-          <Segmented label="Replay length" value={draft.replay_seconds} disabled={active} onChange={v => patch({ replay_seconds: v })}
+          <div className="preset-cards" role="radiogroup" aria-label="Replay preset">
+            {REPLAY_PRESETS.map(p => {
+              const on = draft.replay_seconds === p.seconds;
+              return (
+                <button key={p.id} role="radio" aria-checked={on} className={`preset-card ${on ? 'on' : ''}`} disabled={active}
+                  onClick={() => patch({ replay_seconds: p.seconds, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * p.seconds)) })}>
+                  <strong>{p.label}{'recommended' in p && <em className="rec-tag">Recommended</em>}</strong>
+                  <span>{durationLabel(p.seconds)} · about {bytes(bytesPerSecond * p.seconds)} on disk</span>
+                  <small>{p.text}</small>
+                </button>
+              );
+            })}
+          </div>
+          <span className="field-label">Custom length</span>
+          <Segmented label="Replay length" value={draft.replay_seconds} disabled={active} onChange={v => patch({ replay_seconds: v, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * v)) })}
             options={LENGTHS.map(n => ({ value: n, label: durationLabel(n) }))} />
           <div className="buffer-bar" aria-label="Current buffer">
             <span style={{ width: `${Math.min(100, (s.buffer / draft.replay_seconds) * 100)}%` }} />

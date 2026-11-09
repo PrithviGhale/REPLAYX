@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AudioLines, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, SquareStack, X } from 'lucide-react';
+import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
 import { native, VERSION } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
@@ -12,12 +12,14 @@ import { ReplayPage } from './pages/Replay';
 import { CapturePage } from './pages/Capture';
 import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
+import { GamesPage } from './pages/Games';
 import { PerformancePage } from './pages/Performance';
 import { SettingsPage } from './pages/Settings';
 import { QuitPrompt } from './QuitPrompt';
+import { BrandMark } from './brand';
 import { Tour } from './Tour';
 
-export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'performance' | 'settings';
+export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings';
 const NAV: { group: string; items: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] }[] = [
   { group: 'Capture', items: [
     { id: 'home', label: 'Home', icon: Home },
@@ -25,7 +27,7 @@ const NAV: { group: string; items: { id: Page; label: string; icon: React.Compon
     { id: 'capture', label: 'Video', icon: MonitorPlay },
     { id: 'audio', label: 'Audio', icon: AudioLines },
   ] },
-  { group: 'Library', items: [{ id: 'clips', label: 'Clips', icon: Film }] },
+  { group: 'Library', items: [{ id: 'clips', label: 'Clips', icon: Film }, { id: 'games', label: 'Games', icon: Gamepad2 }] },
   { group: 'System', items: [
     { id: 'performance', label: 'Performance', icon: Gauge },
     { id: 'settings', label: 'Settings', icon: Settings2 },
@@ -125,7 +127,7 @@ export function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark" aria-hidden="true"><SquareStack size={16} /></span><span>REPLAY<b>X</b></span></div>
+        <div className="brand"><BrandMark size={28} /><span>REPLAY<b>X</b></span></div>
         <nav aria-label="Main">
           {NAV.map(g => (
             <div className="nav-group" key={g.group}>
@@ -161,6 +163,7 @@ export function App() {
           {page === 'capture' && <CapturePage />}
           {page === 'audio' && <AudioPage />}
           {page === 'clips' && <ClipsPage />}
+          {page === 'games' && <GamesPage go={setPage} />}
           {page === 'performance' && <PerformancePage />}
           {page === 'settings' && <SettingsPage />}
           </PageBoundary>

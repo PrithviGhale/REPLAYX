@@ -24,6 +24,8 @@ export function splashDone() {
   const el = node();
   if (!el) return;
   el.classList.add('out');
+  // The dashboard rises in as the splash fades (a crossfade, no extra wait).
+  document.documentElement?.classList?.add('app-enter');
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   window.setTimeout(() => el.remove(), reduce ? 0 : 320);
 }

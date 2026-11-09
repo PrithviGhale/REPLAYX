@@ -89,6 +89,13 @@ mockIPC((cmd, args) => {
       { pid: 19036, name: 'Spotify.exe', path: '', started: 1, active: false }, { pid: 24240, name: 'Browser.exe', path: '', started: 1, active: false },
     ];
     case 'app_icon': return null;
+    case 'playtime_data': {
+      const day = 864e5, now = Date.now();
+      const games = ['Roblox', 'Fortnite', 'Valorant', 'Counter-Strike 2'];
+      const sessions = Array.from({ length: 40 }, (_, i) => ({ id: String(i), game: games[i % 4 === 3 ? 1 : i % 3], start: now - (i % 20) * day - 3600e3 * (2 + (i % 5)), seconds: 900 + ((i * 1373) % 5400), source: 'preview' }));
+      return { sessions, current: { game: 'Roblox', start: now - 1800e3, seconds: 1800 }, settings: { enabled: true, paused: false, idle_minutes: 15, excluded: [] } };
+    }
+    case 'game_art': return Object.fromEntries((a.games as string[]).map(g => [g, { custom: null, icon: null, id: null }]));
     case 'voice_presets': return { raw: { ...CLEAR_VOICE, preset: 'raw', high_pass: false, suppression: 'off', compressor: false, mud_db: 0, presence_db: 0, air_db: 0 }, clear: CLEAR_VOICE };
     case 'audio_test': return { seconds: 6.2, packets: 620, peak: 0.42, rms: 0.08, discontinuities: 0, device_glitches: 0, timestamp_errors: 0, drift_correction_ppm: 0, measured_device_clock_ppm: 0, endpoint_mix_format: '48000 Hz · 2 ch · float' };
     default: return null;

@@ -1,5 +1,5 @@
 /** First-run tour: steps and tooltip placement (pure, unit-tested). */
-export type TourPage = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'performance' | 'settings';
+export type TourPage = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings';
 export type TourStep = {
   id: string;
   /** Page to show first (the tour navigates; it never presses anything). */

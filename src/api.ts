@@ -37,11 +37,19 @@ export type Settings = {
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
+  playtime: PlaytimeSettings;
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
   enabled: boolean; position: OverlayPosition; opacity: number; show_replay: boolean; show_mic: boolean;
+  show_recording: boolean; show_timer: boolean;
 };
+export type PlaytimeSettings = { enabled: boolean; paused: boolean; idle_minutes: number; excluded: string[] };
+export type PlaySession = { id: string; game: string; start: number; seconds: number; source: string };
+export type PlaytimeData = {
+  sessions: PlaySession[]; current: { game: string; start: number; seconds: number } | null; settings: PlaytimeSettings;
+};
+export type GameArt = { custom: string | null; icon: string | null; id: string | null };
 export type Status = {
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
   buffer_seconds: number; buffer_bytes: number; free_bytes: number; frames: number; dropped_frames: number;
@@ -85,7 +93,17 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 export const api = {
   status: () => call<Status>('status'),
   settings: () => call<Settings>('settings'),
-  saveSettings: (settings: Settings) => call<void>('save_settings', { settings }),
+  /** Returns the settings as stored, with the shortcuts actually active. */
+  saveSettings: (settings: Settings) => call<Settings>('save_settings', { settings }),
+  testHotkey: (combo: string) => call<void>('test_hotkey', { combo }),
+  retryHotkeys: () => call<string | null>('retry_hotkeys'),
+  gameArt: (games: string[]) => call<Record<string, GameArt>>('game_art', { games }),
+  gameArtSet: (game: string, image: string) => call<void>('game_art_set', { game, image }),
+  gameArtClear: (game: string) => call<void>('game_art_clear', { game }),
+  playtimeData: () => call<PlaytimeData>('playtime_data'),
+  playtimeConfigure: (settings: PlaytimeSettings) => call<void>('playtime_configure', { settings }),
+  playtimeExport: () => call<string>('playtime_export'),
+  playtimeClear: () => call<void>('playtime_clear'),
   action: <T = unknown>(name: ActionName) => call<T>('action', { name }),
   setMix: (index: number, volume: number, muted: boolean) => call<void>('set_mix', { index, volume, muted }),
   capabilities: () => call<Caps>('capabilities'),
@@ -134,9 +152,10 @@ export const previewSettings: Settings = {
   fps: 60, encoder: 'auto', codec: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
-  close_to_tray: false, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 2, scale_policy: 'smooth',
-  overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true },
+  close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
+  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 4, scale_policy: 'smooth',
+  overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
+  playtime: { enabled: false, paused: false, idle_minutes: 15, excluded: [] },
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 

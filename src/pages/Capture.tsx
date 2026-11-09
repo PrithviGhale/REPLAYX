@@ -89,6 +89,10 @@ export function CapturePage() {
   const codec = requestedCodec(draft.codec);
   const rate = ratePlan(draft.preset, draft.bitrate_mbps, draft.fps, p.width, p.height, codec);
   const codecAvailable = (c: string) => c === 'auto' || c === 'h264' || !caps?.codecs || caps.codecs.some(x => x.codec === c && x.encoders.length > 0);
+  // Recommended preset from the hardware: a GPU encoder handles Balanced
+  // easily; encoding on the CPU is lighter with Performance.
+  const hardware = !!caps?.encoders.some(e => e.available && /nvenc|qsv|amf/.test(e.name));
+  const recommended = !caps || hardware ? 'balanced' : 'performance';
   const nvenc = draft.encoder === 'h264_nvenc' || (draft.encoder === 'auto' && !!caps?.encoders.find(e => e.name === 'h264_nvenc' && e.available));
   const fellBack = active && !!live.codec && live.codec !== codec;
   const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
@@ -210,7 +214,7 @@ export function CapturePage() {
         <Field label="Quality">
           <Segmented label="Quality preset" value={draft.preset} disabled={active}
             onChange={v => patch(v === 'custom' ? { preset: v, bitrate_mbps: mbps } : { preset: v })}
-            options={PRESETS.map(x => ({ value: x.value, label: x.label, hint: x.text }))} />
+            options={PRESETS.map(x => ({ value: x.value, label: x.value === recommended ? <>{x.label}<em className="rec-tag">Recommended</em></> : x.label, hint: x.text }))} />
         </Field>
         {fellBack && <div className="banner warn">The GPU driving this display can't encode {codecName[codec]}, so this capture is recording {codecName[live.codec] ?? live.codec}. Choose H.264 to hide this message.</div>}
         <p className="preset-note">

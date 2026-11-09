@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALL, categories, filterClips, nextSelection, removeClip, upsertClip } from '../src/library.ts';
+import { ALL, categories, filterClips, gameTiles, nextSelection, removeClip, upsertClip } from '../src/library.ts';
 
 const clip = (id: string, kind = 'Replay', modified = 1, bytes = 1, duration = 10) => {
   const [category, name] = id.includes('/') ? id.split('/') : ['Unsorted', id];
@@ -52,4 +52,30 @@ test('a moved clip (game correction) replaces its old entry', () => {
   const after = upsertClip(removeClip(library, 'Fortnite/Fortnite_2026-11-07_15-30-22.mkv'), moved);
   assert.equal(after.filter(c => c.name === moved.name).length, 1);
   assert.equal(categories(after).find(c => c.name === 'Roblox')?.count, 2);
+});
+
+test('game tiles exist only for games that have clips, and follow deletions', () => {
+  const tiles = gameTiles(library);
+  assert.deepEqual(tiles.map(t => [t.name, t.count]), [['Fortnite', 2], ['Roblox', 1], ['Desktop', 1], ['Unsorted', 1]]);
+  assert.equal(tiles[0].seconds, 610, 'total clip duration');
+  assert.ok(!tiles.some(t => t.name === 'Minecraft'), 'known but unrecorded games get no tile');
+  const after = removeClip(library, 'Roblox/Roblox_2026-11-07_16-10-45.mkv');
+  assert.ok(!gameTiles(after).some(t => t.name === 'Roblox'), 'last clip deleted: tile gone');
+  assert.equal(gameTiles(after.filter(c => c.category === 'Fortnite')).length, 1);
+  assert.deepEqual(gameTiles([]), []);
+});
+
+test('more sorts and a date range', () => {
+  assert.deepEqual(filterClips(library, ALL, 'all', '', 'game-az').map(c => c.category).slice(0, 3), ['Desktop', 'Fortnite', 'Fortnite']);
+  assert.equal(filterClips(library, ALL, 'all', '', 'game-za')[0].category, 'Unsorted');
+  assert.equal(filterClips(library, ALL, 'all', '', 'type')[0].kind, 'Recording');
+  const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dated = [
+    { ...library[0], id: 'a', modified: Math.floor(+new Date(2026, 10, 1, 12) / 1000) },
+    { ...library[1], id: 'b', modified: Math.floor(+new Date(2026, 10, 5, 23, 59) / 1000) },
+    { ...library[2], id: 'c', modified: Math.floor(+new Date(2026, 10, 9, 0, 1) / 1000) },
+  ];
+  const inRange = filterClips(dated, ALL, 'all', '', 'old', { from: day(new Date(2026, 10, 2)), to: day(new Date(2026, 10, 5)) });
+  assert.deepEqual(inRange.map(c => c.id), ['b'], 'whole local days, inclusive');
+  assert.equal(filterClips(dated, ALL, 'all', '', 'old', { from: '2026-11-09' }).length, 1);
 });

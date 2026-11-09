@@ -113,7 +113,8 @@ export function MicrophoneCard() {
         <div className="voice-head"><Wand2 size={15} /><strong>Voice Enhancer</strong>
           <span className="muted small">{v.preset === 'custom' ? 'Your own settings (Fine-tune below).' : PRESETS.find(p => p.value === v.preset)?.hint}</span></div>
         <div className="voice-presets">
-          <Segmented label="Voice Enhancer preset" value={v.preset} disabled={locked} onChange={usePreset} options={presetOptions} />
+          <Segmented label="Voice Enhancer preset" value={v.preset} disabled={locked} onChange={usePreset}
+            options={presetOptions.map(o => (o.value === 'clear' ? { ...o, label: <>{o.label}<em className="rec-tag">Recommended</em></> } : o))} />
           {draft.voice_presets.length > 0 && (
             <select className="voice-saved" aria-label="Your presets" value="" disabled={locked}
               onChange={e => { const s = draft.voice_presets[Number(e.target.value)]; if (s) update({ voice: { ...s.voice, preset: 'custom' }, boost_db: s.boost_db }); }}>
