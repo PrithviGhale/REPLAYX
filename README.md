@@ -25,7 +25,7 @@
 <p align="center">
   <img src="docs/images/home.png" alt="REPLAYX home screen with Instant Replay on, a detected game, capture details and recent clips" width="900">
 </p>
-<p align="center"><sub>Screenshots show the real 0.3.0-alpha.1 interface with sample data.</sub></p>
+<p align="center"><sub>Screenshots show the real REPLAYX interface with sample data.</sub></p>
 
 > [!IMPORTANT]
 > **REPLAYX is alpha software.** Capture, saving and the clip library are tested on real hardware (see [VALIDATION](docs/VALIDATION.md)), but it has been used on few machines so far, and builds are not code-signed yet, so Windows SmartScreen may warn. Read [Known limitations](docs/KNOWN_LIMITATIONS.md) before relying on it for something you can't replay.
@@ -74,7 +74,10 @@ Noise suppression (Off, Light, Balanced, Strong) uses **RNNoise**. In our tests 
 System sound, individual apps (game, Discord, music) and your microphone each get their own track, plus a full mix on track 1 so every player plays everything. New microphones and headsets are picked up automatically when you plug them in.
 
 ### Game detection and clip folders
-REPLAYX recognises the game in front (Fortnite, Roblox, Valorant, Minecraft, Counter-Strike 2 and games from Steam, Epic and Xbox folders) by process identity only. It never injects into or reads from games. Clips are saved as `Videos\REPLAYX\<Game>\<Game>_2026-11-07_21-30-12.mkv`. Browse by game, search, rename, change the game, export to MP4 or delete to the Recycle Bin.
+REPLAYX recognises 140 games (Fortnite, Roblox, Valorant, Minecraft, Counter-Strike 2, Apex, Call of Duty, Overwatch 2, League of Legends, Genshin Impact and many more, plus games in Steam, Epic, Xbox and other store folders) by process identity only. It never injects into or reads from games. Clips are saved as `Videos\REPLAYX\<Game>\<Game>_2026-11-07_21-30-12.mkv`. Browse *All clips* or *By game* tiles, sort and filter by game, type and date, search, rename, change the game, export to MP4 or delete to the Recycle Bin. Each game shows its own icon.
+
+### Games and playtime
+An optional, local playtime tracker: the **Games** page shows how long you played each game today, yesterday, this week, this month or any dates you choose, with a daily chart, your most-played games and a page per game with its sessions and clips. It counts only time while the game is the window in front and REPLAYX is running, skips idle stretches and sleep, and stays on your PC. Turn it on (or off, pause, exclude games, export or clear it) whenever you like.
 
 ### Status overlay
 Small icons in a corner of your screen show Instant Replay, your microphone and a red dot while recording, over games, apps and the desktop. You see them while you play; Windows keeps them **out of your recordings** (verified on captured frames). Corner, opacity and icons are configurable.
@@ -106,7 +109,7 @@ REPLAYX can live in the system tray: Instant Replay, recording and shortcuts kee
 
 | Action | Default |
 | --- | --- |
-| Save replay | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> |
+| Save replay | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> (Alt+F10 if no other app uses it) |
 | Start / stop recording | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> |
 | Instant Replay on / off | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F8</kbd> |
 | Mute microphone | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> |

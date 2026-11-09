@@ -1,3 +1,43 @@
+# Validation — 0.3.1-alpha.1 (November 8, 2026)
+
+Development laptop. Roblox was open during the final checks, so nothing that shows windows or takes the foreground was run then (no overlay test, no full-screen recording benchmark, no app launch); builds and tests ran at idle CPU priority. No microphone was opened. No recordings or recovery sessions were touched; test data lived in temporary folders.
+
+## Verified
+
+| Check | Result |
+| --- | --- |
+| Thumbnail mix-up (root cause) | Reproduced in code: `Thumb` kept its first image and skipped loading for a new clip. Fixed; tests cover rapid switching with a late answer for the previous clip, shared requests, retries and invalidation on rename/move/replace. |
+| New thumbnail generator | Real clip: 0.2 s per thumbnail (representative of 30 frames, square pixels, 640 px). |
+| Tray root cause | The user's settings had `close_to_tray: false` (the old default), so closing quit the app. Default and one-time migration now enable it; click-to-open and menu wired. |
+| Alt+F10 | Parses and records as `Alt+F10`; a refused shortcut keeps the previous one with the requested message (unit-tested planner). Registration against the real NVIDIA App is a user test. |
+| Game catalog | 140 entries validated (unique ids, folder-safe names, lower-case executables, generic names need folder evidence); disambiguation and launcher exclusion tests. |
+| Playtime tracker | Unit tests: counting, game switches, background/alt-tab, short switches, sleep gaps, idle removal and opt-out, disabled/paused/excluded, crash recovery exactly once, CSV export. Frontend: local-midnight split, daylight-saving day length, periods, totals, daily series. |
+| Overlay renderer | 26 px tiles (from 32), timer digits, corner alignment, DPI scaling (unit tests and a rendered PNG). |
+| Scrolling | 24/24 page/size combinations (now including Games). |
+| Executable version | `replayx.exe` ProductVersion and FileVersion 0.3.1-alpha.1; installer file name matches. |
+
+## Automated
+
+Rust 134 tests, frontend 34 tests, Clippy `-D warnings`, rustfmt, TypeScript, production build, NSIS installer.
+
+## Build artifacts (not installed, not published)
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` | 16,840,704 | `a15498c8a5765a13c3c029d525f73eaed860b17ebf1105f5fe33408156cdef99` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.3.1-alpha.1_x64-setup.exe` | 60,716,159 | `90d78c9fe79279155fe7a092491c08d6ab2ec5fa1ee47ece6045cffc0303bfdc` |
+
+## Pending (needs the user, or a moment with no game running)
+
+- Tray icon visible after closing (it may sit in the hidden-icons area), reopening by click, Quit from the tray.
+- Alt+F10 with the NVIDIA App running (expected: the conflict message) and after freeing it in NVIDIA (expected: registered); shortcuts while REPLAYX is in the tray; persistence across restarts.
+- Correct thumbnail when switching between real recordings; By game tiles and counts with real clips.
+- Playtime with real games (opt in on the Games page, play, alt-tab, check totals).
+- Game artwork appearing for games seen with this version.
+- Overlay exclusion re-check with the smaller tiles (`replayx-cli overlay-test`) and a 60 fps recording regression run (`scripts/overhead-bench.py`); both use the same mechanisms as 0.3.0-alpha.1, which passed.
+
+---
+
 # Validation — 0.3.0-alpha.1 (November 8, 2026)
 
 Same laptop (RTX 4070 Laptop GPU driving the 250 Hz panel during these tests). The user was away for the unattended parts. **No microphone was opened** during development or testing: voice processing was evaluated with Windows text-to-speech and synthetic noise. No game was launched or touched; capture tests used REPLAYX's own game proxy and throw-away folders. The user's settings file was backed up before each start-up test and is byte-identical afterwards.

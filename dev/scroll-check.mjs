@@ -50,7 +50,7 @@ ws.addEventListener('message', m => { const msg = JSON.parse(m.data); pending.ge
 const send = (method, params = {}) => new Promise(resolve => { const n = ++id; pending.set(n, resolve); ws.send(JSON.stringify({ id: n, method, params })); });
 const js = async expression => (await send('Runtime.evaluate', { expression, returnByValue: true })).result?.result?.value;
 
-const pages = ['home', 'replay', 'capture', 'audio', 'clips', 'performance', 'settings'];
+const pages = ['home', 'replay', 'capture', 'audio', 'clips', 'games', 'performance', 'settings'];
 const sizes = [[1280, 820], [1000, 640], [820, 560]];
 let failures = 0;
 for (const [w, h] of sizes) {

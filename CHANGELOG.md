@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.1-alpha.1 — Games and playtime, clip library, correct thumbnails, tray, Alt+F10
+
+Not published. User-facing notes: [docs/release-notes/v0.3.1-alpha.1.md](docs/release-notes/v0.3.1-alpha.1.md).
+
+- **Fixed: a clip showed another clip's thumbnail.** The thumbnail component kept the first image it loaded and skipped loading once it had one, so the details panel (one component reused for every selected clip) kept the previous clip's picture; a slow request could also overwrite a newer one. Each image is now tied to its clip (id, size, modification time), a different clip shows a placeholder until its own image arrives, and late answers for an old clip are ignored. The thumbnail cache no longer truncates long clip ids (two clips could share a cached image) and is invalidated when a clip is renamed, moved or replaced.
+- **Better thumbnails:** the most representative of 30 frames about a third into the clip (not a black first frame), square pixels (Smooth-mode recordings are no longer squashed), 640 px wide.
+- **Clips library:** *All clips* and *By game*. Cards show the thumbnail, game icon and name, date, duration, resolution, FPS, size and type. Sort by newest, oldest, game A–Z or Z–A, length, size or type; filter by game, type and date range; search by game or file name; your choices are remembered. Game tiles exist only for games you have clips of and update when clips are saved, deleted or moved.
+- **Games and playtime (new, opt-in):** a Games page that tracks how long each game is the window in front while REPLAYX runs. Time in another window, sleep and idle stretches (no keyboard or mouse input, 15 minutes by default, adjustable or off) are not counted. Periods: today, yesterday, last 7 days, this week, last 30 days, this month, all time or custom dates; daily chart, most played, and a page per game (total, today, yesterday, week, month, last played, clips, footage, recent sessions). Stored only on this PC; pause, exclude games, export CSV or clear (to the Recycle Bin) in Settings. Nothing from before you turn it on is counted.
+- **Game detection:** a structured catalog of 140 games (executable aliases, folder requirements for generic names such as THE FINALS' `Discovery.exe`) compiled into the app, plus store-folder fallback for unknown games. Minecraft Java now files as *Minecraft Java Edition*.
+- **Game artwork without downloads:** the icon of the game's own executable (high resolution), or an image you choose; otherwise a drawn tile.
+- **Fixed: no tray icon after closing.** *Minimize to tray when closing* was off by default, so closing quit REPLAYX. It is now on by default (existing settings are switched once); clicking the tray icon opens REPLAYX, right-click shows the menu (Open REPLAYX, Instant Replay, Save replay, Start/Stop recording, microphone, Open Clips, Settings, Quit). The first time, a notice says *REPLAYX is still running in the background. Open it from the system tray.*
+- **Alt+F10 (and any shortcut another program owns):** pick it from *Common…* even when the key press is swallowed (NVIDIA's Instant Replay uses Alt+F10). REPLAYX checks at once whether Windows will give it the shortcut; if another app owns it, it says *Alt+F10 is already used by another application. Change that application's hotkey or choose another shortcut.* and keeps your previous working shortcut. *Try again* re-registers after you free it.
+- **Overlay:** about 19% smaller, a little more transparent; new options for the recording indicator and a recording timer.
+- **Presets:** Instant Replay *Short clips*, *Balanced* (recommended) and *Long sessions* with real disk estimates; *Recommended* marks the video preset suited to your hardware and the *Clear* voice preset.
+- **Startup:** smoother hand-off from the startup screen to the dashboard; branding is centralised so the approved logo (pending) can be applied in one pass (docs/BRANDING.md).
+
 ## 0.3.0-alpha.1 — Voice Enhancer, startup screen, first-run tour, release preparation
 
 First public preview candidate (not yet published). User-facing notes: [docs/release-notes/v0.3.0-alpha.1.md](docs/release-notes/v0.3.0-alpha.1.md).
