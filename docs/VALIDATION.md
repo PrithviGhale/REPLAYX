@@ -1,3 +1,24 @@
+# Validation — 0.3.1-alpha.3 (November 9, 2026)
+
+New logo, playtime on by default, lower background impact on games. No game was running; builds ran at below-normal priority; REPLAYX was not launched (the user's settings and data were not touched).
+
+| Check | Result |
+| --- | --- |
+| Logo | Master `branding/replayx-logo-1024.png` cut from the owner's image (background flood-filled from the corners; inside area matches the rounded square, no artwork altered). Icons regenerated (`npx tauri icon`). Seen in headless Chrome: startup screen, sidebar, About. Icon read back from the built `replayx.exe` and from the installer (which previously had NSIS's default icon; `installerIcon` set). |
+| Playtime default | `PlaytimeSettings::default().enabled = true`; settings v5 switches it on once, and a later choice to turn it off is kept (unit test). |
+| Background tick cost | `replayx-cli tick-cost`: 17.2–17.8 µs per once-a-second check (foreground process, game classification, idle time) ≈ 0.002% of one core. |
+| Helpers below normal priority | Probe, segment checks, clip join, playback checks, thumbnails, export, full decode: `BELOW_NORMAL_PRIORITY_CLASS`. Capture/encoder processes unchanged. |
+| Hidden page | Hide to tray, `--background` start and minimise now call WebView2 `SetIsVisible(false)` (wry hides only its child container); every show path makes it visible again. Not yet observed in the running app. |
+
+Automated: Rust 136 tests, frontend 34 tests, Clippy `-D warnings`, rustfmt, TypeScript, production build, NSIS installer.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target/release/replayx.exe` (ProductVersion 0.3.1-alpha.3) | 17,035,264 | `6a77ec5bcef6f2cc96804b428ce6f7576c3f08885cc9b87bc6049d67fbdb4a7b` |
+| `src-tauri/target/release/bundle/nsis/REPLAYX_0.3.1-alpha.3_x64-setup.exe` | 61,105,995 | `f634801715d1a80f1776d897a00188ee25f301e6c4e93188a37541afa1e3e604` |
+
+**Needs you:** install, then check the icon in the taskbar, tray and Alt-Tab; the pop-ups; that the Games page counts a game session; and that with REPLAYX in the tray your game's FPS is the same as without it.
+
 # Validation — 0.3.1-alpha.2 (November 8, 2026)
 
 Adds the capture pop-ups (Recording started, Instant Replay saved, Recording saved, Save failed). No game was running; builds ran at below-normal priority. No microphone was opened and no recordings were made or touched.

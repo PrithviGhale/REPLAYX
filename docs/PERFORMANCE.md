@@ -28,6 +28,8 @@ Synthetic hard scene: H.264 VBR 16.55 Mb/s → VMAF 84.0; H.264 CQ 28 → 22.0 M
 
 Conclusions: constant quality with a cap beats a fixed average (same picture for 12% less on real gameplay; more bits where a scene needs them, never above the cap). AV1 needs about 25% fewer bits than H.264 for the same VMAF. HEVC on this GPU with these settings is not meaningfully smaller than H.264, so the app does not promise smaller HEVC files. H.264 stays the default because it plays everywhere.
 
+**Background cost while you play (0.3.1-alpha.3).** With capture off, REPLAYX does one check a second (which program is in front, which game it is, keyboard/mouse idle time): about 17 µs per check on this laptop (`replayx-cli tick-cost`), ≈0.002% of one CPU core. Playtime writes a small checkpoint at most once a minute. Hidden in the tray or minimised, the window's page is marked hidden (no drawing, a status check every 2 s). Everything after capture (segment checks, joining, playback checks, thumbnails, export) runs below normal priority; the capture and encoder processes keep normal CPU and high GPU priority, which the measurements below show is what keeps recordings free of repeated frames.
+
 Game-FPS impact and smoothness (`scripts/overhead-bench.py`, the GPU-heavy game proxy full screen on the RTX 4070, system audio captured, Balanced 1080p60, 20 s per run, one run each):
 
 | Codec | Game FPS without → with REPLAYX | Cost | 1% low | Repeated frames in clip |

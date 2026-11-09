@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-alpha.3 — New logo, playtime on by default, lighter on games
+
+Not published.
+
+- **New logo** everywhere: the app and installer icons, taskbar, tray, Alt-Tab, the startup screen, the sidebar, About and the README banner.
+- **Playtime tracking is on by default.** No sign-up step: the Games page counts your playtime from the start (existing settings are switched on once). It stays local; turn it off, pause it, exclude games, export or clear it in Settings.
+- **Fixed: the hidden window kept working during games.** Hiding REPLAYX to the tray (or minimising it) hid the window but not its page, which kept refreshing up to 4 times a second and redrawing while you played. The page is now told it's hidden, so it slows to a status check every 2 seconds and draws nothing until you open it.
+- **Saves and thumbnails no longer compete with your game for CPU.** Everything that runs after capture (checking footage, joining it into a clip, playback checks, thumbnails, MP4 export) now runs below normal priority, so Windows always serves the game first. Capture and encoding keep their priority, so recordings stay smooth.
+- The Games page no longer re-reads your playtime history every 10 seconds while REPLAYX is hidden.
+- Measured: the background check that powers playtime and game detection takes about 17 µs per second (≈0.002% of one CPU core).
+
 ## 0.3.1-alpha.2 — Pop-ups for recording started and clips saved
 
 Not published.

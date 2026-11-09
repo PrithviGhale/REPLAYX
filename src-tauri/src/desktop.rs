@@ -1053,9 +1053,22 @@ async fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
     *state.updating.lock().unwrap() = false;
     result
 }
+/// Tell WebView2 whether the page can be seen. Hiding or minimising the
+/// window alone doesn't: the page kept polling 4 times a second and redrawing
+/// while REPLAYX sat in the tray during a game. Marked hidden, it throttles
+/// timers and stops drawing (the status poll slows to every 2 s). Only the
+/// web content's child window is hidden; the window and taskbar entry are not.
+fn set_page_visible(w: &tauri::WebviewWindow, visible: bool) {
+    static HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if HIDDEN.swap(!visible, std::sync::atomic::Ordering::Relaxed) == visible {
+        let page: &tauri::Webview = w.as_ref();
+        let _ = if visible { page.show() } else { page.hide() };
+    }
+}
 /// Bring the main window forward, optionally on a page.
 fn show_main(app: &tauri::AppHandle, page: Option<&str>) {
     if let Some(w) = app.get_webview_window("main") {
+        set_page_visible(&w, true);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -1161,6 +1174,7 @@ pub fn run() {
         // the data-directory lock.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
+                set_page_visible(&w, true);
                 let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
@@ -1248,8 +1262,10 @@ pub fn run() {
                 let _ = winutil::set_autostart(true);
             }
             // Sign-in launches start in the tray; everything else shows the window.
-            if !std::env::args().any(|a| a == "--background") {
-                if let Some(w) = app.get_webview_window("main") {
+            if let Some(w) = app.get_webview_window("main") {
+                if std::env::args().any(|a| a == "--background") {
+                    set_page_visible(&w, false);
+                } else {
                     let _ = w.show();
                 }
             }
@@ -1517,11 +1533,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Minimised or restored: the page throttles itself while it can't be seen.
+            if let tauri::WindowEvent::Resized(_) = event {
+                if let Some(w) = window.app_handle().get_webview_window("main") {
+                    if w.is_visible().unwrap_or(false) {
+                        set_page_visible(&w, !w.is_minimized().unwrap_or(false));
+                    }
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
                 api.prevent_close();
                 if state.engine.settings().close_to_tray {
                     let _ = window.hide();
+                    if let Some(w) = window.app_handle().get_webview_window("main") {
+                        set_page_visible(&w, false);
+                    }
                     if !state.engine.settings().tray_hint_shown {
                         state.engine.mark_tray_hint_shown();
                         // One-time explanation.

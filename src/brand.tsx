@@ -1,23 +1,16 @@
-import { SquareStack } from 'lucide-react';
+import logo from './assets/replayx-logo.png';
 
-/** REPLAYX branding in one place. The approved final logo has not been
- * supplied yet; this is the existing mark. To apply the new logo, follow
- * docs/BRANDING.md: replace `BrandMark` below, the BRAND-MARK block in
- * index.html (startup screen) and the app icons (`npx tauri icon`). */
+/** REPLAYX branding in one place (see docs/BRANDING.md): this mark, the
+ * BRAND-MARK block in index.html (startup screen), the app icons generated
+ * from branding/replayx-logo-1024.png (`npx tauri icon`) and the README banner. */
 export const BRAND = {
   name: 'REPLAYX',
   tagline: 'Capture everything. Miss nothing.',
-  /** The final logo is pending from the owner (see docs/BRANDING.md). */
-  logoPending: true,
 } as const;
 
-/** The app mark at a given size (sidebar, About, tour). */
+/** The app logo at a given size (sidebar, About). */
 export function BrandMark({ size = 28 }: { size?: number }) {
-  return (
-    <span className="brand-mark" style={{ width: size, height: size, borderRadius: Math.round(size * 0.29) }} aria-hidden="true">
-      <SquareStack size={Math.round(size * 0.57)} />
-    </span>
-  );
+  return <img className="brand-mark" src={logo} width={size} height={size} alt="" aria-hidden="true" draggable={false} />;
 }
 
 /** "REPLAY" + violet "X". */

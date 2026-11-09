@@ -1,6 +1,6 @@
 # Branding and the new logo
 
-**Status: the approved final logo has not been supplied yet.** REPLAYX keeps its existing mark until it is. Nothing in the app invents or substitutes a logo.
+**Status: applied in 0.3.1-alpha.3.** The approved logo (supplied by the owner on November 8, 2026) is the master file `branding/replayx-logo-1024.png`: the owner's artwork with the black surround made transparent along the rounded square's own edge, nothing redrawn. The same image is used at every size; no simplified small variant was supplied, and at 32 × 32 the eye and play symbol stay recognisable. To change the logo, follow the steps below with a new master file.
 
 Everything that shows the mark goes through a few places, so the new logo can be applied in one pass.
 

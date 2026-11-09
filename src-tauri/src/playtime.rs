@@ -38,7 +38,7 @@ pub struct PlaytimeSettings {
 impl Default for PlaytimeSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             paused: false,
             idle_minutes: 15,
             excluded: Vec::new(),
@@ -384,7 +384,10 @@ mod tests {
             60,
             Some("Roblox"),
             0,
-            &PlaytimeSettings::default(),
+            &PlaytimeSettings {
+                enabled: false,
+                ..cfg()
+            },
         );
         run(
             &mut t,

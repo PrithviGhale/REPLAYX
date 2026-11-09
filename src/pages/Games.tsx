@@ -59,14 +59,14 @@ function DailyChart({ series, label }: { series: { day: string; seconds: number 
 
 function OptIn({ onEnable }: { onEnable: () => void }) {
   return (
-    <Card className="optin" title="Track how long you play" subtitle="Optional, and entirely on this PC.">
+    <Card className="optin" title="Playtime tracking is off" subtitle="It was turned off in Settings. Turn it back on to count your playtime again.">
       <ul className="optin-list">
         <li><Clock size={15} />Counts time while a game is the window in front and REPLAYX is running. A game open in the background doesn't count.</li>
         <li><Pause size={15} />Stops counting after 15 minutes without keyboard or mouse input (adjustable in Settings), and never counts sleep.</li>
         <li><ShieldCheck size={15} />Stored only on this PC. No account, no uploads. Pause, exclude games, export or clear it anytime in Settings.</li>
       </ul>
-      <p className="muted small">Nothing from before you turn this on is counted, and REPLAYX does not guess playtime from your clips.</p>
-      <div className="row"><Button variant="primary" icon={Play} disabled={!native} onClick={onEnable}>Start tracking playtime</Button></div>
+      <p className="muted small">Time while tracking was off isn't counted, and REPLAYX does not guess playtime from your clips.</p>
+      <div className="row"><Button variant="primary" icon={Play} disabled={!native} onClick={onEnable}>Turn tracking back on</Button></div>
     </Card>
   );
 }
@@ -79,7 +79,14 @@ export function GamesPage({ go }: { go: (page: 'clips' | 'settings') => void }) 
   const [custom, setCustom] = useState({ from: dayKey(new Date(Date.now() - 6 * 864e5)), to: dayKey(new Date()) });
   const [game, setGame] = useState<string | null>(null);
   const load = useCallback(() => { if (native) api.playtimeData().then(d => { setData(d); setError(null); }).catch(e => setError(errorText(e))); }, []);
-  useEffect(() => { load(); const t = window.setInterval(load, 10_000); return () => window.clearInterval(t); }, [load]);
+  // Refresh every 10 s while visible; nothing while REPLAYX is hidden behind a game.
+  useEffect(() => {
+    load();
+    const t = window.setInterval(() => { if (document.visibilityState === 'visible') load(); }, 10_000);
+    const back = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', back);
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', back); };
+  }, [load]);
   const settings = data?.settings;
   const configure = (p: Partial<NonNullable<typeof settings>>) => settings && run('Saving', async () => { await api.playtimeConfigure({ ...settings, ...p }); load(); });
 
@@ -140,7 +147,7 @@ export function GamesPage({ go }: { go: (page: 'clips' | 'settings') => void }) 
           <DailyChart series={series} label="Daily playtime" />
         </Card>
         <Card title="Most played">
-          {top.length === 0 ? <p className="muted small">{settings?.enabled ? 'Play a game with REPLAYX running to see it here.' : 'Turn on playtime tracking to see your most played games.'}</p> : (
+          {top.length === 0 ? <p className="muted small">{settings?.enabled ? 'Play a game with REPLAYX running to see it here.' : 'Playtime tracking is off (Settings → Playtime tracking).'}</p> : (
             <ol className="rank">
               {top.map(g => (
                 <li key={g.game}><button onClick={() => setGame(g.game)}>

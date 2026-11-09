@@ -153,10 +153,10 @@ export const previewSettings: Settings = {
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8',
   close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
-  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 4, scale_policy: 'smooth',
+  launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 5, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
-  playtime: { enabled: false, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
+  playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.2';
+export const VERSION = '0.3.1-alpha.3';

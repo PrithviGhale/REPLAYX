@@ -12,7 +12,17 @@ use std::{
 
 pub fn command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut c = Command::new(exe);
-    c.creation_flags(0x08000000);
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+/// Helper processes after capture (probes, saving, checks, thumbnails,
+/// export) run below normal priority, so a save or a thumbnail never takes
+/// CPU time from the game being played. Capture itself uses `command`.
+pub fn helper(exe: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut c = Command::new(exe);
+    c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     c
 }
 #[derive(Clone)]
@@ -105,7 +115,7 @@ impl Media {
         bail!("FFmpeg not found. Run scripts/setup-media.ps1 or set REPLAYX_FFMPEG_DIR to a trusted FFmpeg bin directory.")
     }
     pub fn probe(&self, path: &Path) -> Result<Probe> {
-        let out = command(&self.ffprobe)
+        let out = helper(&self.ffprobe)
             .args([
                 "-v",
                 "error",
@@ -172,7 +182,7 @@ impl Media {
                 p.audio_tracks
             )
         }
-        let out = command(&self.ffmpeg)
+        let out = helper(&self.ffmpeg)
             .args(["-v", "error", "-xerror", "-i"])
             .arg(path)
             .args(["-map", "0:v", "-map", "0:a?", "-f", "null", "-"])
@@ -424,7 +434,7 @@ impl Media {
         )?;
         mark("Remuxing");
         let part = destination.with_extension("partial.mkv");
-        let output = command(&self.ffmpeg)
+        let output = helper(&self.ffmpeg)
             .args([
                 "-hide_banner",
                 "-v",
@@ -498,10 +508,10 @@ impl Media {
     /// Same probe as a below-normal-priority process, for background use
     /// while capture runs.
     pub fn segment_info_low_priority(&self, path: &Path) -> Result<SegmentInfo> {
-        self.segment_info_with(path, 0x0800_0000 | 0x0000_4000)
+        self.segment_info_with(path, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
     }
     fn segment_info(&self, path: &Path) -> Result<SegmentInfo> {
-        self.segment_info_with(path, 0x0800_0000)
+        self.segment_info_with(path, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
     }
     fn segment_info_with(&self, path: &Path, flags: u32) -> Result<SegmentInfo> {
         let mut c = Command::new(&self.ffprobe);
@@ -555,7 +565,7 @@ impl Media {
             bail!("Saved clip has an unexpected stream layout")
         }
         for at in [0., (p.duration - 1.).max(0.)] {
-            let out = command(&self.ffmpeg)
+            let out = helper(&self.ffmpeg)
                 .args([
                     "-v",
                     "error",
@@ -590,7 +600,7 @@ impl Media {
         } else {
             0.0
         };
-        let out = command(&self.ffmpeg)
+        let out = helper(&self.ffmpeg)
             .args([
                 "-hide_banner",
                 "-v",
@@ -630,7 +640,7 @@ impl Media {
     pub fn export_mp4(&self, input: &Path, output: &Path) -> Result<Probe> {
         let original = self.probe(input)?;
         let part = output.with_extension("partial.mp4");
-        let r = command(&self.ffmpeg)
+        let r = helper(&self.ffmpeg)
             .args(["-hide_banner", "-v", "error", "-nostdin", "-i"])
             .arg(input)
             .args(["-map", "0", "-c", "copy", "-movflags", "+faststart", "-n"])

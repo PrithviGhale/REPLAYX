@@ -126,7 +126,7 @@ pub struct Settings {
 /// Current settings layout. 2: explicit output width (0.2.1-alpha.3).
 /// 3: a microphone source is always present (0.2.2-alpha.1).
 /// 4: closing the window minimizes to the tray by default (0.3.1-alpha.1).
-pub const SETTINGS_VERSION: u32 = 4;
+pub const SETTINGS_VERSION: u32 = 5;
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -210,6 +210,11 @@ impl Settings {
         // can turn it off again in Settings).
         if self.settings_version < 4 {
             self.close_to_tray = true;
+        }
+        // 5: playtime tracking is on by default (once; it can be turned off
+        // in Settings and stays off).
+        if self.settings_version < 5 {
+            self.playtime.enabled = true;
         }
         self.settings_version = SETTINGS_VERSION;
         true
@@ -456,6 +461,20 @@ pub fn owned_session(root: &Path, dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn playtime_is_switched_on_once() {
+        let mut old = Settings {
+            settings_version: 4,
+            ..Settings::default()
+        };
+        old.playtime.enabled = false;
+        assert!(old.migrate());
+        assert!(old.playtime.enabled, "on by default after the upgrade");
+        old.playtime.enabled = false;
+        assert!(!old.migrate(), "a later choice to turn it off is kept");
+        assert!(!old.playtime.enabled);
+        assert!(Settings::default().playtime.enabled);
+    }
     #[test]
     fn legacy_default_shortcuts_migrate_but_custom_keys_stay() {
         let mut settings = Settings {

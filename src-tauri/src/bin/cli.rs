@@ -304,6 +304,25 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if action == "tick-cost" {
+        // Read-only: CPU cost of the once-a-second background work while a
+        // game is in front (foreground process, game classification, idle time).
+        let n = 2000u32;
+        let started = std::time::Instant::now();
+        for _ in 0..n {
+            if let Some((_, path, title)) = replayx_core::games::foreground_process() {
+                std::hint::black_box(replayx_core::games::classify(&path, &title, &[]));
+            }
+            std::hint::black_box(replayx_core::playtime::idle_seconds());
+        }
+        let per = started.elapsed().as_secs_f64() / n as f64;
+        println!(
+            "per tick {:.1} us; at 1 tick/s that is {:.4}% of one CPU core",
+            per * 1e6,
+            per * 100.0
+        );
+        return Ok(());
+    }
     if action == "device-formats" {
         for (kind, name, format) in replayx_core::audio::device_formats()? {
             println!("{kind:<10} {name}: {format}");

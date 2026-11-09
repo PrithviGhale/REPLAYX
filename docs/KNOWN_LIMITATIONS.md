@@ -1,4 +1,4 @@
-# Known limitations — 0.3.1-alpha.1
+# Known limitations — 0.3.1-alpha.3
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
 
@@ -7,7 +7,6 @@ REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md]
 - **Playtime** is *foreground* time: REPLAYX can't tell whether you are actively playing, only which window is in front. Controller input doesn't count as activity for the idle limit (Windows reports keyboard and mouse only); set the limit to *Never* if you play with a controller. Time while REPLAYX isn't running is never counted.
 - **Game detection** recognises 140 games by executable (plus unknown games in Steam, Epic, Xbox, Riot, EA, Ubisoft and GOG folders by folder name). Games launched from elsewhere with an unlisted executable count as desktop time; add a correction in Settings.
 - **Game artwork** is the game's own executable icon (seen when the game was last in front with REPLAYX running) or your own image. Games REPLAYX hasn't seen running show a drawn tile. Cover art from online services is not used.
-- The new logo is not applied yet (waiting for the approved file).
 - Alt+F10 can only be used when no other program owns it; REPLAYX never takes a shortcut away from another app.
 
 ## New in 0.3.0-alpha.1

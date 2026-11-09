@@ -256,7 +256,7 @@ function OverlayCard() {
   );
 }
 
-/** Playtime tracking: opt-in, pause, idle limit, exclusions, export, clear. */
+/** Playtime tracking: on by default; pause, idle limit, exclusions, export, clear. */
 function PlaytimeCard() {
   const { run, toast } = useApp();
   const [data, setData] = useState<PlaytimeData | null>(null);
@@ -267,11 +267,11 @@ function PlaytimeCard() {
   const set = (x: Partial<PlaytimeSettings>) => p && run('Saving', async () => { await api.playtimeConfigure({ ...p, ...x }); load(); });
   const count = data?.sessions.length ?? 0;
   return (
-    <Card title="Playtime tracking" subtitle="Optional. Counts how long each game is the window in front while REPLAYX runs. Stored only on this PC, never uploaded.">
+    <Card title="Playtime tracking" subtitle="On by default. Counts how long each game is the window in front while REPLAYX runs. Stored only on this PC, never uploaded.">
       {!native && <p className="muted small">Available in the desktop app.</p>}
       {p && <>
         <Toggle label="Track playtime" checked={p.enabled} onChange={v => set({ enabled: v, paused: false })}
-          description="Only time while REPLAYX is running and tracking is on is counted. Nothing from before is ever added." />
+          description="Only time while REPLAYX is running and tracking is on is counted. Turning it off stops counting; your history stays until you clear it." />
         <Toggle label="Pause tracking" checked={p.paused} disabled={!p.enabled} onChange={v => set({ paused: v })} />
         <Field label="Stop counting when idle" hint="Without keyboard or mouse input for this long, the idle time is not counted. Controller-only play may not count as input; choose Never if you mostly use a controller.">
           <select value={p.idle_minutes} disabled={!p.enabled} onChange={e => set({ idle_minutes: Number(e.target.value) })}>
