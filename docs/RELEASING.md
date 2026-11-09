@@ -20,7 +20,7 @@ The version lives in six places that must match: `package.json`, `package-lock.j
 2. **Hardware.** Run the checklist in [VALIDATION.md](VALIDATION.md) on real hardware: record, replay save, audio playback, repeated Record/Stop, Delete, and the game-FPS comparison. Record the results and every untested item in `VALIDATION.md` and `KNOWN_LIMITATIONS.md`.
 3. **Notes.** Add a section to `CHANGELOG.md`. Describe only measured improvements.
 4. **Tag.** `git tag -a v0.2.1-alpha.3 -m "REPLAYX 0.2.1-alpha.3"` and `git push origin v0.2.1-alpha.3`.
-5. **Build.** The *Release (draft)* workflow builds the NSIS installer with the pinned FFmpeg runtime, runs all checks, writes `SHA256SUMS.txt` and creates a draft prerelease.
+5. **Build.** The *Release (draft)* workflow builds the NSIS installer with the pinned FFmpeg runtime, runs all checks, builds the FFmpeg corresponding-source package (`scripts/ffmpeg-source/build-package.ps1`), writes `SHA256SUMS.txt` for both and creates a **draft** release (marked pre-release for `-alpha`/`-beta` tags). It refuses to run if a release for the tag already exists, so a published release is never rebuilt or overwritten; to rebuild a draft, delete the draft first. Before tagging, you can run the workflow by hand **without a tag** on any branch: that is a test build whose installer and source report are kept as workflow artifacts, and it creates no release.
 6. **Verify the artifact.** Download the installer from the draft, compare its SHA-256, install it on a test machine, launch it, record, save a replay, play the clip, uninstall. Scan it with Windows Security.
 7. **Publish.** Edit the draft notes (download link, requirements, known limitations), keep **pre-release** ticked for alpha/beta, and publish.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: a blank Windows Terminal window at sign-in for developers.** *Start with Windows* registered whichever REPLAYX executable was running, so running a development (debug) build pointed the startup entry at it; debug builds are console programs, so Windows opened a terminal for it at every sign-in. Now only the installed app (a release build with its uninstaller beside it) registers itself, it re-points a stale entry at itself, it removes the entry when the setting is off, and development builds never register and clean up an entry left by an older development run. The installed app was not affected (it is a windowed program).
+- **GitHub Actions work from a clean checkout:** the source checks prepare the FFmpeg bundle folder themselves, the pinned FFmpeg download is retried and cached, and the release workflow builds test builds without creating a release, never rebuilds an existing release, and attaches the FFmpeg corresponding-source package to every draft.
+
 ## 0.3.1-alpha.4 — Game icons, open/hide shortcut, text that always fits
 
 Not published.
