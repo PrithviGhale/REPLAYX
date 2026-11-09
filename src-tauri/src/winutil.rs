@@ -248,51 +248,127 @@ pub fn autostart_command(exe: &Path) -> String {
     format!("\"{}\" --background", exe.display())
 }
 
-pub fn autostart_enabled() -> bool {
-    let (key, value) = (wide(RUN_KEY), wide(RUN_VALUE));
-    let mut size = 0u32;
+/// What to do with the "Start with Windows" entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutostartAction {
+    Leave,
+    Register(String),
+    Remove,
+}
+
+/// Is this the installed REPLAYX (a release build in the folder the installer
+/// created, with its uninstaller beside it)? Development and copied builds
+/// are not: a debug build is a console program, and registering it made a
+/// terminal window open at every sign-in.
+pub fn is_installed_build(exe: &Path) -> bool {
+    !cfg!(debug_assertions)
+        && exe
+            .parent()
+            .is_some_and(|d| d.join("uninstall.exe").is_file())
+}
+
+/// A registered command that starts a build-output executable (cargo's
+/// `target\debug` or `target\release`), left by an older development run.
+pub fn is_build_output_command(command: &str) -> bool {
+    let c = command.to_ascii_lowercase().replace('/', "\\");
+    c.contains("\\target\\debug\\") || c.contains("\\target\\release\\")
+}
+
+/// Pure decision: only the installed app owns the entry; it points the entry
+/// at itself when wanted and removes it when not. Other builds never
+/// register, and remove only a stale entry that starts a build output.
+pub fn autostart_plan(
+    wanted: bool,
+    exe: &Path,
+    installed: bool,
+    current: Option<&str>,
+) -> AutostartAction {
+    if !installed {
+        return match current {
+            Some(c) if is_build_output_command(c) => AutostartAction::Remove,
+            _ => AutostartAction::Leave,
+        };
+    }
+    let command = autostart_command(exe);
+    match (wanted, current) {
+        (true, Some(c)) if c == command => AutostartAction::Leave,
+        (true, _) => AutostartAction::Register(command),
+        (false, Some(_)) => AutostartAction::Remove,
+        (false, None) => AutostartAction::Leave,
+    }
+}
+
+fn read_run_value(key: &str, name: &str) -> Option<String> {
+    let (key, name) = (wide(key), wide(name));
+    let mut buf = vec![0u16; 2048];
+    let mut size = (buf.len() * 2) as u32;
     unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
             PCWSTR(key.as_ptr()),
-            PCWSTR(value.as_ptr()),
+            PCWSTR(name.as_ptr()),
             RRF_RT_REG_SZ,
             None,
-            None,
+            Some(buf.as_mut_ptr().cast()),
             Some(&mut size),
         )
-        .is_ok()
+        .ok()
+        .ok()?;
     }
+    let len = (size as usize / 2).saturating_sub(1).min(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
 }
 
-pub fn set_autostart(enabled: bool) -> Result<()> {
-    let (key, value) = (wide(RUN_KEY), wide(RUN_VALUE));
+fn apply_run_value(key: &str, name: &str, action: &AutostartAction) -> Result<()> {
+    let (key, name) = (wide(key), wide(name));
     unsafe {
-        if enabled {
-            let exe = std::env::current_exe().context("Cannot locate REPLAYX executable")?;
-            let data = wide(&autostart_command(&exe));
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                PCWSTR(key.as_ptr()),
-                PCWSTR(value.as_ptr()),
-                REG_SZ.0,
-                Some(data.as_ptr() as *const _),
-                (data.len() * 2) as u32,
-            )
-            .ok()
-            .context("Could not register REPLAYX to start with Windows")?;
-        } else {
-            let status = RegDeleteKeyValueW(
-                HKEY_CURRENT_USER,
-                PCWSTR(key.as_ptr()),
-                PCWSTR(value.as_ptr()),
-            );
-            if status.is_err() && status != ERROR_FILE_NOT_FOUND {
-                status.ok().context("Could not remove the startup entry")?;
+        match action {
+            AutostartAction::Leave => {}
+            AutostartAction::Register(command) => {
+                let data = wide(command);
+                RegSetKeyValueW(
+                    HKEY_CURRENT_USER,
+                    PCWSTR(key.as_ptr()),
+                    PCWSTR(name.as_ptr()),
+                    REG_SZ.0,
+                    Some(data.as_ptr() as *const _),
+                    (data.len() * 2) as u32,
+                )
+                .ok()
+                .context("Could not register REPLAYX to start with Windows")?;
+            }
+            AutostartAction::Remove => {
+                let status = RegDeleteKeyValueW(
+                    HKEY_CURRENT_USER,
+                    PCWSTR(key.as_ptr()),
+                    PCWSTR(name.as_ptr()),
+                );
+                if status.is_err() && status != ERROR_FILE_NOT_FOUND {
+                    status.ok().context("Could not remove the startup entry")?;
+                }
             }
         }
     }
     Ok(())
+}
+
+/// The command REPLAYX's sign-in entry currently runs, if any.
+pub fn autostart_entry() -> Option<String> {
+    read_run_value(RUN_KEY, RUN_VALUE)
+}
+
+/// Make the sign-in entry match the setting (see `autostart_plan`). Returns
+/// what was done. Only the per-user Run value named "REPLAYX" is touched.
+pub fn sync_autostart(wanted: bool) -> Result<AutostartAction> {
+    let exe = std::env::current_exe().context("Cannot locate REPLAYX executable")?;
+    let action = autostart_plan(
+        wanted,
+        &exe,
+        is_installed_build(&exe),
+        autostart_entry().as_deref(),
+    );
+    apply_run_value(RUN_KEY, RUN_VALUE, &action)?;
+    Ok(action)
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -376,6 +452,66 @@ pub fn base64(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_installed_app_owns_the_startup_entry() {
+        use AutostartAction::*;
+        let app = Path::new(r"C:\Users\A\AppData\Local\REPLAYX\replayx.exe");
+        let cmd = autostart_command(app);
+        let dev = r#""C:\Users\A\Desktop\VS CODE\REPLAYX\src-tauri\target\debug\replayx.exe" --background"#;
+        // Installed: points the entry at itself, keeps it, or removes it when off.
+        assert_eq!(autostart_plan(true, app, true, None), Register(cmd.clone()));
+        assert_eq!(
+            autostart_plan(true, app, true, Some(dev)),
+            Register(cmd.clone()),
+            "stale dev entry replaced"
+        );
+        assert_eq!(autostart_plan(true, app, true, Some(&cmd)), Leave);
+        assert_eq!(
+            autostart_plan(false, app, true, Some(&cmd)),
+            Remove,
+            "turning it off stops future launches"
+        );
+        assert_eq!(autostart_plan(false, app, true, None), Leave);
+        // Development builds never register, and clean up a dev entry.
+        let debug = Path::new(r"C:\x\target\debug\replayx.exe");
+        assert_eq!(autostart_plan(true, debug, false, None), Leave);
+        assert_eq!(autostart_plan(true, debug, false, Some(dev)), Remove);
+        assert_eq!(
+            autostart_plan(true, debug, false, Some(&cmd)),
+            Leave,
+            "the installed app's entry is not touched"
+        );
+        assert!(is_build_output_command(
+            r#""C:/x/target/release/replayx.exe" --background"#
+        ));
+        assert!(!is_build_output_command(&cmd));
+        assert!(
+            !is_installed_build(debug),
+            "debug builds are never the installed app"
+        );
+    }
+    #[test]
+    fn startup_entry_round_trips_in_a_scratch_key() {
+        // A throwaway key under HKCU\Software, never the real Run key.
+        let key = format!(r"Software\REPLAYX-test-{}", std::process::id());
+        let cmd = r#""C:\Program Files\REPLAYX\replayx.exe" --background"#.to_string();
+        apply_run_value(&key, "REPLAYX", &AutostartAction::Register(cmd.clone())).unwrap();
+        assert_eq!(
+            read_run_value(&key, "REPLAYX").as_deref(),
+            Some(cmd.as_str())
+        );
+        apply_run_value(&key, "REPLAYX", &AutostartAction::Remove).unwrap();
+        assert_eq!(read_run_value(&key, "REPLAYX"), None);
+        apply_run_value(&key, "REPLAYX", &AutostartAction::Remove).unwrap(); // already gone: fine
+        unsafe {
+            let wkey = wide(&key);
+            let _ = windows::Win32::System::Registry::RegDeleteKeyW(
+                HKEY_CURRENT_USER,
+                PCWSTR(wkey.as_ptr()),
+            );
+        }
+    }
 
     #[test]
     fn base64_matches_rfc4648_vectors() {

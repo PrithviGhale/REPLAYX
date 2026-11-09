@@ -17,6 +17,9 @@ for s in scripts:
     m = re.search(r"ffbuild_dockerdl\(\)\s*\{(.*?)\n\}", text, re.S)
     body = m.group(1) if m else 'default_dl .'
     sub = lambda t: re.sub(r'\$\{?(SCRIPT_[A-Z0-9_]+)\}?', lambda x: vars_.get(x.group(1), x.group(0)), t)
+    if "svn checkout" in body and "SCRIPT_REV" in vars_:
+        items.append({"svn": vars_["SCRIPT_REPO"], "rev": vars_["SCRIPT_REV"]})
+        body = ""
     for line in body.splitlines():
         line = sub(line)
         if "default_dl" in line and "SCRIPT_REPO" in vars_:
@@ -25,7 +28,7 @@ for s in scripts:
             items.append({"git": repo, "commit": ref})
         for url in re.findall(r'(https?://[^\s"\\]+\.(?:tar\.(?:gz|xz|bz2)|tgz|zip|tar))', line):
             items.append({"url": url})
-    if not items and "SCRIPT_REPO" in vars_:
+    if not items and "SCRIPT_REPO" in vars_ and "svn" not in vars_["SCRIPT_REPO"]:
         items.append({"git": vars_["SCRIPT_REPO"], "commit": vars_.get("SCRIPT_COMMIT", "")})
     seen = set()
     uniq = []
@@ -35,7 +38,8 @@ for s in scripts:
             seen.add(k)
             uniq.append(i)
     lgpl_excluded = bool(re.search(r'\$VARIANT == lgpl\*\s*\]\]\s*&&\s*return', text))
-    plan.append({"script": name, "sources": uniq, "gpl_or_nonfree_only": lgpl_excluded})
+    linux_only = bool(re.search(r'\$TARGET == linux\*\s*\]\]\s*\|\|\s*return', text))
+    plan.append({"script": name, "sources": uniq, "gpl_or_nonfree_only": lgpl_excluded, "linux_only": linux_only})
 Path(sys.argv[2]).write_text(json.dumps(plan, indent=1), encoding="utf-8")
 total = sum(len(p["sources"]) for p in plan)
 print(f"{len(plan)} recipes, {total} sources; {sum(p['gpl_or_nonfree_only'] for p in plan)} recipes are GPL/non-free-only")

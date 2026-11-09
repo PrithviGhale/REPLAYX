@@ -50,14 +50,15 @@ for p in plan:
     stem0 = re.sub(r"[^A-Za-z0-9._-]+", "_", p["script"].removesuffix(".sh"))
     for i, s in enumerate(p["sources"]):
         stem = stem0 + (f"-{i}" if i else "")
-        origin = s.get("git") or s.get("url")
-        ref = s.get("commit") or ("r7113" if "lame" in (origin or "") else "")
+        origin = s.get("git") or s.get("url") or s.get("svn")
+        ref = s.get("commit") or (f"r{s['rev']}" if "rev" in s else "")
         if p["gpl_or_nonfree_only"]:
             lines.append(f"{stem:<34} not in this build (GPL/non-free variants only)  {origin}")
             continue
         a = by_stem.get(stem)
         if not a:
-            lines.append(f"{stem:<34} not included: {'Linux-only, not part of the Windows build' if 'pulseaudio' in stem else 'see note'}  {origin} @ {ref}")
+            why = "Linux-only, not part of the Windows build" if p.get("linux_only") else "MISSING"
+            lines.append(f"{stem:<34} not included ({why})  {origin} @ {ref}")
             missing.append(stem)
             continue
         files = licences_from(a, stem)
@@ -66,8 +67,8 @@ for p in plan:
 ff = sorted(root.glob("ffmpeg-*.tar.gz"))[0]
 fb = sorted(root.glob("FFmpeg-Builds-*.tar.gz"))[0]
 licences_from(ff, "ffmpeg")
-head = f"""FFmpeg corresponding source for REPLAYX 0.3.1-alpha.4
-=====================================================
+head = f"""FFmpeg corresponding source for REPLAYX
+=======================================
 
 REPLAYX's installer ships an unmodified LGPL build of FFmpeg:
   FFmpeg n9.0.2-47-gb204e94e90, built by FFmpeg-Builds tag autobuild-2026-11-06-12-50

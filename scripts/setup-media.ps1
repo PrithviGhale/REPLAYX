@@ -37,17 +37,29 @@ $archive = Join-Path $toolsDir $lock.archive
 if ($ArchivePath) {
     Copy-Item -LiteralPath $ArchivePath -Destination $archive -Force
 } elseif (!(Test-Path -LiteralPath $archive)) {
-    try {
-        Invoke-WebRequest -Uri $lock.browser_download_url -OutFile "$archive.partial"
-        Move-Item -LiteralPath "$archive.partial" -Destination $archive -Force
-    } catch {
-        Remove-Item -LiteralPath "$archive.partial" -ErrorAction SilentlyContinue
-        throw "Could not download $($lock.name): $($_.Exception.Message). If the release is unavailable, obtain the same file (SHA-256 $($lock.digest)) and pass -ArchivePath."
+    # GitHub's download servers occasionally answer 5xx; retry with backoff
+    # (a CI run once failed on a single 504). The checksum below still decides.
+    $delays = @(0, 5, 15, 30, 60)
+    for ($attempt = 1; $attempt -le $delays.Count; $attempt++) {
+        Start-Sleep -Seconds $delays[$attempt - 1]
+        try {
+            Invoke-WebRequest -Uri $lock.browser_download_url -OutFile "$archive.partial" -UseBasicParsing
+            Move-Item -LiteralPath "$archive.partial" -Destination $archive -Force
+            break
+        } catch {
+            Remove-Item -LiteralPath "$archive.partial" -ErrorAction SilentlyContinue
+            if ($attempt -eq $delays.Count) {
+                throw "Could not download $($lock.name) after $attempt attempts: $($_.Exception.Message). If the release is unavailable, obtain the same file (SHA-256 $($lock.digest)) and pass -ArchivePath."
+            }
+            Write-Warning "Download attempt $attempt failed ($($_.Exception.Message)); retrying."
+        }
     }
 }
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ('sha256:' + $hash -ne $lock.digest) {
-    throw "FFmpeg checksum mismatch ($hash). Do not run this file. Delete $archive and review the upstream release."
+    # Never keep (or cache) a file that doesn't match the lock.
+    Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+    throw "FFmpeg checksum mismatch ($hash). The file was deleted; do not run it. Review the upstream release."
 }
 Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $toolsDir 'ffmpeg-stable') -Force
 $bin = Join-Path $toolsDir $lock.runtime_dir

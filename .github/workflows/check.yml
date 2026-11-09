@@ -25,6 +25,11 @@ jobs:
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
           rustup override set 1.98.0
+      - name: Cached FFmpeg archive (checksum is verified again below)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tools/ffmpeg-n*.zip
+          key: ffmpeg-${{ hashFiles('tools/ffmpeg-lock.json') }}
       - name: Pinned FFmpeg runtime (checksum-verified)
         shell: pwsh
         run: ./scripts/setup-media.ps1

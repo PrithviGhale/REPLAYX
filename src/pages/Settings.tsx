@@ -114,7 +114,7 @@ export function SettingsPage() {
           <PlaytimeCard />
           <Card tour="tray" title="Startup and window">
             <Toggle label="Start with Windows" checked={draft.launch_at_startup} disabled={active} onChange={v => patch({ launch_at_startup: v })}
-              description="Opens REPLAYX in the system tray when you sign in. Capture never starts on its own." />
+              description="Opens the installed REPLAYX quietly in the system tray when you sign in (no window, no terminal). Capture never starts on its own. Turning it off removes the startup entry." />
             <Toggle label="Minimize to tray when closing" checked={draft.close_to_tray} disabled={active} onChange={v => patch({ close_to_tray: v })}
               description="Closing the window keeps REPLAYX running in the tray: Instant Replay, recording and hotkeys keep working. Quit from the tray menu; REPLAYX asks first if a recording or save is in progress." />
           </Card>

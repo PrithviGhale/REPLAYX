@@ -345,11 +345,8 @@ fn save_settings_blocking(
     {
         return Err("Stop capture before changing settings".into());
     }
-    if settings.launch_at_startup != previous.launch_at_startup
-        || (settings.launch_at_startup && !winutil::autostart_enabled())
-    {
-        winutil::set_autostart(settings.launch_at_startup).map_err(err)?;
-    }
+    // Only the installed app registers itself; development builds never do.
+    winutil::sync_autostart(settings.launch_at_startup).map_err(err)?;
     // A shortcut another program owns is refused; that action keeps its
     // previous working shortcut, and the saved settings say so.
     let (settings, warning) = bind_hotkeys_keeping(app, &settings, Some(&previous))?;
@@ -1300,9 +1297,13 @@ pub fn run() {
                 notices: crate::overlay::Overlay::spawn(),
                 data_dir: data.clone(),
             });
-            // Keep the startup entry pointing at this executable if enabled.
-            if settings.launch_at_startup {
-                let _ = winutil::set_autostart(true);
+            // Make the sign-in entry match the setting: the installed app points
+            // it at itself (or removes it when off); development builds never
+            // register and clean up an entry an older dev run left behind.
+            if let Ok(action) = winutil::sync_autostart(settings.launch_at_startup) {
+                if action != winutil::AutostartAction::Leave {
+                    eprintln!("Start with Windows: {action:?}");
+                }
             }
             // Sign-in launches start in the tray; everything else shows the window.
             if let Some(w) = app.get_webview_window("main") {
