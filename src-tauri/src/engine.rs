@@ -2167,6 +2167,22 @@ impl Inner {
             }
             bail!("Capture exited ({exit}). {reason}")
         }
+        // An audio device that changed during capture (headset plugged in or
+        // removed, output switched, Bluetooth profile change) reconnects
+        // through the bounded recovery instead of stopping capture.
+        let device_changed = p.feeds.iter().find_map(|f| {
+            f.meter
+                .error
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|e| audio::is_device_change(e))
+        });
+        if let Some(e) = device_changed.filter(|_| !p.synthetic) {
+            return self.begin_recovery(&format!(
+                "An audio device changed ({e}); reconnecting audio."
+            ));
+        }
         for f in &p.feeds {
             if let Some(e) = f.meter.error.lock().unwrap().clone() {
                 bail!("Audio capture stopped: {e}")
@@ -2338,7 +2354,7 @@ impl Inner {
         self.status.recording = false;
         self.status.replay = false;
         self.status.state = "Recovering".into();
-        self.status.notice=Some(format!("{reason} Recording is split into verified parts across display changes; replay restarts with a fresh buffer."));
+        self.status.notice=Some(format!("{reason} A recording continues as a new verified part; replay restarts with a fresh buffer. Footage saved so far is kept."));
         self.recovery = Some(Recovery {
             replay,
             recording,
@@ -2356,7 +2372,7 @@ impl Inner {
             return Ok(());
         }
         if r.attempts >= 3 {
-            bail!("Display recovery exhausted three attempts. Select the display/region and restart capture. Previous footage is preserved.")
+            bail!("Capture couldn't restart after three attempts. Check the display and Windows Sound settings, then start capture again. Previous footage is preserved.")
         }
         r.attempts += 1;
         let current = geometry::display(self.settings.display);

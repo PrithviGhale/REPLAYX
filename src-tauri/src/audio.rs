@@ -721,7 +721,24 @@ fn valid_process(s: &AudioSource) -> Result<()> {
     }
     Ok(())
 }
+/// Windows audio errors that mean the device is changing or not ready yet
+/// (AUDCLNT_E_DEVICE_INVALIDATED, _ENDPOINT_CREATE_FAILED,
+/// _SERVICE_NOT_RUNNING, _RESOURCES_INVALIDATED, E_NOTFOUND): worth retrying
+/// with the then-current default device, and a reason to reconnect, not to stop.
+pub fn is_device_change(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "0x88890004",
+        "0x8889000f",
+        "0x88890010",
+        "0x88890026",
+        "0x80070490",
+    ]
+    .iter()
+    .any(|code| m.contains(code))
+}
 pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
+    let name = source.name.clone();
     let microphone = source.kind == "microphone";
     let created = Instant::now();
     if source.kind == "application" || source.kind == "exclude" {
@@ -747,7 +764,6 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
     let capture = thread::spawn(move || {
         let result = (|| -> Result<()> {
             wasapi::initialize_mta().ok()?;
-            let en = DeviceEnumerator::new()?;
             let stream = StreamMode::PollingShared {
                 // Windows converts rate and sample type (AUTOCONVERTPCM +
                 // SRC_DEFAULT_QUALITY); 100ms buffer tolerates stalls under game load.
@@ -758,45 +774,73 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 |n: usize| WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, n, None);
             // `channels` is the layout delivered by Windows; it is converted to
             // stereo by `to_stereo` before entering the timeline.
-            let (client, channels) = if source.kind == "application" || source.kind == "exclude" {
-                let mut c = AudioClient::new_application_loopback_client(
-                    source.pid,
-                    source.kind == "application",
-                )?;
-                c.initialize_client(&float(CHANNELS), &Direction::Capture, &stream)?;
-                (c, CHANNELS)
-            } else {
-                let dir = if source.kind == "microphone" {
-                    Direction::Capture
-                } else {
-                    Direction::Render
-                };
-                let device = if source.device.is_empty() {
-                    en.get_default_device(&dir)?
-                } else {
-                    en.get_device(&source.device)?
-                };
-                let mut c = device.get_iaudioclient()?;
-                let native = c.get_mixformat().ok();
-                if let Some(mix) = &native {
-                    *mt.format.lock().unwrap() = Some(describe_format(mix));
-                }
-                // Microphones open at their native channel count so REPLAYX, not an
-                // unspecified channel matrix, decides how arrays become stereo.
-                // Loopback keeps Windows' mask-aware surround-to-stereo downmix.
-                let wanted = native
-                    .filter(|_| source.kind == "microphone")
-                    .map(|m| m.get_nchannels() as usize)
-                    .filter(|n| (1..=MAX_DEVICE_CHANNELS).contains(n))
-                    .unwrap_or(CHANNELS);
-                match c.initialize_client(&float(wanted), &Direction::Capture, &stream) {
-                    Ok(()) => (c, wanted),
-                    Err(_) if wanted != CHANNELS => {
-                        let mut stereo = device.get_iaudioclient()?;
-                        stereo.initialize_client(&float(CHANNELS), &Direction::Capture, &stream)?;
-                        (stereo, CHANNELS)
+            // Opens the device, looking up the current default each time.
+            let open = || -> Result<(AudioClient, usize)> {
+                let en = DeviceEnumerator::new()?;
+                Ok(
+                    if source.kind == "application" || source.kind == "exclude" {
+                        let mut c = AudioClient::new_application_loopback_client(
+                            source.pid,
+                            source.kind == "application",
+                        )?;
+                        c.initialize_client(&float(CHANNELS), &Direction::Capture, &stream)?;
+                        (c, CHANNELS)
+                    } else {
+                        let dir = if source.kind == "microphone" {
+                            Direction::Capture
+                        } else {
+                            Direction::Render
+                        };
+                        let device = if source.device.is_empty() {
+                            en.get_default_device(&dir)?
+                        } else {
+                            en.get_device(&source.device)?
+                        };
+                        let mut c = device.get_iaudioclient()?;
+                        let native = c.get_mixformat().ok();
+                        if let Some(mix) = &native {
+                            *mt.format.lock().unwrap() = Some(describe_format(mix));
+                        }
+                        // Microphones open at their native channel count so REPLAYX, not an
+                        // unspecified channel matrix, decides how arrays become stereo.
+                        // Loopback keeps Windows' mask-aware surround-to-stereo downmix.
+                        let wanted = native
+                            .filter(|_| source.kind == "microphone")
+                            .map(|m| m.get_nchannels() as usize)
+                            .filter(|n| (1..=MAX_DEVICE_CHANNELS).contains(n))
+                            .unwrap_or(CHANNELS);
+                        match c.initialize_client(&float(wanted), &Direction::Capture, &stream) {
+                            Ok(()) => (c, wanted),
+                            Err(_) if wanted != CHANNELS => {
+                                let mut stereo = device.get_iaudioclient()?;
+                                stereo.initialize_client(
+                                    &float(CHANNELS),
+                                    &Direction::Capture,
+                                    &stream,
+                                )?;
+                                (stereo, CHANNELS)
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    },
+                )
+            };
+            // A device that is switching (headset connecting, Bluetooth changing
+            // profile, waking from sleep) answers "device invalidated" for a
+            // moment: wait and try again with the then-current default device.
+            let mut attempt = 0u64;
+            let (client, channels) = loop {
+                match open() {
+                    Ok(opened) => break opened,
+                    Err(e)
+                        if attempt < 5
+                            && is_device_change(&format!("{e:#}"))
+                            && !st.load(Ordering::Relaxed) =>
+                    {
+                        attempt += 1;
+                        thread::sleep(Duration::from_millis(250 * attempt));
                     }
-                    Err(e) => return Err(e.into()),
+                    Err(e) => return Err(e),
                 }
             };
             if channels != CHANNELS {
@@ -970,7 +1014,13 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
         Ok(Ok(())) => {}
         result => {
             stop.store(true, Ordering::Relaxed);
-            bail!("Audio initialization failed: {result:?}")
+            match result {
+                Ok(Err(message)) if is_device_change(&message) => bail!(
+                    "{message}. The audio device was changing or not ready, and still wasn't after several retries. Check Windows Sound settings (or reconnect the headset) and start capture again."
+                ),
+                Ok(Err(message)) => bail!("Audio could not start: {message}"),
+                _ => bail!("{name}: the audio device did not respond within 8 seconds. Check Windows Sound settings and start capture again."),
+            }
         }
     }
     let st = stop.clone();
@@ -1032,6 +1082,26 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn device_changes_are_retried_and_reconnected_not_fatal() {
+        // The error from the report: a device switching while it was opened.
+        assert!(is_device_change(
+            "System audio: Windows returned an error: 0x88890004"
+        ));
+        assert!(is_device_change(
+            "Microphone: Windows returned an error: 0x88890026"
+        ));
+        assert!(is_device_change(
+            "System audio: Element not found. (0x80070490)"
+        ));
+        // Real failures are still reported as errors.
+        assert!(!is_device_change(
+            "Microphone: Access is denied. (0x80070005)"
+        ));
+        assert!(!is_device_change(
+            "Selected PID has been reused. Select the application again."
+        ));
+    }
     use std::f64::consts::TAU;
 
     const ORIGIN: u64 = 1_000_000_000;

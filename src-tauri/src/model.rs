@@ -147,7 +147,8 @@ impl Default for Settings {
             replay_seconds: 60,
             buffer_mb: 2048,
             output_dir: PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default())
-                .join("Videos/REPLAYX"),
+                .join("Videos")
+                .join("REPLAYX"),
             audio: vec![AudioSource::default(), AudioSource::microphone()],
             separate_tracks: true,
             replay_hotkey: "Control+Shift+F10".into(),
@@ -367,6 +368,16 @@ impl Settings {
         }
         Ok(())
     }
+    /// Windows-style separators in the clips folder. Older versions saved
+    /// "C:\Users\Name\Videos/REPLAYX"; Explorer reads the "/REPLAYX" part as a
+    /// command-line switch and opened Documents instead of the folder.
+    pub fn normalize_paths(&mut self) -> bool {
+        let fixed = normalize_dir(&self.output_dir);
+        // Compare the text: Path equality treats '/' and '\' as the same.
+        let changed = fixed.as_os_str() != self.output_dir.as_os_str();
+        self.output_dir = fixed;
+        changed
+    }
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -375,7 +386,8 @@ impl Settings {
             .context("Settings are corrupt; restore or remove settings.json")?;
         // Migrate only the complete legacy default set, preserving custom keys.
         let layout = s.migrate();
-        if s.migrate_legacy_hotkeys() || layout {
+        let paths = s.normalize_paths();
+        if s.migrate_legacy_hotkeys() || layout || paths {
             s.save(path)?;
         }
         s.validate()?;
@@ -478,9 +490,45 @@ pub fn owned_session(root: &Path, dir: &Path) -> bool {
     path.parent() == Some(root.as_path())
 }
 
+/// Backslashes only, no trailing separator (except a drive root such as `C:\`).
+pub fn normalize_dir(dir: &Path) -> PathBuf {
+    let s = dir.to_string_lossy().replace('/', "\\");
+    let trimmed = s.trim_end_matches('\\');
+    if trimmed.len() <= 2 && trimmed.ends_with(':') {
+        PathBuf::from(format!("{trimmed}\\"))
+    } else {
+        PathBuf::from(trimmed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clips_folder_paths_use_windows_separators() {
+        assert_eq!(
+            normalize_dir(Path::new(r"C:\Users\A\Videos/REPLAYX")),
+            PathBuf::from(r"C:\Users\A\Videos\REPLAYX")
+        );
+        assert_eq!(
+            normalize_dir(Path::new(r"D:/Clips/")),
+            PathBuf::from(r"D:\Clips")
+        );
+        assert_eq!(normalize_dir(Path::new("E:/")), PathBuf::from(r"E:\"));
+        let mut s = Settings {
+            output_dir: r"C:\Users\A\Videos/REPLAYX".into(),
+            ..Settings::default()
+        };
+        assert!(s.normalize_paths(), "an old mixed path is repaired once");
+        assert!(!s.normalize_paths());
+        assert!(
+            !Settings::default()
+                .output_dir
+                .to_string_lossy()
+                .contains('/'),
+            "the default has no forward slash"
+        );
+    }
     #[test]
     fn open_hide_shortcut_never_collides() {
         let mut old = Settings {

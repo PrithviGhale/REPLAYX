@@ -328,10 +328,11 @@ async fn save_settings(
         .map_err(err)?
 }
 fn save_settings_blocking(
-    settings: Settings,
+    mut settings: Settings,
     app: &tauri::AppHandle,
     state: &AppState,
 ) -> Reply<Settings> {
+    settings.normalize_paths();
     settings.validate().map_err(err)?;
     let previous = state.engine.settings();
     let mut settings = settings;
@@ -806,7 +807,9 @@ fn discard_audio_tests(data: &std::path::Path) {
 }
 #[tauri::command]
 fn open_folder(state: State<AppState>) -> Reply<()> {
-    let root = state.engine.settings().output_dir;
+    // Exactly the clips folder (Explorer falls back to Documents for a path
+    // it can't parse, such as one with forward slashes).
+    let root = crate::model::normalize_dir(&state.engine.settings().output_dir);
     fs::create_dir_all(&root).map_err(err)?;
     command("explorer.exe").arg(&root).spawn().map_err(err)?;
     Ok(())
