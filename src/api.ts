@@ -140,4 +140,4 @@ export const previewSettings: Settings = {
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.2.2-alpha.2';
+export const VERSION = '0.3.0-alpha.1';

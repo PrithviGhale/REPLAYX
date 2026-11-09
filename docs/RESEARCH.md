@@ -37,3 +37,22 @@ the current process boundary; show “Not measured,” not invented values.
 3. Show encoder speed and video lag, and stop with the real cause (encoder or GPU overloaded) instead of an audio symptom.
 4. Make 120 fps a visible trade-off in the UI rather than silently reducing it.
 5. Build a repeatable workload, `replayx-gameproxy`: a heavy shader on the high-performance GPU, presented through the display GPU like a game, with time-coded frames. `scripts/overhead-bench.py` measures game FPS and 1% lows with each capture path, GPU engine use, and recording smoothness. Results go to PERFORMANCE.md only once they are measured.
+
+## Voice processing (0.3.0-alpha.1)
+
+Goal: an ordinary gaming-headset microphone that sounds clear, full and steady, without robotic, metallic or "underwater" artefacts, built from documented techniques and permissively licensed code only. Voicemod and similar products were studied only through public documentation and general audio-engineering practice; no proprietary code, models, assets or algorithms were used or examined.
+
+**What makes voice sound good (common practice in OBS filter guides and broadcast audio):** remove rumble below ~80 Hz; reduce steady noise *before* any gain or EQ so it is not amplified; a gentle expander rather than a hard gate so word endings and quiet speech survive; cut boxiness around 250–400 Hz and add presence around 3 kHz; compress 2.5–4:1 with a few dB of make-up gain for a steady level; tame sibilance with a split-band de-esser when the top end is boosted; end with a peak limiter so gain never clips.
+
+**Noise suppression options considered:**
+
+| Option | Notes | Decision |
+| --- | --- | --- |
+| FFmpeg `afftdn` (previous) | Spectral subtraction with a fixed noise-floor estimate. Measured only 2.2 dB less steady fan noise at headset levels with the shipped settings (2.5 dB with stronger ones). | Replaced. |
+| RNNoise (Xiph/Mozilla, BSD-3) | Small recurrent network + DSP, 48 kHz, 10 ms frames (exactly REPLAYX's audio chunk), about 10 ms algorithmic delay, also gives a voice-activity probability. | **Chosen**, via `nnnoiseless`, a pure-Rust port (no C toolchain, no DLL). |
+| WebRTC audio processing (BSD) | Noise suppression + AGC + echo cancellation; heavier C++ dependency with a build toolchain; AEC is not needed for recording. | Not chosen for now. |
+| SpeexDSP preprocessor (BSD) | Older spectral noise suppression and AGC; weaker on non-stationary noise than RNNoise. | Not chosen. |
+
+**Measured** (scripts/voice-eval.ps1: Windows text-to-speech mixed with synthetic fan noise, broadband hiss and keyboard clicks; no microphone was used): Light/Balanced/Strong removed 9.5/17.0/25.0 dB of fan noise and 10.0/18.4/28.0 dB of hiss; speech level changed by at most 0.3 dB; the Noise-Free preset removed 28.6 dB of fan noise. Short keyboard clicks are only partly reduced (RNNoise is weakest on short transients). Processing cost: 0.5–1% of one CPU core; added latency on the microphone track: 11 ms (RNNoise frame + 1 ms limiter look-ahead).
+
+Metrics cannot say whether a voice *sounds* better. Listening tests with real headset recordings, and a fair comparison with Voicemod on the same recording, are still to be done.

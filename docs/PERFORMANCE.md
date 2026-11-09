@@ -1,5 +1,11 @@
 # Performance evidence and pending benchmark
 
+## 0.3.0-alpha.1 — voice processing and startup
+
+**Voice Enhancer** (release build, `replayx-cli voice-eval`, 20 s of speech): 0.5–1.0% of one CPU core per microphone (0.02% with the Off preset); added latency 11 ms with noise suppression on (RNNoise frame 10 ms + limiter look-ahead 1 ms), 1 ms without. Noise removed on fan noise: Light 9.5 dB, Balanced 17.0 dB, Strong 25.0 dB, Noise-Free preset 28.6 dB; hiss: 10.0 / 18.4 / 28.0 / 32.3 dB. Clean speech level changed by ≤0.3 dB through noise suppression. Before (FFmpeg `afftdn` as shipped): 2.2 dB on the same kind of noise.
+
+**Startup** (`dev/startup-bench.mjs`, tray-only launch, warm, 4 runs each, medians, measured back to back): WebView page start 340 ms (0.2.2-alpha.2) vs 342 ms (0.3.0-alpha.1); interface mounted 455 vs 427 ms; app ready (settings loaded and the engine answered) 483 ms. The splash adds no delay: it paints from the first HTML byte (before, the window showed only its dark background until the interface mounted). First launch after building: 1.7–2.4 s to page start in both builds (WebView and disk caches cold).
+
 ## 0.2.2-alpha.1 — quality per GB and codecs
 
 Method: `scripts/quality-bench.py` encodes the same footage with each configuration (NVENC p5, tune hq, spatial AQ, lookahead 20, no B-frames, 2 s GOP, exactly as REPLAYX does) and scores it against the source with FFmpeg's libvmaf (VMAF v0.6.1, plus SSIM and PSNR). Two sources: 20 s of the user's real Roblox recording (itself H.264 at 16 Mb/s, which slightly favours H.264) and a 12 s lossless synthetic game-like scene with noise foliage, a fractal, gradients, a minimap and a HUD (much harder to compress). Results: `test-output/quality/*/results.json`.

@@ -33,8 +33,8 @@ export function Tour({ go }: { go: (page: TourPage) => void }) {
   useEffect(() => {
     const start = () => setStep(0);
     window.addEventListener('replayx-tour', start);
-    // Preview only: ?tour opens it for screenshots.
-    if (!native && new URLSearchParams(window.location.search).has('tour')) start();
+    // UI preview screenshots only (the app's own URL never has ?tour).
+    if (new URLSearchParams(window.location.search).has('tour')) start();
     return () => window.removeEventListener('replayx-tour', start);
   }, []);
 

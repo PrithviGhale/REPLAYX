@@ -1,6 +1,15 @@
-# Known limitations — 0.2.2-alpha.1
+# Known limitations — 0.3.0-alpha.1
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## New in 0.3.0-alpha.1
+
+- **Voice Enhancer** quality has been measured with synthetic speech and noise only. Whether it makes a real headset sound better is a listening test still to be done, and it has not been compared with Voicemod on the same recording.
+- Noise suppression removes steady noise (fans, hum, hiss, room noise) well; short sounds such as keyboard clicks and mouse clicks are only partly reduced.
+- If you record a virtual microphone (for example Voicemod's), REPLAYX processes audio that is already processed. Choose your real microphone, or the **Off** preset.
+- The microphone track is about 11 ms later than with processing off (RNNoise frame plus limiter look-ahead); far below what is noticeable as lip-sync error.
+- Voice settings (other than volume and mute) can only be changed with capture stopped; Test mic applies them live.
+- The splash can only appear once Windows has created the app's WebView: about 0.35 s after launch normally, 1.7–2.4 s on the first launch after a restart or update.
 
 ## New in 0.2.2-alpha.1
 

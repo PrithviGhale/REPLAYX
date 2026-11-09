@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0-alpha.1 — Voice Enhancer, startup screen, first-run tour, release preparation
+
+First public preview candidate (not yet published). User-facing notes: [docs/release-notes/v0.3.0-alpha.1.md](docs/release-notes/v0.3.0-alpha.1.md).
+
+- **Fixed: noise suppression did almost nothing.** The FFmpeg `afftdn` filter as configured (noise floor −50 dB) removed only 2.2 dB of steady fan noise at headset levels, and the live *Test mic* played the raw microphone, so switching noise suppression on or off changed nothing you could hear. Replaced by REPLAYX's own processing (below), which the recording, Test mic and Compare all use.
+- **Voice Enhancer.** Native real-time processing on each 10 ms microphone chunk in the capture thread (never the video path): 80 Hz high-pass → RNNoise noise suppression (via nnnoiseless, BSD-3) → expander held open by RNNoise's voice detection → EQ → compressor → de-esser → recording gain → look-ahead limiter. Presets *Off*, *Natural*, *Clear* (default), *Broadcast*, *Noise-Free* set real parameters; *Custom* and saved presets. Measured with text-to-speech and synthetic noise (no microphone used): Light/Balanced/Strong remove 9.5/17/25 dB of fan noise; speech level changes ≤0.3 dB; 0.5–1% of one CPU core; 11 ms added latency on the microphone track. Existing microphones move to the *Clear* preset.
+- **Test mic** now hears the exact recording chain, applies changes live, and switches between *Enhanced* and *Original* at the same loudness. **Compare** records one take (explicit click, memory only) and plays original vs enhanced of the same words; changing settings re-processes the same take.
+- **Fine-tune:** recording gain (REPLAYX only; the Windows hardware level is never changed, with a button to Windows sound settings), rumble filter, soft gate with threshold, compressor threshold/ratio, warmth / boxiness / presence / air EQ, de-esser, saved presets.
+- **Fixed:** in-app audio playback was blocked by the window's security policy (`media-src` did not allow `data:`/`blob:`); comparisons now use `blob:` URLs, which are allowed.
+- **Startup screen.** Painted from the first HTML byte with the REPLAYX mark, a subtle violet glow and progress line; shows only steps that are really running (interface, settings, engine check); disappears as soon as the app is ready (no minimum duration); respects reduced motion; cannot trap the window. Measured: no startup delay added (interface mounted 455 ms before vs 427 ms after, warm; app ready at 483 ms).
+- **First-run tour.** Twelve short steps spotlighting the real components (Record, Instant Replay, Save replay, video, microphone, Voice Enhancer, overlay, clips, game detection, tray, settings). Dims the rest, follows scrolling and resizing, Back/Next/Skip, Esc and arrow keys, "Step n of 12"; never presses anything; remembered once finished or skipped; *Settings → Replay tutorial*.
+- README rewritten with current screenshots; release notes, third-party notices (RNNoise/nnnoiseless) and release workflow prepared locally.
+- Developer tools: `replayx-cli voice-eval`, `scripts/voice-eval.ps1`, `dev/startup-bench.mjs`.
+
+## 0.2.2-alpha.2 — redesigned Audio page, icon overlay
+
+- Audio page redesigned: microphone first, one-line sound-source strips, tracks and quality last.
+- Microphone always present (no "add" step); Discord-style live **Test mic**.
+- Status overlay redrawn as GeForce-style icon tiles (Instant Replay, microphone, recording dot), stacked in a corner, shown over every app while enabled, still excluded from capture.
+- Audio devices plugged in or removed appear within about 2 s.
+
 ## 0.2.2-alpha.1 — quality per GB, codec choice, microphone setup, in-game overlay, tray
 
 Not yet verified by a person in a real game: the microphone listening test, gameplay with the new presets and codecs, and the overlay over a full-screen game are still to do (see docs/VALIDATION.md). Everything below that says "measured" was measured on the development laptop (RTX 4070 Laptop GPU, Intel Quick Sync, Advanced Optimus).

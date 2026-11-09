@@ -25,6 +25,8 @@ let settings = {} as Settings;
 const plain = { boost_db: 0, voice: { ...CLEAR_VOICE } };
 const initialSettings = (): Settings => ({
   ...previewSettings,
+  // The tour opens only with ?tour (screenshots), never on its own here.
+  tour_done: !new URLSearchParams(window.location.search).has('tour'),
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX',
   audio: [
     { kind: 'application', device: '', pid: 29336, process_started: 1, name: 'Game', enabled: true, volume: 1, muted: false, ...plain },

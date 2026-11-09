@@ -51,3 +51,6 @@ video-path.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Locally prepared release assets (installers, source packages) are uploaded, not committed.
+release/
