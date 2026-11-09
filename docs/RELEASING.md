@@ -26,7 +26,18 @@ The version lives in six places that must match: `package.json`, `package-lock.j
 
 ## FFmpeg and licences
 
-The installer ships an LGPL FFmpeg build pinned in `tools/ffmpeg-lock.json` (immutable release tag and SHA-256). Before each public release, confirm [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the release notes still point to the FFmpeg corresponding source for that exact build.
+The installer ships an LGPL FFmpeg build pinned in `tools/ffmpeg-lock.json` (immutable release tag and SHA-256). Its licences (and those of the LGPL/MPL libraries built into it) require the corresponding source with every public release. Build the source package and attach it to the release:
+
+```powershell
+powershell -File scripts/ffmpeg-source.ps1                    # FFmpeg source + FFmpeg-Builds recipes -> release/ffmpeg-source/
+tar -xzf release/ffmpeg-source/FFmpeg-Builds-*.tar.gz -C $env:TEMPfb --strip-components=1
+python -I scripts/ffmpeg-source/dl_plan.py $env:TEMPfb plan.json        # reads the recipes as text (never runs them)
+python -I scripts/ffmpeg-source/fetch_sources.py plan.json release/ffmpeg-source/deps $env:TEMPfb-work
+git svn clone -r<REV> <lame svn url> lame; git -C lame archive --format=tar.gz --prefix=50-libmp3lame/ -o release/ffmpeg-source/deps/50-libmp3lame--svn-r<REV>.tar.gz HEAD
+python -I scripts/ffmpeg-source/collect_licenses.py plan.json release/ffmpeg-source   # licences/ + SOURCE-README.txt
+```
+
+Then pack `SOURCE-README.txt`, the two archives, `deps/` and `licenses/` into one uncompressed `ffmpeg-corresponding-source-<ffmpeg version>.tar` (under GitHub's 2 GiB asset limit), add its SHA-256 to `SHA256SUMS.txt`, and attach both to the release. Fetch failures must be resolved or explained in `SOURCE-README.txt` (for v0.3.1-alpha.4 only PulseAudio, which is Linux-only, is absent).
 
 ## Signed updates (not enabled yet)
 
