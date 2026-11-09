@@ -151,14 +151,18 @@ jobs:
     # The bundled FFmpeg is LGPL (with LGPL/MPL libraries built in): every
     # release carries the corresponding source. Built here so a release can't
     # be drafted without it.
+    # Linux runner: Subversion (for LAME) comes from Ubuntu's own archive, and
+    # the ~120 source fetches are faster. The script is the same one used on Windows.
     needs: plan
-    runs-on: windows-2022
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.tag && format('refs/tags/{0}', needs.plan.outputs.tag) || github.sha }}
           persist-credentials: false
+      - name: Subversion client
+        run: sudo apt-get update -q && sudo apt-get install -y -q subversion
       - name: FFmpeg corresponding source
         shell: pwsh
         run: ./scripts/ffmpeg-source/build-package.ps1 -Out "$env:RUNNER_TEMP/ffmpeg-source" -Work "$env:RUNNER_TEMP/ffmpeg-source-work"

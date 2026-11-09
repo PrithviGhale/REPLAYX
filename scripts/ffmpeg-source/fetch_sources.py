@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -59,9 +60,15 @@ def fetch_once(stem, s):
             return stem, "ok", dest.name
         repo = work / stem
         shutil.rmtree(repo, ignore_errors=True)
-        run(["git", "svn", "clone", "-q", f"-r{s['rev']}", s["svn"], str(repo)])
         tmp = str(dest) + ".part"
-        run(["git", "-C", str(repo), "archive", "--format=tar.gz", f"--prefix={stem}/", "-o", tmp, "HEAD"])
+        if shutil.which("svn"):
+            # A plain export of that revision (no .svn metadata).
+            run(["svn", "export", "--quiet", "--non-interactive", "-r", s["rev"], s["svn"], str(repo / stem)])
+            with tarfile.open(tmp, "w:gz") as t:
+                t.add(repo / stem, arcname=stem)
+        else:
+            run(["git", "svn", "clone", "-q", f"-r{s['rev']}", s["svn"], str(repo)])
+            run(["git", "-C", str(repo), "archive", "--format=tar.gz", f"--prefix={stem}/", "-o", tmp, "HEAD"])
         Path(tmp).rename(dest)
         shutil.rmtree(repo, ignore_errors=True)
         return stem, "ok", dest.name

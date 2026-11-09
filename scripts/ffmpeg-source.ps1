@@ -4,10 +4,11 @@
 # every bundled library's source) at the tag recorded in tools/ffmpeg-lock.json.
 # Output: release/ffmpeg-source/ with the archives and SHA256SUMS.txt.
 # Downloads only source archives; installs nothing.
-param([string]$Out = "$PSScriptRoot\..\release\ffmpeg-source")
+param([string]$Out = '')
 $ErrorActionPreference = 'Stop'
-$root = Resolve-Path "$PSScriptRoot\.."
-$lock = Get-Content "$root\tools\ffmpeg-lock.json" -Raw | ConvertFrom-Json
+$root = Split-Path $PSScriptRoot -Parent
+if (!$Out) { $Out = Join-Path (Join-Path $root 'release') 'ffmpeg-source' }
+$lock = Get-Content (Join-Path (Join-Path $root 'tools') 'ffmpeg-lock.json') -Raw | ConvertFrom-Json
 $commit = 'b204e94e90'
 $buildsTag = 'autobuild-2026-11-06-12-50'
 New-Item -ItemType Directory -Force $Out | Out-Null
