@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.5/REPLAYX_0.3.1-alpha.5_x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.5-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.6/REPLAYX_0.3.1-alpha.6_x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.6-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
   <br>
-  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.5">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
+  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.6">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
 </p>
 
 <p align="center">
@@ -38,7 +38,7 @@
 
 ## Install
 
-1. Download **`REPLAYX_0.3.1-alpha.5_x64-setup.exe`** with the button above.
+1. Download **`REPLAYX_0.3.1-alpha.6_x64-setup.exe`** with the button above.
 2. Run it. It installs for your account only, without administrator rights.
 3. Builds aren't code-signed yet: if SmartScreen appears, choose **More info → Run anyway**, ideally after checking the file against the release's `SHA256SUMS.txt`.
 

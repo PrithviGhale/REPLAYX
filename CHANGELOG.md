@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.1-alpha.6 — Audio device changes, clips folder
+
+User-facing notes: [docs/release-notes/v0.3.1-alpha.6.md](docs/release-notes/v0.3.1-alpha.6.md).
 
 - **Fixed: "Audio initialization failed … 0x88890004".** Windows returns this code (*device invalidated*) when an audio device is switching just as REPLAYX opens it: a headset connecting, a Bluetooth profile change, waking from sleep. REPLAYX now waits and retries up to five times over about four seconds, each time with the then-current default device. If a device changes **during** capture, REPLAYX reconnects through its bounded recovery instead of stopping (footage so far is kept; a recording continues as a new verified part). The error text is now plain language instead of `Ok(Err(…))`.
 - **Fixed: the Clips folder button opened Documents.** The default clips folder was stored as `…\Videos/REPLAYX`; Explorer reads `/REPLAYX` as a command-line switch and fell back to Documents. Paths are now stored with Windows separators, existing settings are repaired automatically, and the button opens exactly the clips folder.
+- A voice-processing speed test no longer fails when the PC is busy (it now keeps the best of three timings).
 - Playtime tracking (on by default, off in **Settings → Playtime tracking**) re-measured: about 21–25 µs per once-a-second check (≈0.002% of one CPU core) and one small file write at most once a minute.
 
 ## 0.3.1-alpha.5 — Reliable Start with Windows, release pipeline, new project page

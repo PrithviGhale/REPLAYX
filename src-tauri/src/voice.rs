@@ -738,16 +738,36 @@ mod tests {
     }
     #[test]
     fn a_frame_is_processed_far_inside_its_10_ms_budget() {
-        // Even in an unoptimised test build; release is ~0.06 ms per frame.
+        // Even in an unoptimised test build (about 2.5 ms; release is ~0.06 ms).
+        // Measured as this thread's CPU time, best of three: the test suite
+        // runs in parallel, and wall-clock time would also count the time
+        // spent waiting for a free core.
+        fn thread_cpu_ms() -> f64 {
+            use windows::Win32::{
+                Foundation::FILETIME,
+                System::Threading::{GetCurrentThread, GetThreadTimes},
+            };
+            let mut t = [FILETIME::default(); 4];
+            let [created, exited, kernel, user] = &mut t;
+            unsafe { GetThreadTimes(GetCurrentThread(), created, exited, kernel, user) }.unwrap();
+            let ms = |f: &FILETIME| {
+                (((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64) as f64 / 10_000.0
+            };
+            ms(&t[2]) + ms(&t[3])
+        }
         let x = voice(48_000, -24.0);
         let mut p = Processor::new(&preset("broadcast").unwrap(), 6.0);
-        let start = std::time::Instant::now();
-        for c in x.chunks(FRAME) {
-            let mut f = c.to_vec();
-            p.process(&mut f);
-        }
-        let per_frame = start.elapsed().as_secs_f64() * 1000.0 / 100.0;
-        assert!(per_frame < 5.0, "{per_frame:.3} ms per 10 ms frame");
+        let per_frame = (0..3)
+            .map(|_| {
+                let start = thread_cpu_ms();
+                for c in x.chunks(FRAME) {
+                    let mut f = c.to_vec();
+                    p.process(&mut f);
+                }
+                (thread_cpu_ms() - start) / 100.0
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(per_frame < 5.0, "{per_frame:.3} ms of CPU per 10 ms frame");
         assert_eq!(
             p.latency(),
             RNNOISE_DELAY + LOOKAHEAD,

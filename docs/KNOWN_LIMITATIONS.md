@@ -1,6 +1,10 @@
-# Known limitations — 0.3.1-alpha.4
+# Known limitations — 0.3.1-alpha.6
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+
+## Audio devices (0.3.1-alpha.6)
+
+- A device that changes while capture starts is retried for about four seconds; one that changes during capture is reconnected through REPLAYX's bounded recovery (up to three restarts). A specifically selected microphone that stays unplugged ends capture with a message after those attempts; choose another device in **Audio**. Each reconnection starts a new replay buffer and splits a recording into verified parts.
 
 ## New in 0.3.1-alpha.1
 

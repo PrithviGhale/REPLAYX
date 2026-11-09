@@ -2137,6 +2137,24 @@ impl Inner {
                 });
             }
         }
+        // Checked before FFmpeg's exit status: when an audio device goes away,
+        // FFmpeg may also stop because that audio input ended.
+        // An audio device that changed during capture (headset plugged in or
+        // removed, output switched, Bluetooth profile change) reconnects
+        // through the bounded recovery instead of stopping capture.
+        let device_changed = p.feeds.iter().find_map(|f| {
+            f.meter
+                .error
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|e| audio::is_device_change(e))
+        });
+        if let Some(e) = device_changed.filter(|_| !p.synthetic) {
+            return self.begin_recovery(&format!(
+                "An audio device changed ({e}); reconnecting audio."
+            ));
+        }
         if let Some(exit) = p.child.try_wait()? {
             let reason = p
                 .progress
@@ -2166,22 +2184,6 @@ impl Inner {
                 );
             }
             bail!("Capture exited ({exit}). {reason}")
-        }
-        // An audio device that changed during capture (headset plugged in or
-        // removed, output switched, Bluetooth profile change) reconnects
-        // through the bounded recovery instead of stopping capture.
-        let device_changed = p.feeds.iter().find_map(|f| {
-            f.meter
-                .error
-                .lock()
-                .unwrap()
-                .clone()
-                .filter(|e| audio::is_device_change(e))
-        });
-        if let Some(e) = device_changed.filter(|_| !p.synthetic) {
-            return self.begin_recovery(&format!(
-                "An audio device changed ({e}); reconnecting audio."
-            ));
         }
         for f in &p.feeds {
             if let Some(e) = f.meter.error.lock().unwrap().clone() {
@@ -2812,14 +2814,12 @@ mod tests {
             .state
             == "Buffering"));
         let encoder = pid(&engine).unwrap();
-        // Record joins the running encoder: no restart, no capture gap.
+        // Record joins the running encoder: no restart, no capture gap. The
+        // same encoder process (below) is the proof; the time bound only
+        // catches a restart (about 3 s) and allows a busy test machine.
         let t = Instant::now();
         engine.start_synthetic(true).unwrap();
-        assert!(
-            t.elapsed() < Duration::from_millis(100),
-            "{:?}",
-            t.elapsed()
-        );
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
         assert_eq!(pid(&engine), Some(encoder));
         assert!(engine.status().recording);
         assert!(
