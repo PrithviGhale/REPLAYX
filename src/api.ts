@@ -37,7 +37,7 @@ export type Settings = {
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
-  playtime: PlaytimeSettings; capture_notices: boolean;
+  playtime: PlaytimeSettings; capture_notices: boolean; updates: UpdateSettings;
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
@@ -82,7 +82,16 @@ export type TestCapture = {
   timestamp_errors: number; drift_correction_ppm: number; measured_device_clock_ppm: number;
   endpoint_mix_format: string | null;
 };
-export type UpdateInfo = { available: boolean; version?: string; notes?: string };
+export type UpdateSettings = {
+  auto_check: boolean; interval_hours: number; auto_download: boolean; auto_install: boolean; notify: boolean; idle_minutes: number;
+};
+export type UpdateStage = 'idle' | 'checking' | 'up_to_date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'installing' | 'failed';
+/** Sent by the engine (`update-status` event). `simulated` marks test data. */
+export type UpdateStatus = {
+  stage: UpdateStage; current: string; latest: string | null; notes: string | null; date: string | null;
+  downloaded: number; total: number | null; error: string | null; detail: string | null; last_checked: number | null;
+  simulated: boolean; configured: boolean; installable: boolean; waiting: boolean; prompt: boolean; release_url: string | null;
+};
 export type ActionName = 'start_replay' | 'stop_replay' | 'start_recording' | 'stop_recording' | 'save_replay' | 'stop_all' | 'recover' | 'discard_sessions';
 
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -128,8 +137,15 @@ export const api = {
   micMonitorSet: (volume: number, voice: VoiceConfig, boostDb: number, original: boolean) =>
     call<void>('mic_monitor_set', { volume, voice, boostDb, original }),
   openFolder: () => call<void>('open_folder'),
-  checkUpdate: () => call<UpdateInfo>('check_update'),
-  installUpdate: () => call<void>('install_update'),
+  updateStatus: () => call<UpdateStatus>('update_status'),
+  checkUpdate: () => call<UpdateStatus>('check_update'),
+  updateDownload: (install: boolean) => call<void>('update_download', { install }),
+  installUpdate: (pauseReplay: boolean) => call<void>('install_update', { pauseReplay }),
+  updateDismiss: () => call<UpdateStatus>('update_dismiss'),
+  updateConfigure: (settings: UpdateSettings) => call<Settings>('update_configure', { settings }),
+  updateOpenNotes: () => call<void>('update_open_notes'),
+  updateSimulate: (scenario: string) => call<UpdateStatus>('update_simulate', { scenario }),
+  setMicrophone: (on: boolean) => call<Settings>('set_microphone', { on }),
 };
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -156,6 +172,7 @@ export const previewSettings: Settings = {
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 6, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
   playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
+  updates: { auto_check: true, interval_hours: 6, auto_download: false, auto_install: false, notify: true, idle_minutes: 5 },
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 

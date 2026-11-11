@@ -14,7 +14,10 @@ import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
 import { GamesPage } from './pages/Games';
 import { PerformancePage } from './pages/Performance';
-import { SettingsPage } from './pages/Settings';
+import { SettingsPage, type SettingsTab } from './pages/Settings';
+import { UpdatePrompt } from './UpdatePrompt';
+import { startUpdates, useUpdate } from './updates';
+import { hasUpdate } from './update-logic';
 import { QuitPrompt } from './QuitPrompt';
 import { BrandMark } from './brand';
 import { Tour } from './Tour';
@@ -120,10 +123,18 @@ export function App() {
   });
   const { clips } = useApp();
   const pollError = usePollError();
-  useEffect(() => { startPolling(); }, []);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const updateWaiting = hasUpdate(useUpdate());
+  useEffect(() => { startPolling(); startUpdates(); }, []);
   const title = NAV.flatMap(g => g.items).find(i => i.id === page)!.label;
   // Tray "Settings…" and similar open a page by name.
-  const go = React.useCallback((p: string) => { if (NAV.some(g => g.items.some(i => i.id === p))) setPage(p as Page); }, []);
+  // "settings:updates" opens a Settings tab (tray "Update available").
+  const go = React.useCallback((target: string) => {
+    const [p, tab] = target.split(':');
+    if (!NAV.some(g => g.items.some(i => i.id === p))) return;
+    if (p === 'settings' && ['general', 'hotkeys', 'updates', 'about'].includes(tab)) setSettingsTab(tab as SettingsTab);
+    setPage(p as Page);
+  }, []);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -135,6 +146,7 @@ export function App() {
               {g.items.map(({ id, label, icon: Icon }) => (
                 <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>
                   <Icon size={17} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
+                  {id === 'settings' && updateWaiting && <i className="nav-dot" role="img" aria-label="Update available" title="Update available" />}
                 </button>
               ))}
             </div>
@@ -165,11 +177,12 @@ export function App() {
           {page === 'clips' && <ClipsPage />}
           {page === 'games' && <GamesPage go={setPage} />}
           {page === 'performance' && <PerformancePage />}
-          {page === 'settings' && <SettingsPage />}
+          {page === 'settings' && <SettingsPage tab={settingsTab} setTab={setSettingsTab} />}
           </PageBoundary>
         </main>
         <SaveBar />
       </div>
+      <UpdatePrompt suppressed={page === 'settings' && settingsTab === 'updates'} />
       <Toasts />
       <QuitPrompt onNavigate={go} />
       <Tour go={setPage} />

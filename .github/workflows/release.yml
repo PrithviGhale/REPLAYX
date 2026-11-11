@@ -10,11 +10,13 @@
 # - If a release (draft or published) already exists for the tag, the run stops
 #   before building: published installers are never rebuilt or overwritten.
 #
-# Optional repository configuration for signed in-app updates:
-#   secrets.TAURI_SIGNING_PRIVATE_KEY, secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-#   vars.REPLAYX_UPDATE_PUBKEY  (public key matching the private key)
-# Without them the installer is built without updater artifacts and the app
-# reports updates as unavailable.
+# Signed in-app updates: a release build needs the repository secrets
+#   TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# (the private half of the key whose public half is in src-tauri/tauri.conf.json;
+# see docs/RELEASING.md). The installer is signed, the signature is verified
+# against the built-in public key, and latest.json is attached to the draft, so
+# installed copies find the update once the release is published. A release
+# without the secret fails early; test builds without it are unsigned.
 name: Release (draft)
 on:
   push:
@@ -109,25 +111,51 @@ jobs:
       - name: Bundle resources
         shell: pwsh
         run: ./scripts/prepare-bundle.ps1
+      - name: Update signing key (a release must be signed)
+        if: needs.plan.outputs.tag != ''
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw 'The repository secret TAURI_SIGNING_PRIVATE_KEY is missing. Installed copies only accept updates signed with the key whose public half is in src-tauri/tauri.conf.json; see docs/RELEASING.md (Signed updates).'
+          }
       - name: Build installer
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          REPLAYX_UPDATE_PUBKEY: ${{ vars.REPLAYX_UPDATE_PUBKEY }}
         run: |
-          if ($env:TAURI_SIGNING_PRIVATE_KEY -and $env:REPLAYX_UPDATE_PUBKEY) {
-            $env:REPLAYX_UPDATE_URL = "https://github.com/${{ github.repository }}/releases/latest/download/latest.json"
-            npm run tauri -- build --config '{\"bundle\":{\"createUpdaterArtifacts\":true}}'
+          # With the signing key: the installer plus its detached update
+          # signature (.sig). Without it (test builds on forks): unsigned.
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            npm run tauri -- build --config src-tauri/tauri.updater.conf.json
           } else {
-            Remove-Item Env:REPLAYX_UPDATE_PUBKEY -ErrorAction SilentlyContinue
             npm run tauri -- build
           }
           if ($LASTEXITCODE) { throw 'Installer build failed' }
-      - name: Updater manifest
-        if: needs.plan.outputs.tag != ''
+      - name: Verify the update signature against the built-in public key
         shell: pwsh
-        run: ./scripts/updater-manifest.ps1 -Repository "${{ github.repository }}" -Tag "${{ needs.plan.outputs.tag }}"
+        run: |
+          $dir = 'src-tauri/target/release/bundle/nsis'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $exe = @(Get-ChildItem $dir -Filter *.exe)
+          if ($exe.Count -ne 1) { throw "Expected one installer, found $($exe.Count)" }
+          if (Test-Path "$($exe[0].FullName).sig") {
+            node scripts/verify-update-signature.mjs $exe[0].FullName "$($exe[0].FullName).sig" --version $version
+            if ($LASTEXITCODE) { throw 'The update signature does not verify; nothing will be released.' }
+          } elseif ('${{ needs.plan.outputs.tag }}') {
+            throw 'No update signature was produced for a release build.'
+          } else {
+            Write-Host 'Unsigned test build (no signing key available): no update signature to verify.'
+          }
+      - name: Updater manifest (latest.json)
+        shell: pwsh
+        run: |
+          $tag = '${{ needs.plan.outputs.tag }}'
+          if (-not $tag) { $tag = "v$((Get-Content package.json -Raw | ConvertFrom-Json).version)" }
+          ./scripts/updater-manifest.ps1 -Repository "${{ github.repository }}" -Tag $tag
+          if ('${{ needs.plan.outputs.tag }}' -and -not (Test-Path 'src-tauri/target/release/bundle/nsis/latest.json')) { throw 'latest.json was not written for a release build.' }
       - name: Checksum
         shell: pwsh
         run: |
@@ -221,7 +249,12 @@ jobs:
           flags=(--draft --verify-tag --title "REPLAYX $TAG$stage" --notes-file "$notes")
           # Not marked pre-release: GitHub only shows a "Latest" release card for
           # regular releases. The title and tag still say Alpha/Beta.
-          files=(*.exe SHA256SUMS.txt ffmpeg-corresponding-source-*.tar)
-          compgen -G "*.sig" >/dev/null && files+=(*.sig)
-          [[ -f latest.json ]] && files+=(latest.json)
+          # The update manifest must point at exactly the files of this release.
+          exe=$(ls *.exe)
+          [[ -f "$exe.sig" && -f latest.json ]] || { echo "::error::The signed update files (.sig, latest.json) are missing."; exit 1; }
+          want="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$exe"
+          [[ "$(jq -r '.platforms["windows-x86_64"].url' latest.json)" == "$want" ]] || { echo "::error::latest.json does not point at $want"; exit 1; }
+          [[ "$(jq -r '.platforms["windows-x86_64"].signature' latest.json)" == "$(tr -d '\r\n' < "$exe.sig")" ]] || { echo "::error::latest.json carries a different signature than $exe.sig"; exit 1; }
+          [[ "v$(jq -r '.version' latest.json)" == "$TAG" ]] || { echo "::error::latest.json is for another version"; exit 1; }
+          files=("$exe" SHA256SUMS.txt ffmpeg-corresponding-source-*.tar "$exe.sig" latest.json)
           gh release create "$TAG" -R "$GITHUB_REPOSITORY" "${flags[@]}" "${files[@]}"

@@ -36,7 +36,7 @@ Your microphone is recorded on **its own track**, cleaned up by REPLAYX's own re
 Noise suppression (Off, Light, Balanced, Strong) uses **RNNoise**; in our tests on speech mixed with fan noise it removed about 10, 17 and 25 dB of the noise while leaving the speech practically unchanged, using about 1% of one CPU core. **Test mic** plays you back live, switching between *Enhanced* and *Original* at the same loudness; **Compare** records one short take (kept in memory only) to hear both versions of the same words. Fine-tune gives you gain, a rumble filter, a soft gate, compressor, EQ and de-esser, and you can save your own presets. REPLAYX never changes your Windows microphone level.
 
 ## Separate audio tracks
-System sound, individual apps (game, Discord, music) and your microphone each get their own track, plus a full mix on track 1 so every player plays everything. New microphones and headsets are picked up automatically.
+The home page has a **microphone switch**: turn your microphone off and on in recordings with one click, also in the middle of a recording (the mute shortcut and the tray do the same). System sound, individual apps (game, Discord, music) and your microphone each get their own track, plus a full mix on track 1 so every player plays everything. New microphones and headsets are picked up automatically.
 
 ## Clips library and game detection
 
@@ -64,6 +64,9 @@ The **Games** page shows how long you played each game today, yesterday, this we
 </p>
 
 Small icons in a corner of your screen show Instant Replay, your microphone and a red dot while recording (with an optional timer), over games, apps and the desktop. Windows keeps them **out of your recordings** (verified on captured frames). A short pop-up slides in for *Recording started*, *Instant Replay saved*, *Recording saved* or *Save failed*. Silent, click-through, never steals focus, never in your clips; both can be turned off.
+
+## Updates
+REPLAYX tells you when a new version is out: a dot on **Settings**, and a pop-up with what's new and an **Update Now** button. It downloads with visible progress, checks the publisher's signature, installs and restarts; your clips, settings and playtime stay. It never interrupts a recording or a save. Choose **Manual**, **Notify me** (default) or **Auto update** in **Settings → Updates**.
 
 ## Light on your games
 While hidden in the tray, REPLAYX draws nothing and checks its status only every 2 seconds. The once-a-second game check costs about 17 µs (≈0.002% of one CPU core), and work after capture (joining clips, checks, thumbnails) runs below normal priority. Recording itself cost about 3–4.5% game FPS at 1080p60 in our measurements; see [Performance](PERFORMANCE.md).

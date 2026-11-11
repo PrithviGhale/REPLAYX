@@ -11,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 const port = Number(process.argv[process.argv.indexOf('--port') + 1] || 9337);
+// Extra preview parameters, e.g. --query "update=available&prompt" (update screens).
+const extra = process.argv.includes('--query') ? '&' + process.argv[process.argv.indexOf('--query') + 1] : '';
 // Chrome, not Edge: a new Edge profile signs in with the Windows account.
 const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rx-fit-'));
@@ -99,7 +101,7 @@ for (const scale of textScales) for (const [w, h] of sizes) {
   for (const page of pages) {
     await send('Page.navigate', { url: 'about:blank' });
     await sleep(120);
-    await send('Page.navigate', { url: `http://127.0.0.1:1430/dev/preview.html?state=replay&p=${page}#${page}` });
+    await send('Page.navigate', { url: `http://127.0.0.1:1430/dev/preview.html?state=replay&p=${page}${extra}#${page}` });
     let last = -1;
     for (let k = 0; k < 40; k++) {
       await sleep(150);

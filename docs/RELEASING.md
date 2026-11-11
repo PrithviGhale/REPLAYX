@@ -41,6 +41,28 @@ python -I scripts/ffmpeg-source/collect_licenses.py plan.json release/ffmpeg-sou
 
 Then pack `SOURCE-README.txt`, the two archives, `deps/` and `licenses/` into one uncompressed `ffmpeg-corresponding-source-<ffmpeg version>.tar` (under GitHub's 2 GiB asset limit), add its SHA-256 to `SHA256SUMS.txt`, and attach both to the release. Fetch failures must be resolved or explained in `SOURCE-README.txt` (for v0.3.1-alpha.4 only PulseAudio, which is Linux-only, is absent).
 
-## Signed updates (not enabled yet)
+## Signed updates
 
-The app contains the Tauri updater with signature verification. To enable it, a maintainer creates an update signing key **outside** the repository, stores the private key as the repository secret `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`), and the public key as the variable `REPLAYX_UPDATE_PUBKEY`. The release workflow then also publishes `latest.json` and `.sig` files. Test a real upgrade from the previous release before announcing in-app updates. Authenticode code signing is separate and not configured.
+Installed copies of REPLAYX update themselves from GitHub Releases (Settings → Updates). Three things make that work, and all three are checked by the release workflow:
+
+1. **The signing key.** Updates are signed with a dedicated Tauri updater key (minisign, Ed25519). The **public** half is in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) and is compiled into the app. The **private** half and its password never enter the repository, a log or a release:
+   - On the maintainer's PC they live in `%USERPROFILE%\.replayx-signing\` (`replayx-updater.key`, `password.txt`), readable only by that Windows account.
+   - **Back both up somewhere safe and offline** (a password manager, an encrypted USB stick). If the key is lost, installed copies can no longer be updated in place: users would have to install a build with a new key by hand. If it leaks, anyone could sign an "update".
+   - GitHub needs them as repository secrets for release builds. Set them once, from the maintainer's PC (values are read from the files, never typed or shown):
+     ```powershell
+     gh secret set TAURI_SIGNING_PRIVATE_KEY -R PrithviGhale/REPLAYX < "$env:USERPROFILE\.replayx-signing\replayx-updater.key"
+     gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R PrithviGhale/REPLAYX < "$env:USERPROFILE\.replayx-signing\password.txt"
+     ```
+   - This is separate from Windows code signing (Authenticode), which REPLAYX does not have yet: SmartScreen warnings are unaffected.
+2. **The signed installer.** A release build runs `tauri build --config src-tauri/tauri.updater.conf.json`, which also writes `REPLAYX_<version>_x64-setup.exe.sig`. The workflow then verifies that signature against the built-in public key and for exactly the release's version (`scripts/verify-update-signature.mjs`), and fails if it doesn't verify. A release build without the secret fails before building.
+3. **The manifest.** `scripts/updater-manifest.ps1` writes `latest.json` (version, highlights from the release notes, download address, signature). The draft step checks that it points at exactly this release's installer and carries the same signature, then attaches `latest.json` and the `.sig` to the draft.
+
+The app reads `https://github.com/PrithviGhale/REPLAYX/releases/latest/download/latest.json`. GitHub resolves `latest` to the newest **published** release that is not a draft and not marked *pre-release*, so:
+
+- a draft, a failed build or a commit is never offered: only publishing the release makes the update visible;
+- releases must stay unmarked as *pre-release* (they are titled "— Alpha" instead), or installed copies won't see them;
+- a release without `latest.json` (v0.3.1-alpha.6 and older) answers 404 and the app reports that no update file was found.
+
+The app refuses anything that isn't newer than itself (semantic versions: `alpha.7` > `alpha.6`, `beta` > `alpha`, a release > its pre-releases), any package not signed by the key, any signature made for a different version, and any download address outside this repository's release assets. Updating keeps settings, clips and playtime: the installer only replaces the program files.
+
+**Before the first signed release:** set the two secrets, tag, let the workflow draft the release, and test a real update from the previous version (install the previous installer, publish the draft, press *Check Now*). `node dev/update-e2e.mjs` tests the whole flow against a local test server without installing anything.

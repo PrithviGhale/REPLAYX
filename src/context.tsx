@@ -12,6 +12,11 @@ type Ctx = {
   patch: (p: Partial<Settings>) => void; save: () => Promise<boolean>; discard: () => void;
   /** Volume/mute apply immediately (even while capturing) and persist in the engine. */
   setMix: (index: number, volume: number, muted: boolean) => Promise<void>;
+  /** The one microphone switch (home page, tray, shortcut). Resolves to the
+   * state the engine confirmed; the interface never shows On before that. */
+  setMicrophone: (on: boolean) => Promise<boolean>;
+  /** Take over fields the engine changed and confirmed (never marks them unsaved). */
+  syncFromEngine: (fields: Partial<Settings>) => void;
   caps: Caps | null; refreshCaps: () => Promise<void>;
   clips: Clip[]; refreshClips: () => Promise<void>;
   /** Apply a finished delete/move locally; no rescan needed. */
@@ -76,8 +81,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       libraryRevision.current++;
       setClips(payload);
     });
+    // Microphone switched from the tray or with the shortcut.
+    const mix = listen<Settings['audio']>('audio-settings', ({ payload }) => {
+      if (closed) return;
+      const apply = (s: Settings) => ({ ...s, audio: s.audio.map((a, i) => (payload[i] && payload[i].kind === a.kind ? { ...a, muted: payload[i].muted, enabled: payload[i].enabled } : a)) });
+      setSaved(apply); setDraft(apply);
+    });
     return () => {
       closed = true;
+      void mix.then(unlisten => unlisten());
       void subscription.then(unlisten => unlisten());
       void indexed.then(unlisten => unlisten());
       void devices.then(unlisten => unlisten());
@@ -140,7 +152,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (native) await api.setMix(index, volume, muted).catch(e => toast('error', errorText(e)));
   }, [toast]);
 
-  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, dropClip, putClip, pendingSaves, busy, run, toast, toasts, dismiss };
+  const syncFromEngine = useCallback((fields: Partial<Settings>) => {
+    setSaved(s => ({ ...s, ...fields })); setDraft(s => ({ ...s, ...fields }));
+  }, []);
+  const setMicrophone = useCallback(async (on: boolean) => {
+    const before = saved.audio.find(a => a.kind === 'microphone');
+    const was = !!before && before.enabled && !before.muted;
+    if (!native) return was;
+    try {
+      const confirmed = await api.setMicrophone(on);
+      const apply = (s: Settings) => ({ ...s, audio: s.audio.map((a, i) => (confirmed.audio[i] && confirmed.audio[i].kind === a.kind ? { ...a, muted: confirmed.audio[i].muted, enabled: confirmed.audio[i].enabled } : a)) });
+      setSaved(apply); setDraft(apply);
+      const mic = confirmed.audio.find(a => a.kind === 'microphone');
+      return !!mic && mic.enabled && !mic.muted;
+    } catch (e) {
+      toast('error', errorText(e));
+      return was;
+    }
+  }, [saved.audio, toast]);
+
+  const value = { setMix, setMicrophone, syncFromEngine, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, dropClip, putClip, pendingSaves, busy, run, toast, toasts, dismiss };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

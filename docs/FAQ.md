@@ -27,6 +27,12 @@ The source code of the FFmpeg build REPLAYX ships, with the libraries built into
 **Which GPUs are supported?**
 NVIDIA (NVENC), Intel (Quick Sync) and AMD (AMF) hardware encoders, with a CPU fallback. Only codecs your PC can actually encode are offered.
 
+**How do I update REPLAYX?**
+From the first signed release on, REPLAYX finds new versions itself (a dot on Settings and a pop-up) and installs them when you click **Update Now**; **Settings → Updates** has *Check Now* and the automatic options. Version 0.3.1-alpha.6 and older have to be updated once by running the newer installer. Either way your clips and settings are kept.
+
+**Can I turn my microphone off quickly?**
+Yes: the switch next to *Microphone* on the home page, the microphone line in the tray menu, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>. It works during a recording and doesn't affect game or chat audio.
+
 **How do I quit REPLAYX completely?**
 Right-click the tray icon → **Quit**.
 

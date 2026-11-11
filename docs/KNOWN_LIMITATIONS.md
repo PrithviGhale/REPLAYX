@@ -2,6 +2,15 @@
 
 REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
 
+## Updates and the microphone switch (next release)
+
+- **In-app updates start with the first signed release.** v0.3.1-alpha.6 and older contain no update channel, so they must be updated once by hand (run the new installer). From the first release that carries `latest.json`, installed copies find later versions themselves.
+- **Not yet tested end to end with a real installation:** checking, downloading, signature verification, rejections and the interface are tested against a local test server with the real signing key, but replacing an installed copy through the installer and restarting has not been done yet (it needs two published signed releases, or a controlled test).
+- **No automatic rollback.** If an installation fails part-way, run the installer from the Releases page again; settings and clips are not touched by the installer.
+- A GitHub outage and a release without an update file look the same to the app (*no update file was found*); it simply checks again later.
+- Updates are signed with REPLAYX's update key, but the installer is still not code-signed for Windows (Authenticode), so SmartScreen may still warn on a manual download.
+- **Microphone switch:** Off mutes the microphone in recordings at once (also mid-recording, with a 10 ms fade so there is no click) and keeps its track, so audio tracks stay aligned. While capture is running REPLAYX keeps the microphone device open so it can be switched back on instantly; nothing from it is written while it is off. To keep the device closed entirely, turn off *Record microphone* on the Audio page. A microphone removed from the capture there can only be switched back on while capture is stopped.
+
 ## Audio devices (0.3.1-alpha.6)
 
 - A device that changes while capture starts is retried for about four seconds; one that changes during capture is reconnected through REPLAYX's bounded recovery (up to three restarts). A specifically selected microphone that stays unplugged ends capture with a message after those attempts; choose another device in **Audio**. Each reconnection starts a new replay buffer and splits a recording into verified parts.
@@ -93,5 +102,5 @@ REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md]
 
 - The 0.2.1-alpha.2 installer is built but **not yet installed and tested** (install, launch, record, upgrade, uninstall). The tested build is the executable in `src-tauri/target/release/replayx.exe`. Don't use the 0.1.x installers; they predate the fixes.
 - Binaries aren't Authenticode-signed, so Windows SmartScreen may warn.
-- In-app updates are disabled until a publisher signing key and release endpoint exist. The signed update path hasn't been exercised.
+- (Superseded: in-app updates are implemented; see *Updates and the microphone switch* above.)
 - Before a public release, the FFmpeg corresponding source and the notices of its bundled libraries must be packaged with the release (see THIRD_PARTY_NOTICES.md). H.264/AAC patent questions are not resolved by the software license.

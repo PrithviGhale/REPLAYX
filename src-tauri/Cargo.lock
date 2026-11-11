@@ -3004,6 +3004,7 @@ dependencies = [
  "chrono",
  "fs2",
  "nnnoiseless",
+ "semver",
  "serde",
  "serde_json",
  "sysinfo",

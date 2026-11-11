@@ -3,8 +3,11 @@ import { Compass, Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, Sh
 import { startTour } from '../Tour';
 import { comboFrom } from '../hotkeys';
 import { BRAND, BrandMark } from '../brand';
+import { UpdatesTab } from './Updates';
+import { useUpdate } from '../updates';
+import { hasUpdate } from '../update-logic';
 export { comboFrom };
-import { api, errorText, native, type PlaytimeData, type PlaytimeSettings, type Settings, type UpdateInfo } from '../api';
+import { api, errorText, native, type PlaytimeData, type PlaytimeSettings, type Settings } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
 import { Badge, Button, Card, Field, Kbd, Modal, Segmented, Toggle } from '../ui';
@@ -12,7 +15,8 @@ import type { OverlayPosition, OverlaySettings } from '../api';
 import { Section } from './shared';
 import { VERSION } from '../api';
 
-type Tab = 'general' | 'hotkeys' | 'updates' | 'about';
+export type SettingsTab = 'general' | 'hotkeys' | 'updates' | 'about';
+type Tab = SettingsTab;
 type HotkeyKey = 'replay_hotkey' | 'recording_hotkey' | 'pause_hotkey' | 'mute_hotkey' | 'window_hotkey';
 const HOTKEYS: { key: HotkeyKey; label: string; text: string }[] = [
   { key: 'replay_hotkey', label: 'Save instant replay', text: 'Saves the last replay window to Clips.' },
@@ -60,12 +64,11 @@ function HotkeyRow({ item, value, onChange, disabled, duplicate }: { item: typeo
   );
 }
 
-export function SettingsPage() {
-  const { draft, patch, caps, run, busy } = useApp();
+export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: SettingsTab) => void }) {
+  const { draft, patch, run } = useApp();
+  const updateWaiting = hasUpdate(useUpdate());
   const active = useStatus(activeOf);
   const hotkeyError = useStatus(x => x.hotkey_error);
-  const [tab, setTab] = useState<Tab>('general');
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const counts = HOTKEYS.reduce<Record<string, number>>((m, h) => { const k = draft[h.key].toLowerCase(); m[k] = (m[k] ?? 0) + 1; return m; }, {});
   const tabs: { id: Tab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: 'General', icon: Settings2 }, { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard },
@@ -75,7 +78,7 @@ export function SettingsPage() {
   return (
     <Section>
       <div className="tabs" role="tablist" data-tour="settings-tabs">
-        {tabs.map(t => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}><t.icon size={15} />{t.label}</button>)}
+        {tabs.map(t => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}><t.icon size={15} />{t.label}{t.id === 'updates' && updateWaiting && <span className="tab-badge" aria-label="Update available">1</span>}</button>)}
       </div>
 
       {tab === 'general' && (
@@ -134,29 +137,7 @@ export function SettingsPage() {
         </Card>
       )}
 
-      {tab === 'updates' && (
-        <Card title="Updates" subtitle="Optional. Checks GitHub Releases only when you ask, or at startup if enabled.">
-          {!caps?.updates_configured && <div className="banner info">This build has no signed update channel configured, so update checks are unavailable. Download new versions from the project's GitHub Releases page.</div>}
-          <Toggle label="Check for updates at startup" checked={draft.check_updates} disabled={!caps?.updates_configured || active} onChange={v => patch({ check_updates: v })}
-            description="A single request to GitHub. No usage data is sent." />
-          <div className="row">
-            <Button icon={RefreshCw} disabled={!caps?.updates_configured || !!busy} onClick={() => run('Checking for updates', async () => setUpdate(await api.checkUpdate()))}>Check now</Button>
-            <span className="muted small">Current version {VERSION}</span>
-          </div>
-          {update && (update.available ? (
-            <div className="update">
-              <strong>Version {update.version} is available</strong>
-              {update.notes && <pre className="notes">{update.notes}</pre>}
-              <div className="row">
-                <Button variant="primary" icon={Download} disabled={active || !!busy} onClick={() => run('Installing update', api.installUpdate)}>Install and restart</Button>
-                <Button variant="ghost" onClick={() => setUpdate(null)}>Later</Button>
-              </div>
-              {active && <small className="muted">Stop capture first — updates never interrupt a recording.</small>}
-            </div>
-          ) : <div className="banner ok">You're on the latest version.</div>)}
-          <p className="muted small">Updates are verified with the publisher's signature before installing. Settings and clips are kept.</p>
-        </Card>
-      )}
+      {tab === 'updates' && <UpdatesTab />}
 
       {tab === 'about' && (
         <Card className="about">

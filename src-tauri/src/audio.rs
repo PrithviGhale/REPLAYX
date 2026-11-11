@@ -721,6 +721,22 @@ fn valid_process(s: &AudioSource) -> Result<()> {
     }
     Ok(())
 }
+/// Apply the mix gain to one interleaved stereo chunk and return its peak.
+/// The gain moves linearly from the previous chunk's value to the new one
+/// across the chunk (10 ms), so muting, unmuting and volume changes during a
+/// recording never produce a click.
+pub fn apply_gain(chunk: &mut [f32], from: f32, to: f32) -> f32 {
+    let frames = (chunk.len() / CHANNELS).max(1) as f32;
+    let mut peak = 0f32;
+    for (n, frame) in chunk.chunks_mut(CHANNELS).enumerate() {
+        let gain = from + (to - from) * ((n + 1) as f32 / frames);
+        for sample in frame {
+            *sample = (*sample * gain).clamp(-4., 4.);
+            peak = peak.max(sample.abs());
+        }
+    }
+    peak
+}
 /// Windows audio errors that mean the device is changing or not ready yet
 /// (AUDCLNT_E_DEVICE_INVALIDATED, _ENDPOINT_CREATE_FAILED,
 /// _SERVICE_NOT_RUNNING, _RESOURCES_INVALIDATED, E_NOTFOUND): worth retrying
@@ -870,6 +886,8 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 && (source.voice.active() || source.boost_db > 0.05))
                 .then(|| crate::voice::Processor::new(&source.voice, source.boost_db));
             let mut mono = vec![0f32; CHUNK];
+            // Gain of the previous chunk (mute and volume changes are ramped).
+            let mut last_gain: Option<f32> = None;
             client.start_stream()?;
             let mut clock_base: Option<(u64, u64)> = None;
             let mut last_process_check = Instant::now();
@@ -980,14 +998,11 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                     } else {
                         f32::from_bits(mt.volume.load(Ordering::Relaxed))
                     };
-                    let mut peak = 0f32;
-                    for sample in chunk.iter_mut() {
-                        // Float PCM keeps headroom above full scale: a source
-                        // turned above 100% is limited smoothly in FFmpeg
-                        // (media::source_chain) instead of hard-clipped here.
-                        *sample = (*sample * gain).clamp(-4., 4.);
-                        peak = peak.max(sample.abs());
-                    }
+                    // Float PCM keeps headroom above full scale: a source
+                    // turned above 100% is limited smoothly in FFmpeg
+                    // (media::source_chain) instead of hard-clipped here.
+                    let peak = apply_gain(&mut chunk, last_gain.unwrap_or(gain), gain);
+                    last_gain = Some(gain);
                     mt.peak.store(peak.to_bits(), Ordering::Relaxed);
                     let chunk: Vec<u8> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
                     match tx.try_send(chunk) {
@@ -1082,6 +1097,43 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn muting_and_unmuting_ramp_without_a_click() {
+        // A full-scale tone muted mid-recording: the last chunk fades to
+        // silence instead of jumping, and everything after it is silent.
+        let tone = |n: usize| -> Vec<f32> {
+            (0..n * CHANNELS)
+                .map(|i| ((i / CHANNELS) as f32 * 0.2).sin())
+                .collect()
+        };
+        let mut fading = tone(480);
+        apply_gain(&mut fading, 1.0, 0.0);
+        let step = fading
+            .chunks(CHANNELS)
+            .zip(fading.chunks(CHANNELS).skip(1))
+            .map(|(a, b)| (a[0] - b[0]).abs())
+            .fold(0f32, f32::max);
+        assert!(step < 0.25, "largest sample-to-sample step {step}");
+        assert_eq!(fading[fading.len() - 1], 0.0, "ends in silence");
+        let mut silent = tone(480);
+        assert_eq!(
+            apply_gain(&mut silent, 0.0, 0.0),
+            0.0,
+            "muted: nothing is captured"
+        );
+        assert!(silent.iter().all(|v| *v == 0.0));
+        // Unmuting fades in from silence; a steady gain changes nothing.
+        let mut rising = tone(480);
+        apply_gain(&mut rising, 0.0, 1.0);
+        assert!(rising[0].abs() < 0.01 && rising[1].abs() < 0.01);
+        let (mut steady, original) = (tone(480), tone(480));
+        apply_gain(&mut steady, 1.0, 1.0);
+        assert_eq!(steady, original);
+        // Both channels of a frame get the same gain (no stereo shift).
+        let mut pair = vec![1.0f32; 960];
+        apply_gain(&mut pair, 1.0, 0.0);
+        assert!(pair.chunks(CHANNELS).all(|f| f[0] == f[1]));
+    }
     #[test]
     fn device_changes_are_retried_and_reconnected_not_fatal() {
         // The error from the report: a device switching while it was opened.

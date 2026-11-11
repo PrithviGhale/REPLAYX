@@ -38,10 +38,10 @@ for (let i = 0; i < 300 && !target; i++) {
 if (!target) { console.log('Browser DevTools endpoint did not appear'); process.exit(2); }
 await sleep(1500);
 const foreign = (await (await fetch(`http://127.0.0.1:${port}/json`)).json())
-  // Allowed: the preview, Chrome's own UI and its two built-in component
-  // extensions. Anything else (web pages, user extensions) means the profile
+  // Allowed: the preview, Chrome's own UI and its built-in component
+  // extensions (IDs compiled into chrome.dll; the third arrived with Chrome 157). Anything else (web pages, user extensions) means the profile
   // is not anonymous.
-  .filter(t => !/^(about:blank|http:\/\/127\.0\.0\.1:1430\/|devtools:|chrome:\/\/|chrome-extension:\/\/(nkeimhogjdpnpccoofpliimaahmaaome|fignfifoniblkonapihmkfakmlgkbkcf)\/)/.test(t.url));
+  .filter(t => !/^(about:blank|http:\/\/127\.0\.0\.1:1430\/|devtools:|chrome:\/\/|chrome-extension:\/\/(nkeimhogjdpnpccoofpliimaahmaaome|fignfifoniblkonapihmkfakmlgkbkcf|admccjkmockfdflocgggjfgdacdodkdf)\/)/.test(t.url));
 if (foreign.length) { console.log(`Aborting: the test browser opened ${foreign.length} unrelated page(s) (account sign-in or extensions): ${foreign.map(t => `${t.type} ${t.url.replace(/^([a-z-]+:\/\/[^/?#]*).*/, '$1')}`).join(', ')}`); process.exit(3); }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r => ws.addEventListener('open', r, { once: true }));

@@ -121,6 +121,8 @@ pub struct Settings {
     pub playtime: crate::playtime::PlaytimeSettings,
     /// Short bar when a recording starts or a clip is saved.
     pub capture_notices: bool,
+    /// Update checks, downloads and installs (see `updates`).
+    pub updates: crate::updates::UpdateSettings,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -171,6 +173,7 @@ impl Default for Settings {
             tour_done: false,
             voice_presets: Vec::new(),
             playtime: Default::default(),
+            updates: Default::default(),
             capture_notices: true,
             settings_version: SETTINGS_VERSION,
         }

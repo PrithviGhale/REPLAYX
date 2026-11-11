@@ -1,4 +1,5 @@
-import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { native } from '../api';
 import { useApp } from '../context';
 import { useCapture, useRecordButton } from '../capture';
@@ -22,6 +23,32 @@ function ReplayRing({ value, total, live }: { value: number; total: number; live
         <span>of {duration(total)}</span>
       </div>
     </div>
+  );
+}
+
+/** The microphone row of the home Audio card: level and one On/Off switch.
+ * The switch shows what the engine confirmed, also when it was changed from
+ * the tray or with the shortcut. Off mutes the microphone in recordings (its
+ * device, volume and Voice Enhancer settings stay as they are). */
+function MicRow({ name, peak, capturing }: { name: string; peak: number; capturing: boolean }) {
+  const { saved, setMicrophone } = useApp();
+  const [pending, setPending] = useState(false);
+  const mic = saved.audio.find(a => a.kind === 'microphone');
+  const on = !!mic && mic.enabled && !mic.muted;
+  const toggle = async () => {
+    if (pending) return;
+    setPending(true);
+    try { await setMicrophone(!on); } finally { setPending(false); }
+  };
+  return (
+    <li className={`mic-row ${on ? 'on' : 'off'}`}>
+      <span className="source-icon kind-microphone">{on ? <Mic size={18} /> : <MicOff size={18} />}</span>
+      <span className="name" title={name}>{name}{!on && <em className="off-tag">Off</em>}</span>
+      <Meter peak={on ? peak : 0} active={capturing && on} />
+      <button role="switch" aria-checked={on} aria-label={on ? 'Microphone on. Turn microphone off' : 'Microphone off. Turn microphone on'}
+        title={on ? 'Microphone is recorded. Click to turn it off.' : 'Microphone is not recorded. Click to turn it on.'}
+        className={`switch mic-switch ${on ? 'on' : ''} ${pending ? 'pending' : ''}`} aria-busy={pending} disabled={!native} onClick={toggle}><span /></button>
+    </li>
   );
 }
 
@@ -60,7 +87,8 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const display = caps?.displays.find(d => d.index === draft.display);
   const p = plan(sourceRect(display, draft.source_rect), outputWidth(draft.width, draft.height), draft.height, draft.canvas_mode);
   const out = active && s.ow ? `${s.ow} × ${s.oh}${s.pw ? ` (plays as ${s.pw} × ${s.ph})` : ''}` : `${p.width} × ${p.height}`;
-  const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
+  // The microphone is always listed (with its switch), also when it is off.
+  const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled || x.a.kind === 'microphone');
   const rec = useRecordButton('Stop & save');
   const starting = s.pending || s.state === 'Starting';
   const headline = starting ? (s.pending || s.recording ? 'Starting recording…' : 'Starting capture…') : s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
@@ -121,7 +149,9 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
         <Card title="Audio" actions={<button className="link-btn" onClick={() => navigate('audio')}>Mixer <ChevronRight size={13} /></button>}>
           {enabled.length === 0 ? <p className="muted small">No audio sources enabled — clips will be silent.</p> : (
             <ul className="mini-mixer">
-              {enabled.map(({ a, i }) => (
+              {enabled.map(({ a, i }) => a.kind === 'microphone' ? (
+                <MicRow key={i} name={a.name} peak={a.enabled ? peaks[feedIndex(draft.audio, i)] ?? 0 : 0} capturing={active} />
+              ) : (
                 <li key={i}>
                   <SourceIcon source={a} />
                   <span className="name">{a.name}</span>

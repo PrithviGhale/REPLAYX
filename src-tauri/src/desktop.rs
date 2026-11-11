@@ -20,7 +20,6 @@ use tauri::{
     Emitter, Manager, State,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-use tauri_plugin_updater::UpdaterExt;
 type Reply<T> = Result<T, String>;
 /// Persistent clip index plus background-probe bookkeeping.
 struct Library {
@@ -41,6 +40,8 @@ fn err(e: impl std::fmt::Display) -> String {
 struct AppState {
     engine: Engine,
     updating: Arc<Mutex<bool>>,
+    /// Update checks, downloads and installs (see `update_flow`).
+    updates: Arc<crate::update_flow::UpdateRuntime>,
     icons: Arc<Mutex<HashMap<String, Option<String>>>>,
     testing_audio: Arc<Mutex<bool>>,
     /// Set by "Stop test" to end a microphone/source test early.
@@ -340,6 +341,8 @@ fn save_settings_blocking(
     settings.tour_done |= previous.tour_done;
     // Playtime has its own live command (also during capture).
     settings.playtime = previous.playtime.clone();
+    // So do update preferences.
+    settings.updates = previous.updates.clone();
     if state.engine.status().replay
         || state.engine.status().recording
         || state.engine.status().saving > 0
@@ -972,93 +975,120 @@ fn open_local(path: &std::path::Path) -> Reply<()> {
     }
     Ok(())
 }
+/// A public key is built in (tauri.conf.json), so signed updates can be verified.
 fn update_configured() -> bool {
-    option_env!("REPLAYX_UPDATE_URL").is_some_and(validate_update_url)
-        && option_env!("REPLAYX_UPDATE_PUBKEY").is_some_and(|key| !key.trim().is_empty())
-}
-pub fn validate_update_url(url: &str) -> bool {
-    let Some(path) = url.strip_prefix("https://github.com/") else {
-        return false;
-    };
-    let parts: Vec<_> = path.split('/').collect();
-    parts.len() == 6
-        && parts[2..] == ["releases", "latest", "download", "latest.json"]
-        && parts[..2].iter().all(|part| {
-            !part.is_empty()
-                && ![".", ".."].contains(part)
-                && part
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || ['-', '_', '.'].contains(&c))
-        })
-}
-#[tauri::command]
-async fn check_update(app: tauri::AppHandle) -> Reply<serde_json::Value> {
-    let url = option_env!("REPLAYX_UPDATE_URL").ok_or(
-        "Updates are unavailable until the publisher configures a signed GitHub release endpoint",
-    )?;
-    if !validate_update_url(url) {
-        return Err("Untrusted update endpoint".into());
-    }
-    let update = app
-        .updater_builder()
-        .pubkey(option_env!("REPLAYX_UPDATE_PUBKEY").unwrap_or(""))
-        .endpoints(vec![url.parse().map_err(err)?])
-        .map_err(err)?
-        .build()
-        .map_err(err)?
-        .check()
-        .await
-        .map_err(err)?;
-    Ok(match update {
-        Some(u) => serde_json::json!({"available":true,"version":u.version,"notes":u.body}),
-        None => serde_json::json!({"available":false}),
+    // The updater's public key from tauri.conf.json (compiled in). Only the
+    // public half is ever in the repository or the app.
+    static KEY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KEY.get_or_init(|| {
+        serde_json::from_str::<serde_json::Value>(include_str!("../tauri.conf.json"))
+            .ok()
+            .and_then(|v| {
+                v["plugins"]["updater"]["pubkey"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .is_some_and(|key| !key.trim().is_empty())
     })
 }
 #[tauri::command]
-async fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Reply<()> {
-    {
-        let mut gate = state.updating.lock().unwrap();
-        let s = state.engine.status();
-        if *gate
-            || s.replay
-            || s.recording
-            || s.saving > 0
-            || s.pending_recording
-            || ["Starting", "Stopping", "Recovering", "Recovering sessions"]
-                .contains(&s.state.as_str())
-        {
-            return Err("Stop capture and wait for all saves before installing".into());
-        }
-        *gate = true;
+fn update_status(state: State<AppState>) -> crate::updates::UpdateStatus {
+    state.updates.status()
+}
+/// "Check now": ask GitHub whether a newer signed release exists.
+#[tauri::command]
+async fn check_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<crate::updates::UpdateStatus> {
+    Ok(crate::update_flow::check(app, state.updates.clone()).await)
+}
+/// Download the found update; with `install`, install it once verified.
+#[tauri::command]
+fn update_download(install: bool, app: tauri::AppHandle, state: State<AppState>) {
+    crate::update_flow::start(app, state.updates.clone(), install);
+}
+/// Install the downloaded update now. Never interrupts a recording or a save;
+/// Instant Replay is paused only with `pause_replay`.
+#[tauri::command]
+async fn install_update(
+    pause_replay: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<()> {
+    let updates = state.updates.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::update_flow::install(&app, &updates, pause_replay)
+    })
+    .await
+    .map_err(err)?
+}
+/// "Not now": don't show the pop-up for this version again for a few days.
+#[tauri::command]
+fn update_dismiss(app: tauri::AppHandle, state: State<AppState>) -> crate::updates::UpdateStatus {
+    crate::update_flow::dismiss(&app, &state.updates)
+}
+/// Update preferences apply at once (also during capture).
+#[tauri::command]
+async fn update_configure(
+    settings: crate::updates::UpdateSettings,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<Settings> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.engine.set_updates(settings).map_err(err)?;
+        state.updates.refresh(&app);
+        Ok(state.engine.settings())
+    })
+    .await
+    .map_err(err)?
+}
+/// Open the release page of the offered version in the browser.
+#[tauri::command]
+fn update_open_notes(state: State<AppState>) -> Reply<()> {
+    let url = state
+        .updates
+        .status()
+        .release_url
+        .unwrap_or_else(|| crate::updates::RELEASES_PAGE.to_string());
+    if !url.starts_with(crate::updates::RELEASES_PAGE) {
+        return Err("Unexpected address".into());
     }
-    let result = async {
-        let url = option_env!("REPLAYX_UPDATE_URL").ok_or("Updates are not configured")?;
-        if !validate_update_url(url) {
-            return Err("Untrusted endpoint".into());
-        }
-        let update = app
-            .updater_builder()
-            .pubkey(option_env!("REPLAYX_UPDATE_PUBKEY").unwrap_or(""))
-            .endpoints(vec![url.parse().map_err(err)?])
-            .map_err(err)?
-            .build()
-            .map_err(err)?
-            .check()
-            .await
-            .map_err(err)?;
-        if let Some(u) = update {
-            if !u.download_url.as_str().starts_with("https://github.com/") {
-                return Err("Update artifact must use HTTPS on github.com".into());
-            }
-            u.download_and_install(|_, _| {}, || {})
-                .await
-                .map_err(err)?;
-        }
-        Ok(())
-    }
-    .await;
-    *state.updating.lock().unwrap() = false;
-    result
+    winutil::open_url(&url).map_err(err)
+}
+/// Development builds only: preview the update interface with test data.
+#[tauri::command]
+fn update_simulate(
+    scenario: String,
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> Reply<crate::updates::UpdateStatus> {
+    crate::update_flow::simulate(&app, &state.updates, &scenario)
+}
+/// The homepage switch, the tray item and the mute shortcut: one microphone
+/// state. Returns the settings the engine confirmed and tells every window.
+fn apply_microphone(app: &tauri::AppHandle, state: &AppState, on: bool) -> Reply<Settings> {
+    let settings = state.engine.set_microphone(on).map_err(err)?;
+    let _ = app.emit("audio-settings", &settings.audio);
+    Ok(settings)
+}
+/// Is the microphone heard in recordings (set up, recorded and not muted)?
+fn microphone_on(settings: &Settings) -> Option<bool> {
+    let mut mics = settings.audio.iter().filter(|a| a.kind == "microphone");
+    let first = mics.next()?;
+    Some(first.enabled && !first.muted)
+}
+#[tauri::command]
+async fn set_microphone(
+    on: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<Settings> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || apply_microphone(&app, &state, on))
+        .await
+        .map_err(err)?
 }
 /// Tell WebView2 whether the page can be seen. Hiding or minimising the
 /// window alone doesn't: the page kept polling 4 times a second and redrawing
@@ -1071,6 +1101,9 @@ fn set_page_visible(w: &tauri::WebviewWindow, visible: bool) {
         let page: &tauri::Webview = w.as_ref();
         let _ = if visible { page.show() } else { page.hide() };
     }
+}
+fn state_notices(app: &tauri::AppHandle) -> crate::overlay::Overlay {
+    app.state::<AppState>().notices.clone()
 }
 /// Close button, or the Open/hide shortcut: into the tray (the notification
 /// area's hidden icons), with a one-time explanation.
@@ -1118,8 +1151,9 @@ fn show_main(app: &tauri::AppHandle, page: Option<&str>) {
         let _ = app.emit("navigate", page);
     }
 }
-/// Tray texts: (replay on, replay label, save enabled, recording label, mic label).
-fn tray_labels(status: &Status, settings: &Settings) -> (bool, String, bool, String, String) {
+/// Tray texts: (replay on, replay label, save enabled, recording label, mic
+/// label, mic can be switched).
+fn tray_labels(status: &Status, settings: &Settings) -> (bool, String, bool, String, String, bool) {
     let view = crate::status_overlay::view(status, settings);
     use crate::status_overlay::{MicState, ReplayState};
     let replay = match view.replay {
@@ -1136,18 +1170,20 @@ fn tray_labels(status: &Status, settings: &Settings) -> (bool, String, bool, Str
     };
     let mic = match view.mic {
         MicState::None => "Microphone: not added",
-        MicState::Off => "Microphone: off",
-        MicState::Muted => "Microphone: muted",
-        MicState::Ready => "Microphone: ready",
-        MicState::Live => "Microphone: recording",
+        MicState::Off => "Microphone: off (click to turn on)",
+        MicState::Muted => "Microphone: off (click to turn on)",
+        MicState::Ready => "Microphone: on (click to turn off)",
+        MicState::Live => "Microphone: on, recording (click to turn off)",
         MicState::Error => "Microphone: error",
     };
+    let mic_switch = !matches!(view.mic, MicState::None | MicState::Error);
     (
         status.replay,
         replay.into(),
         status.replay && matches!(status.state.as_str(), "Buffering" | "Recording"),
         recording,
         mic.into(),
+        mic_switch,
     )
 }
 /// Quit from the tray or the close button. While a recording or a save is in
@@ -1251,15 +1287,9 @@ pub fn run() {
                         let app = app.clone();
                         thread::spawn(move || {
                             let state = app.state::<AppState>();
-                            for (index, s) in settings
-                                .audio
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, s)| s.kind == "microphone")
-                            {
-                                if let Err(e) = state.engine.set_mix(index, s.volume, !s.muted) {
-                                    state.report(err(e));
-                                }
+                            let on = microphone_on(&state.engine.settings()).unwrap_or(false);
+                            if let Err(e) = apply_microphone(&app, &state, !on) {
+                                state.report(e);
                             }
                         });
                     }
@@ -1275,9 +1305,18 @@ pub fn run() {
             let settings = Settings::load(&data.join("settings.json"))?;
             discard_audio_tests(&data);
             let engine = Engine::new(data.clone(), settings.clone())?;
+            let updating = Arc::new(Mutex::new(false));
+            let updates = crate::update_flow::UpdateRuntime::new(
+                data.clone(),
+                engine.clone(),
+                app.package_info().version.to_string(),
+                update_configured(),
+                updating.clone(),
+            );
             app.manage(AppState {
                 engine,
-                updating: Arc::new(Mutex::new(false)),
+                updating,
+                updates: updates.clone(),
                 icons: Arc::new(Mutex::new(HashMap::new())),
                 testing_audio: Arc::new(Mutex::new(false)),
                 test_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1300,6 +1339,19 @@ pub fn run() {
                 notices: crate::overlay::Overlay::spawn(),
                 data_dir: data.clone(),
             });
+            {
+                // Before the installer replaces the app: stop playtime, finalize
+                // capture and end the encoder, exactly as on Quit.
+                let state = app.state::<AppState>().inner().clone();
+                updates.set_before_exit(move || {
+                    let _ = shutdown(&state);
+                });
+                crate::update_flow::spawn_loop(
+                    app.handle().clone(),
+                    updates,
+                    state_notices(app.handle()),
+                );
+            }
             // Make the sign-in entry match the setting: the installed app points
             // it at itself (or removes it when off); development builds never
             // register and clean up an entry an older dev run left behind.
@@ -1330,6 +1382,8 @@ pub fn run() {
             let recording =
                 MenuItem::with_id(app, "recording", "Start recording", true, None::<&str>)?;
             let mic = MenuItem::with_id(app, "mic", "Microphone: not added", false, None::<&str>)?;
+            let update_item =
+                MenuItem::with_id(app, "update", "Check for updates…", true, None::<&str>)?;
             let clips = MenuItem::with_id(app, "clips", "Open Clips", true, None::<&str>)?;
             let open_settings =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
@@ -1346,11 +1400,13 @@ pub fn run() {
                     &PredefinedMenuItem::separator(app)?,
                     &clips,
                     &open_settings,
+                    &update_item,
                     &PredefinedMenuItem::separator(app)?,
                     &quit,
                 ],
             )?;
             let tray_items = (replay.clone(), save.clone(), recording.clone(), mic.clone());
+            let tray_update = update_item.clone();
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("REPLAYX — Stopped")
@@ -1384,6 +1440,17 @@ pub fn run() {
                         app.clone(),
                         recording_toggle(&app.state::<AppState>().engine.status()),
                     ),
+                    "mic" => {
+                        let app = app.clone();
+                        thread::spawn(move || {
+                            let state = app.state::<AppState>();
+                            let on = microphone_on(&state.engine.settings()).unwrap_or(false);
+                            if let Err(e) = apply_microphone(&app, &state, !on) {
+                                state.report(e);
+                            }
+                        });
+                    }
+                    "update" => show_main(app, Some("settings:updates")),
                     "quit" => request_quit(app.clone()),
                     _ => {}
                 })
@@ -1419,6 +1486,7 @@ pub fn run() {
                     });
                 }
                 let mut tray_shown = Default::default();
+                let mut update_shown = String::new();
                 let mut last_game: Option<String> = None;
                 let mut overlay_frame: Option<crate::status_overlay::Frame> = None;
                 let mut announcer = crate::overlay::Announcer::default();
@@ -1426,8 +1494,29 @@ pub fn run() {
                     thread::sleep(std::time::Duration::from_secs(1));
                     let state = handle.state::<AppState>();
                     let status = state.engine.status();
+                    // The tray says when an update is waiting (only changes on news).
+                    let update = state.updates.status();
+                    let update_label = match (&update.latest, update.has_update()) {
+                        (Some(v), true) if update.stage == crate::updates::Stage::Ready => {
+                            format!("Update ready to install — v{v}")
+                        }
+                        (Some(v), true) => format!("Update available — v{v}"),
+                        _ => "Check for updates…".to_string(),
+                    };
+                    if update_label != update_shown {
+                        let _ = tray_update.set_text(&update_label);
+                        update_shown = update_label;
+                    }
                     if let Some(tray) = handle.tray_by_id("main-tray") {
-                        let _ = tray.set_tooltip(Some(format!("REPLAYX — {}", status.state)));
+                        let _ = tray.set_tooltip(Some(format!(
+                            "REPLAYX — {}{}",
+                            status.state,
+                            if update.has_update() {
+                                " · update available"
+                            } else {
+                                ""
+                            }
+                        )));
                     }
                     // Tray menu mirrors the real state (texts only change on news).
                     {
@@ -1440,6 +1529,7 @@ pub fn run() {
                             let _ = save.set_enabled(labels.2);
                             let _ = recording.set_text(&labels.3);
                             let _ = mic.set_text(&labels.4);
+                            let _ = mic.set_enabled(labels.5);
                             tray_shown = labels;
                         }
                     }
@@ -1634,7 +1724,14 @@ pub fn run() {
             mic_monitor_start,
             mic_monitor_set,
             mic_monitor_stop,
-            open_folder
+            open_folder,
+            update_status,
+            update_download,
+            update_dismiss,
+            update_configure,
+            update_open_notes,
+            update_simulate,
+            set_microphone
         ])
         .run(tauri::generate_context!())
         .expect("REPLAYX could not start; check FFmpeg installation and settings.json");
@@ -1679,6 +1776,32 @@ mod tests {
         assert_eq!(hotkey_label("Control+Alt+F10"), "Ctrl+Alt+F10");
     }
     #[test]
+    fn tray_and_shortcut_follow_the_one_microphone_state() {
+        let status = Status::default();
+        let mut settings = Settings::default();
+        assert_eq!(microphone_on(&settings), Some(true));
+        let on = tray_labels(&status, &settings);
+        assert!(on.4.starts_with("Microphone: on") && on.5, "{}", on.4);
+        // Switched off on the home page: the tray says off and can turn it on.
+        for a in settings.audio.iter_mut().filter(|a| a.kind == "microphone") {
+            a.muted = true;
+        }
+        assert_eq!(microphone_on(&settings), Some(false));
+        let off = tray_labels(&status, &settings);
+        assert!(off.4.starts_with("Microphone: off") && off.5, "{}", off.4);
+        // Not recorded at all (Audio page): also off.
+        for a in settings.audio.iter_mut().filter(|a| a.kind == "microphone") {
+            a.muted = false;
+            a.enabled = false;
+        }
+        assert_eq!(microphone_on(&settings), Some(false));
+        // No microphone set up: nothing to switch.
+        settings.audio.retain(|a| a.kind != "microphone");
+        assert_eq!(microphone_on(&settings), None);
+        let none = tray_labels(&status, &settings);
+        assert!(none.4.contains("not added") && !none.5);
+    }
+    #[test]
     fn recommended_shortcuts_parse_and_are_distinct() {
         let s = Settings::default();
         let keys = [
@@ -1694,22 +1817,6 @@ mod tests {
             .collect();
         for (n, key) in parsed.iter().enumerate() {
             assert!(!parsed[..n].contains(key));
-        }
-    }
-    #[test]
-    fn updater_hosts() {
-        assert!(validate_update_url(
-            "https://github.com/example/replayx/releases/latest/download/latest.json"
-        ));
-        for url in [
-            "http://github.com/x/releases/latest/download/latest.json",
-            "https://github.com.evil.test/x/releases/latest/download/latest.json",
-            "https://github.com/user@evil.test/releases/latest/download/latest.json",
-            "https://github.com/../repo/releases/latest/download/latest.json",
-            "https://github.com/owner/repo/releases/latest/download/latest.json?redirect=1",
-            "https://github.com//repo/releases/latest/download/latest.json",
-        ] {
-            assert!(!validate_update_url(url));
         }
     }
 }

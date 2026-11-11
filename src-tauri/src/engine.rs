@@ -451,6 +451,67 @@ impl Engine {
         self.publish(&i);
         Ok(())
     }
+    /// Update preferences apply at once, also during capture.
+    pub fn set_updates(&self, u: crate::updates::UpdateSettings) -> Result<()> {
+        let mut i = self.0.lock().unwrap();
+        let mut next = i.settings.clone();
+        next.updates = u.normalized();
+        next.save(&i.data_dir.join("settings.json"))?;
+        i.settings = next;
+        self.publish(&i);
+        Ok(())
+    }
+    /// One switch for "is my microphone heard in recordings". Off mutes it
+    /// (silence on its track, the timeline and other sources untouched), also
+    /// in the middle of a recording; On unmutes it. A microphone that was
+    /// taken out of the capture entirely (Audio page) is added back when
+    /// capture is stopped; a running capture can't gain a track.
+    /// Device, volume and Voice Enhancer settings are never changed.
+    pub fn set_microphone(&self, on: bool) -> Result<Settings> {
+        let mut i = self.0.lock().unwrap();
+        let capturing = i.pipeline.is_some() || i.starting.is_some() || i.recovery.is_some();
+        let mut next = i.settings.clone();
+        let mics: Vec<usize> = next
+            .audio
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.kind == "microphone")
+            .map(|(n, _)| n)
+            .collect();
+        if mics.is_empty() {
+            bail!("No microphone is set up. Add one on the Audio page.")
+        }
+        for &n in &mics {
+            let a = &mut next.audio[n];
+            if on && !a.enabled {
+                if capturing {
+                    bail!("The microphone isn't part of the capture that is running. Stop Instant Replay and recording, then turn it on.")
+                }
+                a.enabled = true;
+            }
+            a.muted = !on;
+        }
+        next.validate()?;
+        next.save(&i.data_dir.join("settings.json"))?;
+        i.settings = next.clone();
+        // Apply to the running capture: the feed multiplies by zero when muted.
+        if let Some(p) = &i.pipeline {
+            let mut feed = 0;
+            for a in &i.settings.audio {
+                if !a.enabled {
+                    continue;
+                }
+                if a.kind == "microphone" {
+                    if let Some(f) = p.feeds.get(feed) {
+                        f.meter.muted.store(a.muted, Ordering::Relaxed);
+                    }
+                }
+                feed += 1;
+            }
+        }
+        self.publish(&i);
+        Ok(next)
+    }
     /// Mutate engine state with the lock held, then publish the result.
     pub fn update(&self, f: impl FnOnce(&mut Inner)) {
         let mut i = self.0.lock().unwrap();
@@ -2800,6 +2861,85 @@ mod tests {
         assert!(!s.recording && !s.pending_recording);
         assert_eq!(session_dirs(&data, "buffer"), 0);
         assert_eq!(session_dirs(&data, "recordings"), 0);
+    }
+    #[test]
+    fn one_microphone_switch_mutes_live_and_touches_nothing_else() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        let source = |s: &Settings, kind: &str| {
+            let mut v =
+                serde_json::to_value(s.audio.iter().find(|a| a.kind == kind).unwrap()).unwrap();
+            let state = (v["enabled"].take(), v["muted"].take());
+            (v, state.0 == true, state.1 == true)
+        };
+        let before = engine.settings();
+        // Off = muted: still in the capture layout, device/volume/voice untouched.
+        let off = engine.set_microphone(false).unwrap();
+        let (mic, enabled, muted) = source(&off, "microphone");
+        assert!(enabled && muted);
+        assert_eq!(
+            mic,
+            source(&before, "microphone").0,
+            "device, volume and Voice Enhancer kept"
+        );
+        assert_eq!(
+            source(&off, "system"),
+            source(&before, "system"),
+            "system audio unaffected"
+        );
+        let saved = Settings::load(&root.path().join("data").join("settings.json")).unwrap();
+        assert!(source(&saved, "microphone").2, "survives a restart");
+        // During capture: switching is live, repeated fast switching is safe,
+        // and capture is never restarted (same encoder process).
+        let pid = |e: &Engine| e.0.lock().unwrap().pipeline.as_ref().map(|p| p.child.id());
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(15), || engine
+            .status()
+            .state
+            == "Buffering"));
+        let encoder = pid(&engine).unwrap();
+        for _ in 0..25 {
+            assert!(!source(&engine.set_microphone(true).unwrap(), "microphone").2);
+            assert!(source(&engine.set_microphone(false).unwrap(), "microphone").2);
+        }
+        engine.set_microphone(true).unwrap();
+        assert_eq!(pid(&engine), Some(encoder));
+        assert_eq!(engine.status().state, "Buffering");
+        assert!(engine.status().error.is_none());
+        engine.stop_replay().unwrap();
+        // A microphone taken out of the capture (Audio page) comes back with
+        // the switch while idle, but can't join a capture that is running.
+        let mut without = engine.settings();
+        for a in without.audio.iter_mut().filter(|a| a.kind == "microphone") {
+            a.enabled = false;
+        }
+        engine.set_settings(without.clone()).unwrap();
+        let on = engine.set_microphone(true).unwrap();
+        assert!(source(&on, "microphone").1 && !source(&on, "microphone").2);
+        engine.set_settings(without).unwrap();
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(15), || engine
+            .status()
+            .state
+            == "Buffering"));
+        let refused = engine.set_microphone(true).unwrap_err().to_string();
+        assert!(refused.contains("isn't part of the capture"), "{refused}");
+        assert!(
+            !source(&engine.settings(), "microphone").1,
+            "nothing changed on refusal"
+        );
+        engine.stop_replay().unwrap();
+        // No microphone at all: a clear message.
+        let mut none = engine.settings();
+        none.audio.retain(|a| a.kind != "microphone");
+        engine.set_settings(none).unwrap();
+        assert!(engine
+            .set_microphone(true)
+            .unwrap_err()
+            .to_string()
+            .contains("No microphone"));
     }
     #[test]
     fn recording_joins_running_replay_and_stops_cleanly() {
