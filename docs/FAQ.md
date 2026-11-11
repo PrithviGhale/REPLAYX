@@ -7,7 +7,7 @@ Yes. It's open source under the MIT licence, with no account, ads or subscriptio
 REPLAYX records the screen through Windows (DXGI Desktop Duplication) and audio through WASAPI, the same system interfaces other recorders use. It never injects into games, reads their memory or hooks their graphics. Game detection uses only the name of the program in front.
 
 **Does it slow down my games?**
-While recording, about 3–4.5% FPS at 1080p60 in our measurements on an RTX 4070 laptop; less at lower settings. With capture off it does almost nothing. See [Performance](PERFORMANCE.md).
+Controlled synthetic proxy runs measured 2.9–3.3% at 1080p60 on an RTX 4070 laptop. The user reported roughly 45% loss in real-game snapshots; that case remains unresolved. See [Performance](PERFORMANCE.md) for scope and measurements.
 
 **Where are my clips?**
 In `Videos\REPLAYX\<Game>\` by default; change it in **Settings**. Clips are `.mkv` files, which survive crashes and keep every audio track. Export any clip to MP4 from the library.

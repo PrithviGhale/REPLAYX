@@ -93,6 +93,11 @@ fn endpoint() -> (String, bool) {
 }
 
 async fn published_endpoint(current: &str) -> Result<Option<String>, tauri_plugin_updater::Error> {
+    // Discovery runs before the updater plugin's own request, which normally
+    // installs this provider. reqwest's no-provider feature otherwise panics.
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
     let request = async {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))

@@ -1,4 +1,4 @@
-# Known limitations — 0.3.1-alpha.6
+# Known limitations — 0.3.1-alpha.7
 
 REPLAYX is **alpha** software. The reported ~45% real-game FPS loss remains unresolved. Current synthetic measurements do not establish real-game improvement or Discord compatibility. Physical microphone, editor multitrack playback and fullscreen stretched transitions require manual testing. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
 

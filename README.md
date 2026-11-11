@@ -28,7 +28,7 @@
 ## Features
 
 - **Instant Replay.** Keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the moment is a clip, usually within a second.
-- **Smooth hardware recording.** NVIDIA, Intel and AMD encoders, H.264, HEVC or AV1, exact 720p–4K output, about 3–4.5% game FPS in our tests.
+- **Hardware recording.** NVIDIA, Intel and AMD encoders, H.264, HEVC or AV1, 720p–4K output. Synthetic workload measurements are in [Performance](docs/PERFORMANCE.md); real-game overhead remains under investigation.
 - **Clips sorted by game.** 140 games recognised automatically, each with its own icon, in a library you can search, sort and export to MP4.
 - **Clean voice, separate tracks.** The Voice Enhancer removes background noise; game, chat and microphone each get their own track.
 - **Playtime tracking.** See how long you play each game, by day, week or month, with charts.

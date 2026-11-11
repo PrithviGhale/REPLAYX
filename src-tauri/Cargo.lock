@@ -3005,6 +3005,7 @@ dependencies = [
  "fs2",
  "nnnoiseless",
  "reqwest",
+ "rustls",
  "semver",
  "serde",
  "serde_json",

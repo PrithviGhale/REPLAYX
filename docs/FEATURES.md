@@ -69,7 +69,7 @@ Small icons in a corner of your screen show Instant Replay, your microphone and 
 REPLAYX tells you when a new version is out: a dot on **Settings**, and a pop-up with what's new and an **Update Now** button. It downloads with visible progress, checks the publisher's signature, installs and restarts; your clips, settings and playtime stay. It never interrupts a recording or a save. Choose **Manual**, **Notify me** (default) or **Auto update** in **Settings → Updates**.
 
 ## Light on your games
-While hidden in the tray, REPLAYX draws nothing and checks its status only every 2 seconds. The once-a-second game check costs about 17 µs (≈0.002% of one CPU core), and work after capture (joining clips, checks, thumbnails) runs below normal priority. Recording itself cost about 3–4.5% game FPS at 1080p60 in our measurements; see [Performance](PERFORMANCE.md).
+While hidden in the tray, REPLAYX draws nothing and checks its status only every 2 seconds. The once-a-second game check costs about 17 µs (≈0.002% of one CPU core), and work after capture (joining clips, checks, thumbnails) runs below normal priority. Controlled synthetic proxy runs measured 2.9–3.3% overhead at 1080p60. Real-game overhead remains unresolved; see [Performance](PERFORMANCE.md).
 
 ## Private by design
 No account, telemetry, analytics or uploads. Recordings, settings, playtime and microphone tests stay on your PC. See [Privacy](PRIVACY.md).
