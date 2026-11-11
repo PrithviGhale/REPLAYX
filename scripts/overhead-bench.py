@@ -104,9 +104,8 @@ def run(label, args, fps, height, mode, out):
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
                               "--cpu-us", str(args.cpu_us)])
     time.sleep(1.5)
-    hwnd = wc.main_window(proxy.pid)
-    if hwnd:
-        wc.bring_to_front(hwnd)
+    # The fixture opens its own full-screen window. Never manipulate unrelated
+    # windows or focus through a second UI automation implementation.
     time.sleep(args.warm - 1.5)
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                            stdout=subprocess.PIPE, text=True) if cfg else None
@@ -116,7 +115,8 @@ def run(label, args, fps, height, mode, out):
         env = dict(os.environ, REPLAYX_VIDEO_TUNING=tuning)
         cmd = [CLI, "capture-test", str(args.capture), args.audio, f"fps={fps}", f"height={height}", f"mode={mode}",
                f"width={args.width}", *([f"bitrate={args.bitrate}"] if args.bitrate else []), *overrides]
-        subprocess.run(cmd, cwd=out, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+        with open(os.path.join(out, "capture.log"), "w") as capture_log:
+            subprocess.run(cmd, cwd=out, env=env, stdout=capture_log, stderr=capture_log, timeout=180, check=True)
     else:
         gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                                stdout=subprocess.PIPE, text=True)

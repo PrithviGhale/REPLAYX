@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyMode, formatBytes, hasUpdate, highlights, lastChecked, microphoneOn, modeOf, normalize, percent, progressText, stageLabel } from '../src/update-logic.ts';
+import { applyMode, formatBytes, hasUpdate, highlights, lastChecked, microphoneOn, microphoneLabel, modeOf, normalize, percent, progressText, stageLabel } from '../src/update-logic.ts';
 
 const prefs = { auto_check: true, interval_hours: 6, auto_download: false, auto_install: false, notify: true, idle_minutes: 5 };
 const status = (over: object = {}) => ({
@@ -81,4 +81,14 @@ test('the microphone is On only when it is recorded and not muted', () => {
   assert.equal(microphoneOn(mic(false, false)), false, 'not recorded');
   assert.equal(microphoneOn([{ kind: 'system', enabled: true, muted: false }]), null, 'no microphone set up');
   assert.equal(microphoneOn([{ kind: 'system', enabled: true, muted: true }, { kind: 'microphone', enabled: true, muted: false }]), true, 'muting system audio does not turn the microphone off');
+});
+
+test('microphone labels distinguish intent from active capture and device failure', () => {
+  assert.equal(microphoneLabel({ enabled: false, muted: false }, 'Stopped'), 'Disabled');
+  assert.equal(microphoneLabel({ enabled: true, muted: true }, 'Recording'), 'Muted');
+  assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Stopped'), 'Ready');
+  assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Recording'), 'Live');
+  assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Recovering'), 'Unavailable');
+  assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Error'), 'Unavailable');
+  assert.equal(microphoneOn([{ kind: 'microphone', enabled: true, muted: true }, { kind: 'microphone', enabled: true, muted: false }]), true);
 });

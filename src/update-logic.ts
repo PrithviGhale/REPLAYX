@@ -80,6 +80,13 @@ export function lastChecked(ms: number | null, now = Date.now()): string {
 
 /** Is the microphone heard in recordings? null when no microphone is set up. */
 export function microphoneOn(audio: Pick<AudioSource, 'kind' | 'enabled' | 'muted'>[]): boolean | null {
-  const mic = audio.find(a => a.kind === 'microphone');
-  return mic ? mic.enabled && !mic.muted : null;
+  const mics = audio.filter(a => a.kind === 'microphone');
+  return mics.length ? mics.some(a => a.enabled && !a.muted) : null;
+}
+
+export function microphoneLabel(mic: Pick<AudioSource, 'enabled' | 'muted'> | undefined, state: string): string {
+  if (!mic || !mic.enabled) return 'Disabled';
+  if (mic.muted) return 'Muted';
+  if (state === 'Error' || state === 'Recovering') return 'Unavailable';
+  return ['Buffering', 'Recording'].includes(state) ? 'Live' : 'Ready';
 }

@@ -505,13 +505,18 @@ fn main() -> Result<()> {
     } else {
         None
     };
-    let worker = thread::spawn(move || first.run());
+    let worker = thread::spawn(move || {
+        let result = first.run();
+        (result, stop_started.elapsed().as_millis())
+    });
+    let mut second_ready_ms = None;
     let b = second.map(|job| {
         let r = job.run();
+        second_ready_ms = Some(stop_started.elapsed().as_millis());
         engine.complete_save(&r);
         r
     });
-    let a = worker.join().unwrap();
+    let (a, first_ready_ms) = worker.join().unwrap();
     engine.complete_save(&a);
     engine.shutdown()?;
     let (path, probe) = a?;
@@ -521,9 +526,9 @@ fn main() -> Result<()> {
     };
     println!(
         "first clip ready {} ms after the stop/save request",
-        stop_started.elapsed().as_millis()
+        first_ready_ms
     );
-    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
+    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first_ready_ms":first_ready_ms,"second_ready_ms":second_ready_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
     std::fs::write(run.join("report.json"), serde_json::to_vec_pretty(&result)?)?;
     std::fs::write(
         run.join("samples.json"),

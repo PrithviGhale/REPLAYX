@@ -21,7 +21,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     thread,
     time::{Duration, Instant},
@@ -54,7 +54,7 @@ pub struct UpdateRuntime {
     /// Finalizes capture before the installer replaces the app.
     before_exit: Mutex<Option<Hook>>,
     /// Blocks capture actions while the installer is being started.
-    installing: Arc<Mutex<bool>>,
+    installing: Arc<RwLock<bool>>,
 }
 
 struct Busy<'a>(&'a AtomicBool);
@@ -68,6 +68,18 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+fn user_error(error: &tauri_plugin_updater::Error) -> String {
+    match error {
+        tauri_plugin_updater::Error::Reqwest(e) if e.is_timeout() => {
+            updates::friendly_error("timeout")
+        }
+        tauri_plugin_updater::Error::ReleaseNotFound => {
+            "The update service did not return a usable release. Try again later.".into()
+        }
+        _ => updates::friendly_error(&error.to_string()),
+    }
+}
+
 /// The update source: GitHub, or in development builds a local test server
 /// (`REPLAYX_UPDATE_TEST_ENDPOINT=http://127.0.0.1:PORT/latest.json`).
 fn endpoint() -> (String, bool) {
@@ -78,6 +90,33 @@ fn endpoint() -> (String, bool) {
         }
     }
     (updates::ENDPOINT.to_string(), false)
+}
+
+async fn published_endpoint(current: &str) -> Result<Option<String>, tauri_plugin_updater::Error> {
+    let request = async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .user_agent(concat!("REPLAYX/", env!("CARGO_PKG_VERSION")))
+            .build()?;
+        let mut response = client
+            .get(updates::RELEASES_API)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len() + chunk.len() > 2_000_000 {
+                return Err(tauri_plugin_updater::Error::Network(
+                    "Update release listing exceeds its size limit".into(),
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let releases: Vec<updates::Release> = serde_json::from_slice(&bytes)?;
+        Ok(updates::release_endpoint(current, &releases))
+    };
+    // Preserve transport detail only for classification, never return URLs or credentials.
+    request.await
 }
 
 fn capture_state(engine: &Engine) -> CaptureState {
@@ -106,7 +145,7 @@ impl UpdateRuntime {
         engine: Engine,
         current: String,
         configured: bool,
-        installing: Arc<Mutex<bool>>,
+        installing: Arc<RwLock<bool>>,
     ) -> Arc<Self> {
         let memory = Memory::load(&data);
         let installable = std::env::current_exe()
@@ -140,12 +179,16 @@ impl UpdateRuntime {
     /// Change the status, decide whether the pop-up shows, tell the interface.
     fn set(&self, app: &AppHandle, change: impl FnOnce(&mut UpdateStatus)) -> UpdateStatus {
         let settings = self.engine.settings().updates;
+        let preview = matches!(
+            *self.pending.lock().unwrap(),
+            Some(Pending::Simulated { .. })
+        );
         let status = {
             let mut s = self.status.lock().unwrap();
             change(&mut s);
             let offered = matches!(s.stage, Stage::Available | Stage::Ready);
             s.prompt = match (&s.latest, offered) {
-                (Some(_), true) if s.simulated => {
+                (Some(_), true) if preview => {
                     settings.notify && !self.sim_dismissed.load(Ordering::Relaxed)
                 }
                 (Some(v), true) => {
@@ -195,6 +238,14 @@ pub async fn check(app: AppHandle, rt: Arc<UpdateRuntime>) -> UpdateStatus {
     });
     let (url, test) = endpoint();
     let result = async {
+        let url = if test {
+            url
+        } else {
+            let Some(url) = published_endpoint(&rt.status().current).await? else {
+                return Ok(None);
+            };
+            url
+        };
         let mut builder = app.updater_builder().timeout(Duration::from_secs(20));
         if let Some(hook) = rt.before_exit.lock().unwrap().clone() {
             builder = builder.on_before_exit(move || hook());
@@ -236,7 +287,7 @@ pub async fn check(app: AppHandle, rt: Arc<UpdateRuntime>) -> UpdateStatus {
                             .into(),
                     );
                 })
-            } else if !updates::is_newer(&current, &update.version) {
+            } else if !updates::compatible(&current, &update.version) {
                 // The updater already refuses downgrades; this is a second guard.
                 *rt.pending.lock().unwrap() = None;
                 rt.remember(|m| {
@@ -275,8 +326,7 @@ pub async fn check(app: AppHandle, rt: Arc<UpdateRuntime>) -> UpdateStatus {
                 })
             }
         }
-        Ok(None) | Err(tauri_plugin_updater::Error::ReleaseNotFound) => {
-            let missing = result.is_err();
+        Ok(None) => {
             *rt.pending.lock().unwrap() = None;
             rt.remember(|m| {
                 m.last_checked = Some(now);
@@ -288,9 +338,8 @@ pub async fn check(app: AppHandle, rt: Arc<UpdateRuntime>) -> UpdateStatus {
                 s.notes = None;
                 s.last_checked = Some(now);
                 s.simulated = test;
-                s.detail = missing.then(|| {
-                    "No update file was found for the newest release (it may not include a signed update yet).".into()
-                });
+                s.detail =
+                    Some("No newer signed release was found on this build's channel.".into());
             })
         }
         Err(e) => {
@@ -298,7 +347,7 @@ pub async fn check(app: AppHandle, rt: Arc<UpdateRuntime>) -> UpdateStatus {
                 m.last_checked = Some(now);
                 m.failures += 1;
             });
-            let text = updates::friendly_error(&e.to_string());
+            let text = user_error(&e);
             rt.set(&app, |s| {
                 s.stage = Stage::Failed;
                 s.error = Some(text);
@@ -381,7 +430,7 @@ pub async fn download(app: AppHandle, rt: Arc<UpdateRuntime>) -> Result<(), Stri
                         update,
                         bytes: None,
                     });
-                    let text = updates::friendly_error(&e.to_string());
+                    let text = user_error(&e);
                     rt.install_after.store(false, Ordering::Relaxed);
                     rt.set(&app, |s| {
                         s.stage = Stage::Failed;
@@ -504,6 +553,7 @@ pub fn install(app: &AppHandle, rt: &Arc<UpdateRuntime>, pause_replay: bool) -> 
         });
         text
     };
+    let mut installing = rt.installing.write().unwrap();
     let mut resumed_replay = false;
     match updates::safety(&capture_state(&rt.engine)) {
         Safety::Blocked(why) => return Err(wait(why)),
@@ -524,7 +574,7 @@ pub fn install(app: &AppHandle, rt: &Arc<UpdateRuntime>, pause_replay: bool) -> 
         }
         return Err(wait("Capture is busy."));
     }
-    *rt.installing.lock().unwrap() = true;
+    *installing = true;
     rt.set(app, |s| {
         s.stage = Stage::Installing;
         s.waiting = false;
@@ -540,7 +590,7 @@ pub fn install(app: &AppHandle, rt: &Arc<UpdateRuntime>, pause_replay: bool) -> 
     };
     // Only reached when the installer could not be started.
     *rt.pending.lock().unwrap() = pending;
-    *rt.installing.lock().unwrap() = false;
+    *installing = false;
     if resumed_replay {
         rt.remember(|m| m.resume_replay_at = None);
         let _ = rt.engine.start_replay();
@@ -559,7 +609,7 @@ pub fn install(app: &AppHandle, rt: &Arc<UpdateRuntime>, pause_replay: bool) -> 
 /// "Not now": hide the pop-up for this version for a few days.
 pub fn dismiss(app: &AppHandle, rt: &Arc<UpdateRuntime>) -> UpdateStatus {
     let status = rt.status();
-    if status.simulated {
+    if matches!(*rt.pending.lock().unwrap(), Some(Pending::Simulated { .. })) {
         rt.sim_dismissed.store(true, Ordering::Relaxed);
     } else if let Some(v) = status.latest {
         rt.remember(|m| {
@@ -727,11 +777,11 @@ pub fn spawn_loop(app: AppHandle, rt: Arc<UpdateRuntime>, notices: Overlay) {
                         &settings,
                     );
                 if ok {
-                    let _ = install(&app, &rt, true);
+                    let _ = install(&app, &rt, false);
                 } else if status.installable && !status.waiting {
                     rt.set(&app, |s| {
                         s.waiting = true;
-                        s.detail = Some("Waiting for a safe time to install: no recording, no game in front, and the PC idle.".into());
+                        s.detail = Some("Waiting until recording, Instant Replay and saves are stopped, no game is in front, and the PC is idle.".into());
                     });
                 }
             }

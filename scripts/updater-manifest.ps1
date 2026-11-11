@@ -1,7 +1,7 @@
 # Writes latest.json for the in-app updater next to the signed NSIS installer:
 # the version, the release's highlights, and for 64-bit Windows the download
 # address on GitHub and the installer's signature. REPLAYX reads it from
-# https://github.com/<repo>/releases/latest/download/latest.json .
+# the selected release tag's latest.json (stable and prerelease channels).
 # Skips (with a notice) when no update signature was produced.
 param([Parameter(Mandatory)][string]$Repository, [Parameter(Mandatory)][string]$Tag)
 $ErrorActionPreference = 'Stop'
@@ -13,6 +13,8 @@ $installer = Get-ChildItem $dir -Filter "*_${version}_x64-setup.exe" | Select-Ob
 if (!$installer) { throw "No installer for version $version in $dir" }
 $sig = "$($installer.FullName).sig"
 if (!(Test-Path $sig)) { Write-Host 'No update signature (signing key not configured); latest.json not written.'; exit 0 }
+& node (Join-Path $root 'scripts/verify-update-signature.mjs') $installer.FullName $sig --version $version
+if ($LASTEXITCODE) { throw 'Installer signature/version validation failed; manifest not written.' }
 
 # Notes for the update pop-up: the bullet points under "What's New" and
 # "Improvements and Fixes" of the release notes, else the changelog section.

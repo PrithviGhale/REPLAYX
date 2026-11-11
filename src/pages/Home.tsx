@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { native } from '../api';
+import { microphoneLabel, microphoneOn } from '../update-logic';
 import { useApp } from '../context';
 import { useCapture, useRecordButton } from '../capture';
 import { ReplaySwitch } from '../ReplaySwitch';
@@ -34,7 +35,9 @@ function MicRow({ name, peak, capturing }: { name: string; peak: number; capturi
   const { saved, setMicrophone } = useApp();
   const [pending, setPending] = useState(false);
   const mic = saved.audio.find(a => a.kind === 'microphone');
-  const on = !!mic && mic.enabled && !mic.muted;
+  const on = microphoneOn(saved.audio) ?? false;
+  const state = useStatus(x => x.state);
+  const label = microphoneLabel(mic, state);
   const toggle = async () => {
     if (pending) return;
     setPending(true);
@@ -43,7 +46,7 @@ function MicRow({ name, peak, capturing }: { name: string; peak: number; capturi
   return (
     <li className={`mic-row ${on ? 'on' : 'off'}`}>
       <span className="source-icon kind-microphone">{on ? <Mic size={18} /> : <MicOff size={18} />}</span>
-      <span className="name" title={name}>{name}{!on && <em className="off-tag">Off</em>}</span>
+      <span className="name" title={name}><span>{name}</span><em className="off-tag">{label}</em></span>
       <Meter peak={on ? peak : 0} active={capturing && on} />
       <button role="switch" aria-checked={on} aria-label={on ? 'Microphone on. Turn microphone off' : 'Microphone off. Turn microphone on'}
         title={on ? 'Microphone is recorded. Click to turn it off.' : 'Microphone is not recorded. Click to turn it on.'}

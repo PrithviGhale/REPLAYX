@@ -55,7 +55,7 @@ export type Status = {
   buffer_seconds: number; buffer_bytes: number; free_bytes: number; frames: number; dropped_frames: number;
   fps: number; elapsed: number; write_mbps: number; memory_mb: number; cpu_percent: number;
   audio_peaks: number[]; audio_packets: number[]; audio_gaps: number[]; audio_discontinuities: number[];
-  audio_drift_ppm: number[]; audio_written_bytes: number[]; error: string | null; notice: string | null;
+  audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null; notice: string | null;
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
   scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
@@ -176,4 +176,4 @@ export const previewSettings: Settings = {
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.6';
+export const VERSION = '0.3.1-alpha.7';

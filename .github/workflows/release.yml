@@ -247,8 +247,9 @@ jobs:
           notes="../docs/release-notes/$TAG.md"; [[ -f "$notes" ]] || notes=../CHANGELOG.md
           stage=""; [[ "$TAG" == *-alpha* ]] && stage=" — Alpha"; [[ "$TAG" == *-beta* ]] && stage=" — Beta"
           flags=(--draft --verify-tag --title "REPLAYX $TAG$stage" --notes-file "$notes")
-          # Not marked pre-release: GitHub only shows a "Latest" release card for
-          # regular releases. The title and tag still say Alpha/Beta.
+          # Prereleases remain prereleases. The app resolves its channel from
+          # the releases API, independently of GitHub's Latest badge.
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
           # The update manifest must point at exactly the files of this release.
           exe=$(ls *.exe)
           [[ -f "$exe.sig" && -f latest.json ]] || { echo "::error::The signed update files (.sig, latest.json) are missing."; exit 1; }

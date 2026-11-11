@@ -1,6 +1,6 @@
 [package]
 name = "replayx"
-version = "0.3.1-alpha.6"
+version = "0.3.1-alpha.7"
 edition = "2021"
 license = "MIT"
 default-run = "replayx"
@@ -24,7 +24,7 @@ path = "src/bin/gameproxy.rs"
 
 [features]
 default = []
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance", "dep:reqwest"]
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
@@ -34,6 +34,7 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
+reqwest = { version = "0.13", optional = true, default-features = false, features = ["rustls-no-provider"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"

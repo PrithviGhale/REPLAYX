@@ -1,5 +1,69 @@
 # Performance evidence and pending benchmark
 
+## 0.3.1-alpha.7: November 11 validation
+
+**15-minute synthetic replay soak:** `test-output/nov11-soak/summary.json`.
+1080p60 NVENC, 60-second retention, internal generated video and three audio
+tracks. Two additional NVENC sessions started and ended successfully. Both
+overlapping saves finished during the second session: 691/664 ms to ready,
+25 ms save-job handover. Both files fully decoded, with no decode errors;
+no buffer MKVs remained after shutdown. One-minute average resident memory
+459.85 MB near the beginning, 461.94 MB near the end; peak 522.33 MB including
+saves. Recorder tree CPU averaged 6.56% of all cores. Internal synthesis and
+CPU scaling contribute to this number; it is not a desktop/game overhead
+measurement. Some automated checks overlapped this soak. End-of-soak output
+was 1920x1080 H.264, 60.021 s. Generated flash/pulse sync over 59 events had
+30 ms maximum offset; this does not validate physical audio sync. The static
+flashing fixture intentionally repeats pictures and cannot qualify smoothness.
+
+The user's real-game snapshots (~211 FPS off, ~117 on) remain unresolved.
+No real-game improvement is claimed. Earlier proxy numbers are not an upper
+bound on real games; CPU/GPU saturation, presentation and hybrid copies differ.
+
+Controlled desktop capture of our silent GPU proxy, RTX 4070 Laptop driving
+1920x1080 at 250 Hz, H.264 NVENC Balanced 1080p60 with WASAPI system loopback,
+1200 shader iterations, 10 s warmup + 25 s capture per run:
+
+| Configuration | Proxy FPS off/on | Overhead | 1% low off/on | Decoded repeats |
+| --- | --- | --- | --- | --- |
+| Existing high GPU priority, run 1 | 205.9 / 199.2 | 3.3% | 172.4 / 164.3 | 0.00% |
+| Existing high GPU priority, run 2 | 204.0 / 198.1 | 2.9% | 159.4 / 164.3 | 0.19% |
+| Normal priority, run 1 | 207.0 / 198.3 | 4.2% | 173.9 / 155.5 | 0.00% |
+| Normal priority, run 2 | 205.6 / 199.1 | 3.2% | 172.6 / 144.6 | 0.09% |
+
+Evidence: `test-output/overhead/nov11-hardware/all.json`. These are recovered
+alpha.6 capture-engine measurements, not an alpha.7 versus alpha.6 improvement.
+The selected path was D3D11 texture input to NVENC, without CPU scaling/readback.
+No quality/preset/priority change was justified. Quick Sync is not the primary
+candidate on this NVIDIA-driven display; an Intel-driven hybrid display needs
+its own comparison. FFmpeg process + CLI CPU was about 0.57% of machine capacity
+in run 1 (Windows performance counters). This excludes the native GUI.
+
+Unique motion was decoded from the source's frame stamp. Near-zero repeats do
+not mean perfect pacing: approximately 6.7% of source-clock advances exceeded
+25 ms. This variability and physical gameplay smoothness remain unqualified.
+Output timestamps alone are not evidence of unique 60 FPS motion.
+
+Confirmed code findings: the GPU scaling fallback can round-trip BGRA through
+system memory; exact scaling can therefore be costly, while the smooth D3D11
+path avoids it. NVENC lookahead intentionally buffers video to prevent audio
+holdback from starving the grabber; removing it without replacing that scheduling
+mechanism risks the previously measured stutter regression. Keep quality and
+lookahead unchanged pending a reproducible game trace.
+
+The public NVIDIA guidance supports GPU-resident resource reuse and avoiding
+copies; NVENC's dedicated engine does not make preprocessing free:
+[NVENC programming guide](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.1/nvenc-video-encoder-api-prog-guide/index.html).
+
+Alpha.7 removes an audio byte-buffer allocation per 10 ms chunk and applies
+mute/gain after the bounded queue. This fixes stale queued microphone gain;
+it is not evidence of a game-FPS fix. New audio queue telemetry and a redacted
+report make future failures measurable. Video source FPS, video queue depth,
+GPU usage and per-frame latency are explicitly unavailable live.
+
+Repeat using `scripts/overhead-bench.py`; real-game and Discord instructions are
+in [MANUAL_ACCEPTANCE.md](MANUAL_ACCEPTANCE.md).
+
 ## 0.3.0-alpha.1 — voice processing and startup
 
 **Voice Enhancer** (release build, `replayx-cli voice-eval`, 20 s of speech): 0.5–1.0% of one CPU core per microphone (0.02% with the Off preset); added latency 11 ms with noise suppression on (RNNoise frame 10 ms + limiter look-ahead 1 ms), 1 ms without. Noise removed on fan noise: Light 9.5 dB, Balanced 17.0 dB, Strong 25.0 dB, Noise-Free preset 28.6 dB; hiss: 10.0 / 18.4 / 28.0 / 32.3 dB. Clean speech level changed by ≤0.3 dB through noise suppression. Before (FFmpeg `afftdn` as shipped): 2.2 dB on the same kind of noise.

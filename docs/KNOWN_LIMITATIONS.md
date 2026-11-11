@@ -1,13 +1,13 @@
 # Known limitations — 0.3.1-alpha.6
 
-REPLAYX is **alpha** software. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+REPLAYX is **alpha** software. The reported ~45% real-game FPS loss remains unresolved. Current synthetic measurements do not establish real-game improvement or Discord compatibility. Physical microphone, editor multitrack playback and fullscreen stretched transitions require manual testing. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
 
-## Updates and the microphone switch (next release)
+## Updates and the microphone switch (0.3.1-alpha.7)
 
 - **In-app updates start with the first signed release.** v0.3.1-alpha.6 and older contain no update channel, so they must be updated once by hand (run the new installer). From the first release that carries `latest.json`, installed copies find later versions themselves.
-- **Not yet tested end to end with a real installation:** checking, downloading, signature verification, rejections and the interface are tested against a local test server with the real signing key, but replacing an installed copy through the installer and restarting has not been done yet (it needs two published signed releases, or a controlled test).
+- **Not yet tested end to end with a real installation:** checking, downloading, signature verification, rejections and the interface are tested against a local test server with the real signing key, but replacing an installed copy through the installer and restarting has not been done yet; do this in a disposable Windows VM with two signed versions.
 - **No automatic rollback.** If an installation fails part-way, run the installer from the Releases page again; settings and clips are not touched by the installer.
-- A GitHub outage and a release without an update file look the same to the app (*no update file was found*); it simply checks again later.
+- Update discovery considers the 100 most recent releases on this repository. GitHub failures now report a failed check and retry with backoff. Actual installer replacement/restart remains unverified; no isolated Windows VM was available.
 - Updates are signed with REPLAYX's update key, but the installer is still not code-signed for Windows (Authenticode), so SmartScreen may still warn on a manual download.
 - **Microphone switch:** Off mutes the microphone in recordings at once (also mid-recording, with a 10 ms fade so there is no click) and keeps its track, so audio tracks stay aligned. While capture is running REPLAYX keeps the microphone device open so it can be switched back on instantly; nothing from it is written while it is off. To keep the device closed entirely, turn off *Record microphone* on the Audio page. A microphone removed from the capture there can only be switched back on while capture is stopped.
 

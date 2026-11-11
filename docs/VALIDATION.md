@@ -439,3 +439,39 @@ The existing WASAPI producer was exercised directly, without launching FFmpeg, u
 ## Updated application executable
 
 The optimized 0.1.1-alpha.1 application built successfully with `npm run tauri -- build --no-bundle`. Path: `src-tauri/target/release/replayx.exe`; size: 13972992 bytes; SHA-256: `2287394decb5ec33d39300016150a9467fd3a664a61ff9e9295a7d80c726e144`. Native launch and video recording of this new build are unverified. The NSIS installer remains the older artifact described above. No recording process was started by the release build.
+# Local 0.3.1-alpha.7 validation - November 11, 2026
+
+Final additional checks: 132/132 responsive text cases (including update popup,
+130% text), 24/24 scrolling cases, and 9/9 media checks on each of the short
+fixture and end-of-soak clip. Short-fixture isolated audio separation measured
+101.0/89.3 dB; max generated A/V offset 10 ms. End-of-soak max offset 30 ms.
+15-minute soak, second encoder start/stop, two concurrent saves and full decode
+passed; see PERFORMANCE.md and `test-output/nov11-soak/summary.json`.
+
+This continues the recovered work checkpoint `71e03ca` on
+`codex/performance-0.2.1`. No push, merge, tag or publication was performed.
+
+- 160 Rust tests passed with desktop features; scratch registry test requires
+  execution outside the restricted sandbox. Rustfmt and Clippy with warnings
+  denied passed. TypeScript/Vite build and 50 frontend tests passed.
+- Native debug app updater integration: 42/42 checks passed against isolated
+  localhost fixtures, including signatures, wrong key/version, tampering,
+  interrupted transfers, HTTP errors, timeout, offline mode, progress,
+  dismissal persistence and mic synchronization. Evidence:
+  `test-output/update-e2e-Uyx6Tp/results.json`. Installation was refused by
+  design. Dummy signed payloads were never executed.
+- Four motion-rich desktop hardware recordings completed. See PERFORMANCE.md
+  for decoded unique motion, frame pacing, proxy FPS and methodological limits.
+  An initial sandbox attempt returned access denied; the authorized desktop
+  captures outside the sandbox succeeded. No protection setting was changed.
+- The inherited alpha.6 installer failed independent signature verification:
+  its unsigned rebuild had replaced the signed artifact. Alpha.7 is generated
+  separately; manifest generation now verifies signature and signed version.
+- Native installation/restart preservation is NOT verified. Testing NSIS with
+  another directory on this host would still share installer registration with
+  the working installation. Use a disposable Windows VM for that acceptance.
+- Physical gameplay FPS, fullscreen stretched transitions, real microphone,
+  Discord sharing, editor multitrack playback and real A/V sync remain manual
+  acceptance items in MANUAL_ACCEPTANCE.md. No production-readiness claim.
+
+Historical entries below retain their original scope and dates.

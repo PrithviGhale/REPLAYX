@@ -11,7 +11,7 @@ use std::{
     fs,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     thread,
 };
 use tauri::{
@@ -39,7 +39,7 @@ fn err(e: impl std::fmt::Display) -> String {
 #[derive(Clone)]
 struct AppState {
     engine: Engine,
-    updating: Arc<Mutex<bool>>,
+    updating: Arc<RwLock<bool>>,
     /// Update checks, downloads and installs (see `update_flow`).
     updates: Arc<crate::update_flow::UpdateRuntime>,
     icons: Arc<Mutex<HashMap<String, Option<String>>>>,
@@ -94,9 +94,10 @@ async fn action(name: String, state: State<'_, AppState>) -> Reply<serde_json::V
         .map_err(err)?
 }
 fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
-    // Check, don't hold: holding this guard for a whole action serialized every
-    // action, so Stop/Cancel pressed during a slow start waited for the start.
-    if *state.updating.lock().unwrap() {
+    // Shared guards allow Stop/Cancel alongside Start. Installation takes the
+    // exclusive guard before its final safety check, closing the check/start race.
+    let updating = state.updating.read().unwrap();
+    if *updating {
         return Err("Update installation is in progress".into());
     }
     let engine = &state.engine;
@@ -872,7 +873,10 @@ async fn clip_action(
     let root = state.engine.settings().output_dir;
     let library = state.library.clone();
     let gate = state.thumbnail_gate.clone();
+    let updating = state.updating.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let permit = updating.read().unwrap();
+        if *permit { return Err("Update installation is in progress".into()); }
         match operation.as_str() {
             "delete" => {
                 // Wait for any thumbnail decode that may be reading this file.
@@ -1075,9 +1079,12 @@ fn apply_microphone(app: &tauri::AppHandle, state: &AppState, on: bool) -> Reply
 }
 /// Is the microphone heard in recordings (set up, recorded and not muted)?
 fn microphone_on(settings: &Settings) -> Option<bool> {
-    let mut mics = settings.audio.iter().filter(|a| a.kind == "microphone");
-    let first = mics.next()?;
-    Some(first.enabled && !first.muted)
+    let mics: Vec<_> = settings
+        .audio
+        .iter()
+        .filter(|a| a.kind == "microphone")
+        .collect();
+    (!mics.is_empty()).then(|| mics.iter().any(|a| a.enabled && !a.muted))
 }
 #[tauri::command]
 async fn set_microphone(
@@ -1305,7 +1312,7 @@ pub fn run() {
             let settings = Settings::load(&data.join("settings.json"))?;
             discard_audio_tests(&data);
             let engine = Engine::new(data.clone(), settings.clone())?;
-            let updating = Arc::new(Mutex::new(false));
+            let updating = Arc::new(RwLock::new(false));
             let updates = crate::update_flow::UpdateRuntime::new(
                 data.clone(),
                 engine.clone(),

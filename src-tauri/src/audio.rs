@@ -58,6 +58,8 @@ pub struct Meter {
     pub gaps: AtomicU64,
     pub volume: AtomicU32,
     pub muted: AtomicBool,
+    /// PCM chunks waiting for the socket writer (each chunk is 10 ms).
+    pub queued_chunks: AtomicU64,
     pub error: Mutex<Option<String>>,
     pub written_bytes: AtomicU64,
     pub last_write_ms: AtomicU64,
@@ -772,7 +774,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
     meter.muted.store(source.muted, Ordering::Relaxed);
     // 3s of 10ms chunks: FFmpeg may not read audio while it initialises GPU
     // devices; sustained stalls are caught by the 3s audio-write health check.
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CHUNKS);
+    let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(OUTPUT_CHANNEL_CHUNKS);
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     let st = stop.clone();
     let mt = meter.clone();
@@ -886,8 +888,6 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 && (source.voice.active() || source.boost_db > 0.05))
                 .then(|| crate::voice::Processor::new(&source.voice, source.boost_db));
             let mut mono = vec![0f32; CHUNK];
-            // Gain of the previous chunk (mute and volume changes are ramped).
-            let mut last_gain: Option<f32> = None;
             client.start_stream()?;
             let mut clock_base: Option<(u64, u64)> = None;
             let mut last_process_check = Instant::now();
@@ -993,25 +993,18 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                         }
                         mt.dsp_faults.store(p.faults, Ordering::Relaxed);
                     }
-                    let gain = if mt.muted.load(Ordering::Relaxed) {
-                        0.
-                    } else {
-                        f32::from_bits(mt.volume.load(Ordering::Relaxed))
-                    };
-                    // Float PCM keeps headroom above full scale: a source
-                    // turned above 100% is limited smoothly in FFmpeg
-                    // (media::source_chain) instead of hard-clipped here.
-                    let peak = apply_gain(&mut chunk, last_gain.unwrap_or(gain), gain);
-                    last_gain = Some(gain);
-                    mt.peak.store(peak.to_bits(), Ordering::Relaxed);
-                    let chunk: Vec<u8> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    mt.queued_chunks.fetch_add(1, Ordering::Relaxed);
                     match tx.try_send(chunk) {
                         Ok(()) => {}
                         Err(mpsc::TrySendError::Full(_)) => {
+                            mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
                             mt.gaps.fetch_add(1, Ordering::Relaxed);
                             bail!("Audio output backpressure exceeded 10 s: FFmpeg stopped reading audio")
                         }
-                        Err(_) => return Ok(()),
+                        Err(_) => {
+                            mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
+                            return Ok(());
+                        }
                     }
                 }
                 thread::sleep(Duration::from_millis(4));
@@ -1063,12 +1056,27 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
             socket.set_write_timeout(Some(Duration::from_secs(10)))?;
             socket.set_nodelay(true)?;
             connected.store(true, Ordering::Relaxed);
+            let mut last_gain: Option<f32> = None;
+            let mut bytes = Vec::with_capacity(CHUNK * CHANNELS * 4);
             while !st.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(data) => {
-                        socket.write_all(&data)?;
+                    Ok(mut data) => {
+                        mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
+                        // Apply the latest controls after the bounded queue so
+                        // already queued microphone samples cannot bypass mute.
+                        let gain = if mt.muted.load(Ordering::Relaxed) {
+                            0.
+                        } else {
+                            f32::from_bits(mt.volume.load(Ordering::Relaxed))
+                        };
+                        let peak = apply_gain(&mut data, last_gain.unwrap_or(gain), gain);
+                        last_gain = Some(gain);
+                        mt.peak.store(peak.to_bits(), Ordering::Relaxed);
+                        bytes.clear();
+                        bytes.extend(data.iter().flat_map(|v| v.to_le_bytes()));
+                        socket.write_all(&bytes)?;
                         mt.written_bytes
-                            .fetch_add(data.len() as u64, Ordering::Relaxed);
+                            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         mt.last_write_ms
                             .store(created.elapsed().as_millis() as u64, Ordering::Relaxed);
                     }

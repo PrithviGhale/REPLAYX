@@ -14,6 +14,55 @@ pub const ENDPOINT: &str =
 /// Update packages may only come from this repository's release assets.
 pub const DOWNLOAD_PREFIX: &str = "https://github.com/PrithviGhale/REPLAYX/releases/download/";
 pub const RELEASES_PAGE: &str = "https://github.com/PrithviGhale/REPLAYX/releases";
+pub const RELEASES_API: &str =
+    "https://api.github.com/repos/PrithviGhale/REPLAYX/releases?per_page=100";
+
+#[derive(Deserialize)]
+pub struct Release {
+    pub tag_name: String,
+    pub draft: bool,
+    pub prerelease: bool,
+    pub assets: Vec<ReleaseAsset>,
+}
+#[derive(Deserialize)]
+pub struct ReleaseAsset {
+    pub name: String,
+    pub browser_download_url: String,
+}
+
+/// Stable builds only offer stable versions. Prerelease builds follow their
+/// named channel or graduate to stable, never rely on GitHub's Latest badge.
+pub fn compatible(current: &str, candidate: &str) -> bool {
+    let parse = |v: &str| semver::Version::parse(v.trim_start_matches('v'));
+    let (Ok(c), Ok(n)) = (parse(current), parse(candidate)) else {
+        return false;
+    };
+    n > c
+        && (n.pre.is_empty()
+            || (!c.pre.is_empty()
+                && n.pre.as_str().split('.').next() == c.pre.as_str().split('.').next()))
+}
+
+pub fn release_endpoint(current: &str, releases: &[Release]) -> Option<String> {
+    releases
+        .iter()
+        .filter_map(|r| {
+            let version = semver::Version::parse(r.tag_name.strip_prefix('v')?).ok()?;
+            if r.draft
+                || r.prerelease == version.pre.is_empty()
+                || !compatible(current, &version.to_string())
+            {
+                return None;
+            }
+            let expected = format!("{DOWNLOAD_PREFIX}{}/latest.json", r.tag_name);
+            r.assets
+                .iter()
+                .any(|a| a.name == "latest.json" && a.browser_download_url == expected)
+                .then_some((version, expected))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, url)| url)
+}
 
 /// An update endpoint is trusted only if it is exactly
 /// `https://github.com/<owner>/<repo>/releases/latest/download/latest.json`.
@@ -268,7 +317,7 @@ pub fn auto_install_ok(
     settings.auto_install
         && !game_in_front
         && idle_seconds >= settings.idle_minutes as u64 * 60
-        && matches!(safety(capture), Safety::Safe | Safety::ReplayOnly)
+        && safety(capture) == Safety::Safe
 }
 
 /// Should Instant Replay be switched back on after an update restart?
@@ -281,7 +330,10 @@ pub fn resume_replay(now: i64, memory: &Memory) -> bool {
 /// Plain-language text for a failed check or download.
 pub fn friendly_error(raw: &str) -> String {
     let r = raw.to_ascii_lowercase();
-    let text = if r.contains("signature") || r.contains("minisign") || r.contains("signed version")
+    let text = if r.contains("signature")
+        || r.contains("minisign")
+        || r.contains("signed version")
+        || r.contains("signed for version")
     {
         "The update's signature is not valid, so it was not installed. Nothing on your PC was changed."
     } else if r.contains("timed out") || r.contains("timeout") {
@@ -319,6 +371,35 @@ pub fn highlights(notes: &str, max: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn channels_select_highest_semver_and_reject_untrusted_or_mislabeled_releases() {
+        assert!(!compatible("0.3.1", "0.4.0-alpha.1"));
+        assert!(!compatible("0.3.1-beta.1", "0.4.0-alpha.1"));
+        assert!(compatible("0.3.1-alpha.6", "0.3.1-alpha.10"));
+        assert!(compatible("0.3.1-alpha.6", "0.3.1"));
+        let release = |v: &str| Release {
+            tag_name: format!("v{v}"),
+            draft: false,
+            prerelease: v.contains('-'),
+            assets: vec![ReleaseAsset {
+                name: "latest.json".into(),
+                browser_download_url: format!("{DOWNLOAD_PREFIX}v{v}/latest.json"),
+            }],
+        };
+        let mut releases = vec![release("0.3.1-alpha.9"), release("0.3.1-alpha.10")];
+        assert!(release_endpoint("0.3.1-alpha.6", &releases)
+            .unwrap()
+            .contains("alpha.10/"));
+        releases[1].draft = true;
+        assert!(release_endpoint("0.3.1-alpha.6", &releases)
+            .unwrap()
+            .contains("alpha.9/"));
+        releases[0].prerelease = false;
+        assert!(release_endpoint("0.3.1-alpha.6", &releases).is_none());
+        releases[0].prerelease = true;
+        releases[0].assets[0].browser_download_url = "https://example.com/latest.json".into();
+        assert!(release_endpoint("0.3.1-alpha.6", &releases).is_none());
+    }
     const DAY: i64 = 24 * HOUR_MS;
     fn capture(replay: bool, recording: bool, saving: u32, state: &str) -> CaptureState {
         CaptureState {
@@ -436,8 +517,8 @@ mod tests {
             !auto_install_ok(&idle, true, 3600, &auto),
             "a game is in front"
         );
-        // Continuous Instant Replay doesn't block forever: it is paused and resumed.
-        assert!(auto_install_ok(
+        // Even an idle PC must keep its active replay buffer intact.
+        assert!(!auto_install_ok(
             &capture(true, false, 0, "Buffering"),
             false,
             300,

@@ -775,7 +775,9 @@ details p { margin-top: 8px; }
 
 /* Home: microphone row with its switch */
 .mini-mixer li.mic-row { grid-template-columns: 30px minmax(0, max-content) minmax(36px, 1fr) auto; }
-.mic-row .name { max-width: 190px; }
+.mic-row .name { max-width: 220px; display: flex; align-items: center; overflow: visible; }
+.mic-row .name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mic-row .off-tag { flex-shrink: 0; }
 .mic-row .source-icon { transition: color 0.15s, box-shadow 0.15s, background 0.15s; }
 .mic-row.on .source-icon { color: #9ee9cb; box-shadow: inset 0 0 0 1px rgba(58, 210, 159, 0.3); }
 .mic-row.off .source-icon { color: var(--muted); }

@@ -22,8 +22,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`); };
@@ -33,7 +34,8 @@ if (execSync('tasklist /FI "IMAGENAME eq replayx.exe" /NH', { encoding: 'utf8' }
 }
 
 // ---------------------------------------------------------------- fixtures
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'rx-update-e2e-'));
+fs.mkdirSync(path.join(root, 'test-output'), { recursive: true });
+const work = fs.mkdtempSync(path.join(root, 'test-output', 'update-e2e-'));
 const dataDir = path.join(work, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ tour_done: true, tray_hint_shown: true, output_dir: path.join(work, 'clips') }));
@@ -46,7 +48,7 @@ const signEnv = { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PATH: path.join(sign
 function signed(name, bytes, version) {
   const file = path.join(work, name);
   fs.writeFileSync(file, bytes);
-  const r = spawnSync('npx', ['tauri', 'signer', 'sign', '--app-version', version, file], { cwd: root, env: signEnv, shell: true, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'signer', 'sign', '--app-version', version, file], { cwd: root, env: signEnv, encoding: 'utf8' });
   if (r.status !== 0 || !fs.existsSync(`${file}.sig`)) { console.log('Could not sign the test payload.'); process.exit(2); }
   return fs.readFileSync(`${file}.sig`, 'utf8').trim();
 }
@@ -81,6 +83,7 @@ const server = http.createServer(async (req, res) => {
       case 'slowmanifest': await sleep(1500); return send(200, manifest(newer, sigNewer));
       case 'slow': return send(200, manifest(newer, sigNewer, 'slow.bin'));
       case 'tampered': return send(200, manifest(newer, sigNewer, 'tampered.bin'));
+      case 'interrupted': return send(200, manifest(newer, sigNewer, 'interrupted.bin'));
       case 'wrongkey': return send(200, manifest(newer, strangerSig));
       case 'oldsig': return send(200, manifest(newer, sigOld));
       case 'older': return send(200, manifest(older, sigOld));
@@ -97,6 +100,7 @@ const server = http.createServer(async (req, res) => {
     hits.payload++;
     const bytes = req.url.includes('tampered') ? tampered : payload;
     res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length });
+    if (req.url.includes('interrupted')) { res.write(bytes.subarray(0, 1024)); await sleep(100); return res.destroy(); }
     if (!req.url.includes('slow')) return res.end(bytes);
     for (let i = 0; i < bytes.length; i += 256 * 1024) { res.write(bytes.subarray(i, i + 256 * 1024)); await sleep(120); }
     return res.end();
@@ -109,12 +113,12 @@ const port = server.address().port;
 // ---------------------------------------------------------------- the app
 const cdp = 9560 + Math.floor(Math.random() * 30);
 const log = fs.createWriteStream(path.join(work, 'tauri-dev.log'));
-const app = spawn('npx', ['tauri', 'dev'], {
-  cwd: root, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
+const app = spawn(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'dev'], {
+  cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, REPLAYX_DATA_DIR: dataDir, REPLAYX_UPDATE_TEST_ENDPOINT: `http://127.0.0.1:${port}/latest.json`, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdp} --remote-debugging-address=127.0.0.1` },
 });
 app.stdout.pipe(log); app.stderr.pipe(log);
-const stopApp = () => { try { execSync(`taskkill /PID ${app.pid} /T /F`, { stdio: 'ignore' }); } catch { /* gone */ } try { execSync('taskkill /IM replayx.exe /F', { stdio: 'ignore' }); } catch { /* gone */ } };
+const stopApp = () => { try { execSync(`taskkill /PID ${app.pid} /T /F`, { stdio: 'ignore' }); } catch { /* gone */ } };
 process.on('exit', stopApp);
 const startedAt = Date.now();
 let target;
@@ -203,8 +207,10 @@ f = await failsWith('badjson', 'could not be read');
 check('unreadable update information is reported clearly', f.ok, f.r.error ?? f.r.stage);
 for (const code of ['e500', 'e404']) {
   use(code); s = await invoke('check_update');
-  check(`server answer ${code.slice(1)}: no update offered, explained`, s.stage === 'up_to_date' && (s.detail ?? '').includes('No update file was found'), s.detail ?? s.stage);
+  check(`server answer ${code.slice(1)}: failed check, not falsely up to date`, s.stage === 'failed' && !!s.error, s.error ?? s.stage);
 }
+f = await failsWith('interrupted', '');
+check('an interrupted transfer is rejected; it never becomes ready', f.ok, f.r.error ?? f.r.stage);
 use('hang'); const t0 = Date.now(); s = await invoke('check_update'); const took = (Date.now() - t0) / 1000;
 check('a server that never answers ends in a timeout', s.stage === 'failed' && (s.error ?? '').includes('too long') && took > 15 && took < 40, `${took.toFixed(1)} s`);
 check('failures are counted for back-off', JSON.parse(fs.readFileSync(path.join(dataDir, 'updates.json'), 'utf8')).failures >= 1);
@@ -263,5 +269,6 @@ check('no capture was started by any of this', st.replay === false && st.recordi
 ws.close(); stopApp();
 const failed = results.filter(r => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed${failed.length ? `; FAILED: ${failed.map(r => r.name).join(' | ')}` : ''}`);
-try { fs.rmSync(work, { recursive: true, force: true }); } catch { /* files still closing */ }
+fs.writeFileSync(path.join(work, 'results.json'), JSON.stringify({ results, passed: results.length - failed.length, failed: failed.length, actualInstallationTested: false }, null, 2));
+console.log('Retained isolated evidence:', work);
 process.exit(failed.length ? 1 : 0);

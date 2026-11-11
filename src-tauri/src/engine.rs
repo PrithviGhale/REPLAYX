@@ -64,6 +64,7 @@ pub struct Status {
     pub segment_age_ms: u64,
     pub frame_age_ms: u64,
     pub audio_written_bytes: Vec<u64>,
+    pub audio_queue_ms: Vec<u64>,
     pub hotkey_error: Option<String>,
     /// A recording was requested and capture is still starting.
     pub pending_recording: bool,
@@ -469,6 +470,9 @@ impl Engine {
     /// Device, volume and Voice Enhancer settings are never changed.
     pub fn set_microphone(&self, on: bool) -> Result<Settings> {
         let mut i = self.0.lock().unwrap();
+        if i.starting.is_some() || i.recovery.is_some() {
+            bail!("Capture is starting or reconnecting. Retry the microphone switch when it is ready.")
+        }
         let capturing = i.pipeline.is_some() || i.starting.is_some() || i.recovery.is_some();
         let mut next = i.settings.clone();
         let mics: Vec<usize> = next
@@ -1921,6 +1925,19 @@ impl Inner {
         self.ring_audio_tracks = p.expected_audio;
         self.last_activity_sample = None;
         self.pipeline = Some(p.pipeline);
+        // Controls may change while a worker is initializing a capture path.
+        if let Some(p) = &self.pipeline {
+            for (feed, source) in p
+                .feeds
+                .iter()
+                .zip(self.settings.audio.iter().filter(|a| a.enabled))
+            {
+                feed.meter.muted.store(source.muted, Ordering::Relaxed);
+                feed.meter
+                    .volume
+                    .store(source.volume.to_bits(), Ordering::Relaxed);
+            }
+        }
     }
     fn collect_segments(&mut self) -> Result<()> {
         let Some(p) = &mut self.pipeline else {
@@ -2294,6 +2311,11 @@ impl Inner {
             .feeds
             .iter()
             .map(|f| f.meter.written_bytes.load(Ordering::Relaxed))
+            .collect();
+        self.status.audio_queue_ms = p
+            .feeds
+            .iter()
+            .map(|f| f.meter.queued_chunks.load(Ordering::Relaxed) * 10)
             .collect();
         self.status.write_mbps = if self.status.buffer_seconds > 0. {
             self.status.buffer_bytes as f64 / self.status.buffer_seconds / 1_000_000.

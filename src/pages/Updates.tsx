@@ -103,7 +103,7 @@ export function UpdatesTab() {
           ))}
         </div>
         <Toggle label="Automatically check for updates" checked={prefs.auto_check} onChange={v => void configure({ ...prefs, auto_check: v })}
-          description="Shortly after REPLAYX starts and then on a schedule. One small request to GitHub; nothing about you, your games or your recordings is sent." />
+          description="Shortly after REPLAYX starts and then on a schedule. A small release listing and, when available, a signed-update manifest from GitHub; nothing about you, your games or your recordings is sent." />
         <Field label="Check frequency">
           <div className="row">
             <Segmented label="Check frequency" value={custom ? 'custom' : 'recommended'} disabled={!prefs.auto_check}
@@ -121,7 +121,7 @@ export function UpdatesTab() {
         <Toggle label="Automatically download updates" checked={prefs.auto_download} disabled={!prefs.auto_check} onChange={v => void configure({ ...prefs, auto_download: v })}
           description="Downloads in the background and verifies the signature. Nothing installs until you say so, unless the next switch is on." />
         <Toggle label="Automatically install updates" checked={prefs.auto_install} disabled={!prefs.auto_download} onChange={v => void configure({ ...prefs, auto_install: v })}
-          description="Installs and restarts REPLAYX by itself, only when nothing is recording or saving, no game is in front and you have been away from the PC. Instant Replay is paused and switched back on." />
+          description="Installs and restarts REPLAYX by itself, only after recording, Instant Replay and saves have stopped, no game is in front and you have been away from the PC." />
         {prefs.auto_install && (
           <Field label="Install after the PC has been idle for">
             <Segmented label="Idle time before an automatic install" value={prefs.idle_minutes} onChange={v => void configure({ ...prefs, idle_minutes: v })}

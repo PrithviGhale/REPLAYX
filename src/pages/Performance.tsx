@@ -4,6 +4,17 @@ import { bytes, duration, encoderName } from '../format';
 import { Badge, Card, Empty, Sparkline, Stat } from '../ui';
 import { Section } from './shared';
 import { Gauge } from 'lucide-react';
+import { VERSION } from '../api';
+import { diagnosticReport } from '../diagnostics';
+
+function DiagnosticReport() {
+  const { saved, toast } = useApp();
+  const report = useStatus(x => JSON.stringify(diagnosticReport(x, saved, VERSION), null, 2));
+  return <Card title="Capture diagnostics" subtitle="A report without file paths, device names, game titles or raw error messages.">
+    <button className="btn" onClick={() => navigator.clipboard.writeText(report).then(() => toast('success', 'Diagnostics copied'), () => toast('error', 'Copy failed. Select the report below.'))}>Copy diagnostics</button>
+    <details><summary>Review report</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{report}</pre></details>
+  </Card>;
+}
 
 export function PerformancePage() {
   const { draft } = useApp();
@@ -12,17 +23,19 @@ export function PerformancePage() {
     fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, start: x.start_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
     buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, detail: x.scaling_detail,
     ow: x.output_width, oh: x.output_height, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, state: x.state,
-    speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label,
+    speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label, error: x.error, capture: x.capture,
     geo: x.geometry ? `${x.geometry.active_width}×${x.geometry.active_height} @ ${x.geometry.refresh_hz} Hz` : '',
   }));
   const ui = useUiStart();
-  const audio = useStatus(x => ({ packets: x.audio_packets, disc: x.audio_discontinuities, drift: x.audio_drift_ppm, gaps: x.audio_gaps, written: x.audio_written_bytes, peaks: x.audio_peaks }));
+  const audio = useStatus(x => ({ packets: x.audio_packets, disc: x.audio_discontinuities, drift: x.audio_drift_ppm, gaps: x.audio_gaps, written: x.audio_written_bytes, peaks: x.audio_peaks, queue: x.audio_queue_ms }));
   const history = useHistory();
   const names = draft.audio.filter(a => a.enabled).map(a => a.name);
   const dropPct = s.frames + s.dropped > 0 ? (100 * s.dropped) / (s.frames + s.dropped) : 0;
 
   return (
     <Section>
+      <DiagnosticReport />
+      <p className="muted small">Capture backend: {s.capture || 'Not started'}. {s.error ? `Last capture error: ${s.error}` : 'No current capture error.'}</p>
       {!active && <div className="banner info">Start Instant Replay or a recording to see live measurements. Nothing here is estimated.</div>}
       {active && s.speed > 0 && (s.speed < 0.97 || s.lag > 2000) && (
         <div className="banner warn" role="alert">The encoder is not keeping up ({s.speed.toFixed(2)}× real time, video {(s.lag / 1000).toFixed(1)} s behind). Expect stutter; capture stops if it falls 8 s behind. Lower the frame rate or resolution, or choose the Performance preset.</div>
@@ -60,7 +73,7 @@ export function PerformancePage() {
           {!active || names.length === 0 ? <Empty icon={Gauge} title={names.length ? 'Capture is off' : 'No audio sources'} /> : (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Source</th><th>Packets</th><th>Breaks</th><th>Clock ppm</th><th>Delivered</th></tr></thead>
+                <thead><tr><th>Source</th><th>Packets</th><th>Breaks</th><th>Clock ppm</th><th>Delivered</th><th>Queue</th></tr></thead>
                 <tbody>
                   {names.map((n, i) => (
                     <tr key={i}>
@@ -69,6 +82,7 @@ export function PerformancePage() {
                       <td className={(audio.disc[i] ?? 0) > 0 ? 'warn-text' : ''}>{audio.disc[i] ?? 0}</td>
                       <td>{(audio.drift[i] ?? 0).toFixed(1)}</td>
                       <td>{bytes(audio.written[i] ?? 0)}</td>
+                      <td>{audio.queue?.[i] === undefined ? 'Unmeasured' : `${audio.queue[i]} ms`}</td>
                     </tr>
                   ))}
                 </tbody>
