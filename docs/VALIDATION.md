@@ -441,6 +441,11 @@ The existing WASAPI producer was exercised directly, without launching FFmpeg, u
 The optimized 0.1.1-alpha.1 application built successfully with `npm run tauri -- build --no-bundle`. Path: `src-tauri/target/release/replayx.exe`; size: 13972992 bytes; SHA-256: `2287394decb5ec33d39300016150a9467fd3a664a61ff9e9295a7d80c726e144`. Native launch and video recording of this new build are unverified. The NSIS installer remains the older artifact described above. No recording process was started by the release build.
 # Local 0.3.1-alpha.7 validation - November 11, 2026
 
+Production-only follow-up found and fixed missing TLS-provider initialization
+before the Releases API request. The corrected native release completed a real
+GitHub check with no newer signed channel release; Rust 160/160 and Clippy passed
+again. Artifact hashes and final build details are in LOCAL_BUILD_0.3.1-alpha.7.md.
+
 Final additional checks: 132/132 responsive text cases (including update popup,
 130% text), 24/24 scrolling cases, and 9/9 media checks on each of the short
 fixture and end-of-soak clip. Short-fixture isolated audio separation measured
