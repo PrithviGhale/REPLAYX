@@ -24,6 +24,7 @@ export type VoiceSample = {
 };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Display = {
+  adapter_vendor?: number;
   index: number; device: string; adapter_luid: string; active_width: number; active_height: number;
   desktop_width: number; desktop_height: number; refresh_hz: number; rotation: number; left: number; top: number;
 };
@@ -176,4 +177,4 @@ export const previewSettings: Settings = {
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.7';
+export const VERSION = '0.3.1-alpha.8';

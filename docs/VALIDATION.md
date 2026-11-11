@@ -480,3 +480,26 @@ This continues the recovered work checkpoint `71e03ca` on
   acceptance items in MANUAL_ACCEPTANCE.md. No production-readiness claim.
 
 Historical entries below retain their original scope and dates.
+# Local alpha.8 performance milestone - November 11, 2026
+
+The Fortnite FPS gap remains unresolved; no under-5% gameplay qualification or
+ShadowPlay-equivalence claim. See PERFORMANCE_ALPHA8.md for the complete audit,
+experiments and limits, and FORTNITE_ABA.md for manual acceptance.
+
+- 161 Rust tests passed; the opt-in release polling benchmark was executed
+  separately. Rustfmt/Clippy passed, as did 51 frontend tests, TypeScript/Vite,
+  four read-only CSV-analyzer tests and 42 native isolated updater/mic checks.
+- Six hardware codec/region cases passed with actual NVENC H.264/HEVC/AV1;
+  12 clips fully decoded. 4:3 region SAR/DAR verified. This did not change
+  Windows/NVIDIA display modes or validate physical fullscreen gameplay.
+- 15-minute synthetic replay soak passed with two other NVENC workloads,
+  concurrent saves (805/805 ms), full decoding and no remaining buffer MKVs.
+  Memory averages 458.62 -> 461.26 MB; peak 528.69 MB; fixture CPU 6.21%.
+- End-of-soak media checks: three tracks, 87.38/106.13 dB synthetic isolation,
+  max generated A/V offset 30 ms, monotonic packet timestamps.
+- NV12 D3D11 scaling and CUDA derivation probes failed on this hardware;
+  direct D3D11/NVENC passed. Those unavailable paths are limitations, not
+  passing feature tests. The media runtime was not modified.
+- Production quality, lookahead, audio processing, game detection and default
+  GPU priority remain unchanged. Lower-priority/AQ-off/lookahead-off defaults
+  were rejected based on measurements or motion regressions.

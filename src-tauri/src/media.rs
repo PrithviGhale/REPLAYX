@@ -892,6 +892,8 @@ pub struct Tuning {
     pub cpu_priority: bool,
     /// Raise the encoder process's GPU scheduling class.
     pub gpu_priority: bool,
+    /// Profiling-only scheduling experiment; never permits realtime priority.
+    pub gpu_priority_class: i32,
     /// Capture at this multiple of the output rate and keep the frame nearest
     /// each output slot (1 = capture at the output rate).
     pub oversample: u32,
@@ -905,6 +907,8 @@ pub struct Tuning {
     pub video_queue: Option<u32>,
     /// NVENC rate-control lookahead in frames.
     pub nvenc_lookahead: Option<u32>,
+    /// Profiling control only; production keeps spatial AQ enabled.
+    pub nvenc_aq: bool,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -915,12 +919,14 @@ impl Default for Tuning {
             qsv_async_depth: None,
             cpu_priority: false,
             gpu_priority: true,
+            gpu_priority_class: 4,
             oversample: 1,
             audio_wallclock: false,
             interleave_delta: None,
             split_graphs: true,
             video_queue: None,
             nvenc_lookahead: Some(20),
+            nvenc_aq: true,
         }
     }
 }
@@ -935,12 +941,16 @@ pub fn tuning() -> Tuning {
                 "qsv_async_depth" => t.qsv_async_depth = v.parse().ok(),
                 "cpu_priority" => t.cpu_priority = v != "0",
                 "gpu_priority" => t.gpu_priority = v != "0",
+                "gpu_priority_class" => {
+                    t.gpu_priority_class = v.parse::<i32>().unwrap_or(4).clamp(2, 4)
+                }
                 "oversample" => t.oversample = v.parse::<u32>().unwrap_or(1).clamp(1, 8),
                 "audio_wallclock" => t.audio_wallclock = v != "0",
                 "interleave_delta" => t.interleave_delta = v.parse().ok(),
                 "split_graphs" => t.split_graphs = v != "0",
                 "video_queue" => t.video_queue = v.parse().ok(),
                 "nvenc_lookahead" => t.nvenc_lookahead = v.parse().ok(),
+                "nvenc_aq" => t.nvenc_aq = v != "0",
                 _ => {}
             }
         }
@@ -1210,7 +1220,8 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         _ => {}
     }
     if nvenc {
-        // NVENC runs on its own engine; presets trade encoder time, not game GPU time.
+        // NVENC is dedicated hardware, but RGB conversion, AQ and lookahead
+        // can also consume GPU resources shared with rendering.
         c.args([
             "-preset",
             match s.preset.as_str() {
@@ -1221,7 +1232,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
             "-tune",
             "hq",
             "-spatial-aq",
-            "1",
+            if tuning().nvenc_aq { "1" } else { "0" },
         ]);
         // Rate-control lookahead: better bit allocation, and the encoder holds
         // ~1/3 s of video, so video never runs ahead of the (deliberately

@@ -12,20 +12,18 @@ usage: python scripts/overhead-bench.py --configs none,qsv,qsv-lp [--fps 60] [--
 """
 import argparse
 import glob
-import importlib.util
 import json
 import os
 import statistics
 import subprocess
 import sys
 import time
+import shutil
+import threading
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rel = os.path.join(root, "src-tauri", "target", "release")
 CLI, PROXY = os.path.join(rel, "replayx-cli.exe"), os.path.join(rel, "replayx-gameproxy.exe")
-spec = importlib.util.spec_from_file_location("wc", os.path.join(root, "scripts", "window-check.py"))
-wc = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(wc)
 
 # label -> (capture-test overrides, REPLAYX_VIDEO_TUNING); None = no capture (control).
 CONFIGS = {
@@ -56,6 +54,7 @@ CONFIGS = {
     "smooth-os4": (["scale_policy=smooth"], "oversample=4"),
     "exact": (["scale_policy=exact"], ""),
     "prio-none": ([], "cpu_priority=0,gpu_priority=0"),
+    "prio-middle": ([], "cpu_priority=0,gpu_priority=1,gpu_priority_class=3"),
     "prio-gpu": ([], "cpu_priority=0,gpu_priority=1"),
     "prio-cpu": ([], "cpu_priority=1,gpu_priority=0"),
     "prio-both": ([], "cpu_priority=1,gpu_priority=1"),
@@ -65,14 +64,20 @@ CONFIGS = {
     "av1": (["codec=av1"], ""),
     "av1-quality": (["codec=av1", "preset=quality"], ""),
     "h264-quality": (["codec=h264", "preset=quality"], ""),
+    # Attribution experiments, not proposed production quality changes.
+    "aq-off": (["codec=h264"], "nvenc_aq=0"),
+    "lookahead-off": (["codec=h264"], "nvenc_lookahead=0"),
 }
 
 GPU_PS = r"""
+Start-Sleep -Seconds 5
+$names = @{{}}
+Get-Process -Name ffmpeg,replayx-cli,replayx-gameproxy,dwm -ErrorAction SilentlyContinue | ForEach-Object {{ $names[[string]$_.Id]=$_.ProcessName }}
 $s = Get-Counter -Counter '\GPU Engine(*)\Utilization Percentage','\Process(*)\% Processor Time' -SampleInterval 1 -MaxSamples {n} -ErrorAction SilentlyContinue
 $acc = @{{}}; $cpu = @{{}}
 foreach ($set in $s) {{ foreach ($x in $set.CounterSamples) {{
   if ($x.Path -like '*gpu engine*' -and $x.InstanceName -match 'pid_(\d+)_luid_(0x\w+_0x\w+)_phys_\d+_eng_\d+_engtype_(.*)$') {{
-    $p = (Get-Process -Id $matches[1] -ErrorAction SilentlyContinue).ProcessName
+    $p = $names[$matches[1]]; if (!$p) {{ continue }}
     $k = "$p|$($matches[2])|$($matches[3])"; $acc[$k] += $x.CookedValue / {n} }}
   elseif ($x.Path -like '*% processor time*' -and $x.InstanceName -match '^(ffmpeg|replayx-cli|replayx-gameproxy|dwm|robloxplayerbeta)') {{
     $k = $x.InstanceName -replace '#\d+$',''; $cpu[$k] += $x.CookedValue / {n} / [Environment]::ProcessorCount }} }} }}
@@ -97,32 +102,64 @@ def stats(times):
 
 
 def run(label, args, fps, height, mode, out):
-    os.makedirs(out, exist_ok=True)
+    os.makedirs(out, exist_ok=False)  # never mix old clips or reports into a new run
     cfg = CONFIGS[label]
-    total = args.warm + args.capture + 9
+    telemetry, telemetry_thread, telemetry_process = [], None, None
+    if args.telemetry and shutil.which('nvidia-smi'):
+        telemetry_process = subprocess.Popen(['nvidia-smi', '--query-gpu=clocks.current.graphics,clocks.current.memory,power.draw,utilization.gpu,memory.used,temperature.gpu',
+            '--format=csv,noheader,nounits', '-lms', '1000'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        def collect():
+            for line in telemetry_process.stdout:
+                try:
+                    row = [float(v.strip()) for v in line.split(',')]
+                    if len(row) == 6 and len(telemetry) < 10000:
+                        telemetry.append(dict(t=time.perf_counter(), values=row))
+                except ValueError:
+                    pass
+        telemetry_thread = threading.Thread(target=collect, daemon=True)
+        telemetry_thread.start()
+    total = args.warm + args.capture + 9 + args.post
     proxy_log = os.path.join(out, "proxy.json")
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
-                              "--cpu-us", str(args.cpu_us)])
+                              "--cpu-us", str(args.cpu_us), "--detail", str(args.detail)])
     time.sleep(1.5)
     # The fixture opens its own full-screen window. Never manipulate unrelated
     # windows or focus through a second UI automation implementation.
     time.sleep(args.warm - 1.5)
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
-                           stdout=subprocess.PIPE, text=True) if cfg else None
+                           stdout=subprocess.PIPE, text=True) if cfg and args.counters else None
     t0 = time.perf_counter()
     if cfg:
         overrides, tuning = cfg
         env = dict(os.environ, REPLAYX_VIDEO_TUNING=tuning)
-        cmd = [CLI, "capture-test", str(args.capture), args.audio, f"fps={fps}", f"height={height}", f"mode={mode}",
+        cmd = [args.cli, "capture-test", str(args.capture), args.audio, f"fps={fps}", f"height={height}", f"mode={mode}",
                f"width={args.width}", *([f"bitrate={args.bitrate}"] if args.bitrate else []), *overrides]
         with open(os.path.join(out, "capture.log"), "w") as capture_log:
-            subprocess.run(cmd, cwd=out, env=env, stdout=capture_log, stderr=capture_log, timeout=180, check=True)
+            recorder = subprocess.Popen(cmd, cwd=out, env=env, stdout=capture_log, stderr=capture_log)
+            deadline = time.monotonic() + args.capture + 90
+            try:
+                while recorder.poll() is None:
+                    if proxy.poll() is not None:
+                        raise RuntimeError('Fixture ended early; stopping capture instead of recording the uncovered desktop')
+                    if time.monotonic() > deadline:
+                        raise TimeoutError('Capture exceeded its deadline')
+                    time.sleep(.1)
+                if recorder.returncode:
+                    raise subprocess.CalledProcessError(recorder.returncode, cmd)
+            finally:
+                if recorder.poll() is None:
+                    recorder.terminate(); recorder.wait(timeout=15)
     else:
         gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
-                               stdout=subprocess.PIPE, text=True)
+                               stdout=subprocess.PIPE, text=True) if args.counters else None
         time.sleep(args.capture + 4)
     t1 = time.perf_counter()
     proxy.wait(timeout=total + 60)
+    if telemetry_process:
+        telemetry_process.terminate()
+        telemetry_process.wait(timeout=10)
+        telemetry_thread.join(timeout=3)
+        json.dump(telemetry, open(os.path.join(out, 'gpu-telemetry.json'), 'w'), indent=1)
     usage = {}
     if gpu:
         try:
@@ -134,6 +171,24 @@ def run(label, args, fps, height, mode, out):
     abs_t = [log["start_qpc_s"] + p for p in log["presents_s"]]
     base = stats([t for t in abs_t if log["start_qpc_s"] + 2 < t < t0 - 0.5])
     during = stats([t for t in abs_t if t0 + 5 < t < t0 + args.capture - 1])
+    after = stats([t for t in abs_t if t1 + 3 < t < log['start_qpc_s'] + total - 1])
+    def draw_time(lo, hi):
+        samples = [v['ms'] for v in log.get('fixture_draw_gpu_ms', [])
+                   if lo < log['start_qpc_s'] + v['t'] < hi]
+        if not samples:
+            return None
+        return dict(samples=len(samples), mean_ms=statistics.mean(samples),
+                    p95_ms=sorted(samples)[int(.95*(len(samples)-1))])
+    gpu_draw = dict(before=draw_time(log['start_qpc_s']+2, t0-.5),
+                    capture=draw_time(t0+5, t0+args.capture-1),
+                    after=draw_time(t1+3, log['start_qpc_s']+total-1))
+    def gpu_state(lo, hi):
+        rows = [v['values'] for v in telemetry if lo < v['t'] < hi]
+        if not rows:
+            return None
+        names = ['graphics_mhz', 'memory_mhz', 'power_w', 'gpu_busy_percent', 'memory_used_mb', 'temperature_c']
+        return {name: dict(mean=statistics.mean(v), minimum=min(v), maximum=max(v))
+                for name, v in zip(names, zip(*rows))}
     clip = None
     clips = sorted(glob.glob(os.path.join(out, "test-output", "capture-test-*", "clips", "**", "*.mkv"), recursive=True),
                    key=os.path.getsize)
@@ -141,7 +196,21 @@ def run(label, args, fps, height, mode, out):
         clip = json.loads(subprocess.check_output([sys.executable, "-I", os.path.join(root, "scripts", "gameproxy-check.py"),
                                                    clips[-1], "--skip-seconds", "6"]))
         clip.pop("advance_histogram_ms", None)
+    control_fps = statistics.mean([base['fps'], after['fps']]) if base and after else None
+    drift = 100 * (after['fps'] / base['fps'] - 1) if base and after else None
+    valid = bool(base and during and after and drift is not None and abs(drift) <= 5
+                 and log.get('detail', 0) == args.detail)
     report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "baseline": base, "capture": during,
+              "fixture_draw_gpu_timing": gpu_draw,
+              "counter_sampler_enabled": args.counters,
+              "gpu_state": dict(before=gpu_state(log['start_qpc_s']+2, t0-.5),
+                                capture=gpu_state(t0+5,t0+args.capture-1), after=gpu_state(t1+3,log['start_qpc_s']+total-1)),
+              "after": after, "detail": log.get('detail', 0), "requested_detail": args.detail,
+              "fixture_matches_request": log.get('detail', 0) == args.detail,
+              "valid_comparison": valid,
+              "limitations": "Synthetic only. Drift >5%, missing controls or fixture mismatch invalidate comparisons. Present-call times are not displayed-frame times.",
+              "aba_drop_pct": round(100 * (1 - during['fps'] / control_fps), 2) if control_fps and during else None,
+              "control_drift_pct": round(100 * (after['fps'] / base['fps'] - 1), 2) if base and after else None,
               "fps_drop_pct": round(100 * (1 - during["fps"] / base["fps"]), 1) if base and during else None,
               "usage": usage, "clip": clip}
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1)
@@ -151,6 +220,9 @@ def run(label, args, fps, height, mode, out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--configs", default="none,qsv")
+    ap.add_argument("--cli", default=CLI, help="Recorder binary to compare; fixture stays identical")
+    ap.add_argument("--counters", action="store_true", help="Separate profiling run: counter collection only during B may affect FPS")
+    ap.add_argument("--telemetry", action="store_true", help="Read NVIDIA clocks/power consistently throughout A/B/A")
     ap.add_argument("--fps", default="60")
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--mode", default="stretch")
@@ -161,6 +233,8 @@ def main():
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--cpu-us", type=int, default=0)
     ap.add_argument("--warm", type=int, default=10)
+    ap.add_argument("--post", type=int, default=20, help="Capture-off A2 window after saves finish")
+    ap.add_argument("--detail", type=int, choices=[0, 1], default=1)
     ap.add_argument("--capture", type=int, default=20)
     ap.add_argument("--tag", default=time.strftime("%H%M%S"))
     args = ap.parse_args()

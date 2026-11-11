@@ -54,6 +54,15 @@ float4 ps(float4 pos : SV_Position) : SV_Target {
     for (uint k = 0; k < iters; k++) a += sin(q.x * 0.013 + k * 0.7 + t) * cos(q.y * 0.017 - k * 0.3);
     float bar = frac((q.x - t * 90) / 64) < 0.25 ? 1 : 0;
     float3 c = float3(0.06, 0.09, 0.13) + bar * float3(0.8, 0.5, 0.15) + 0.02 * a / max(iters, 1);
+    // Optional moving fine detail exercises encoder complexity/bandwidth, unlike
+    // the original large flat bars. This is still a synthetic workload.
+    if (pad > 0) {
+        float2 uv = floor(pos.xy + float2(t * 120, t * 40));
+        uint h = (uint(uv.x) * 1664525u) ^ (uint(uv.y) * 1013904223u);
+        h ^= h >> 16; h *= 2246822519u; h ^= h >> 13;
+        float foliage = float(h & 255u) / 255.0;
+        c = lerp(c, float3(foliage * 0.5, foliage, foliage * 0.25), 0.6);
+    }
     return float4(c, 1);
 }
 "#;
@@ -66,6 +75,66 @@ struct Constants {
     pad: f32,
     res: [f32; 2],
     pad2: [f32; 2],
+}
+
+/// One bounded, non-blocking timestamp sample in flight. No Flush or GPU wait.
+struct GpuTimer {
+    disjoint: ID3D11Query,
+    begin: ID3D11Query,
+    end: ID3D11Query,
+    pending: Option<(Instant, f64)>,
+}
+impl GpuTimer {
+    unsafe fn new(device: &ID3D11Device) -> windows::core::Result<Self> {
+        let query = |kind| {
+            let mut q = None;
+            device.CreateQuery(
+                &D3D11_QUERY_DESC {
+                    Query: kind,
+                    MiscFlags: 0,
+                },
+                Some(&mut q),
+            )?;
+            Ok::<_, windows::core::Error>(q.unwrap())
+        };
+        Ok(Self {
+            disjoint: query(D3D11_QUERY_TIMESTAMP_DISJOINT)?,
+            begin: query(D3D11_QUERY_TIMESTAMP)?,
+            end: query(D3D11_QUERY_TIMESTAMP)?,
+            pending: None,
+        })
+    }
+    unsafe fn poll(&mut self, context: &ID3D11DeviceContext) -> Option<(f64, f64)> {
+        let (began, t) = self.pending?;
+        let mut disjoint = D3D11_QUERY_DATA_TIMESTAMP_DISJOINT::default();
+        let (mut a, mut b) = (0u64, 0u64);
+        let flags = D3D11_ASYNC_GETDATA_DONOTFLUSH.0 as u32;
+        let ok = context
+            .GetData(
+                &self.disjoint,
+                Some(&mut disjoint as *mut _ as *mut c_void),
+                std::mem::size_of_val(&disjoint) as u32,
+                flags,
+            )
+            .is_ok()
+            && context
+                .GetData(&self.begin, Some(&mut a as *mut _ as *mut c_void), 8, flags)
+                .is_ok()
+            && context
+                .GetData(&self.end, Some(&mut b as *mut _ as *mut c_void), 8, flags)
+                .is_ok();
+        // GetData maps S_FALSE to success in the Windows bindings; unchanged
+        // zero output indicates the asynchronous result is not available yet.
+        if ok && b > a && a > 0 && disjoint.Frequency > 0 {
+            self.pending = None;
+            if !disjoint.Disjoint.as_bool() {
+                return Some((t, (b - a) as f64 / disjoint.Frequency as f64 * 1000.));
+            }
+        } else if began.elapsed() > Duration::from_secs(2) {
+            self.pending = None;
+        }
+        None
+    }
 }
 
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -130,6 +199,7 @@ fn main() -> windows::core::Result<()> {
     let seconds: f64 = arg("--seconds", 30.0);
     let iters: u32 = arg("--iters", 200);
     let cpu_us: u64 = arg("--cpu-us", 0);
+    let detail: u32 = arg("--detail", 0);
     let log: String = arg("--log", "gameproxy.json".to_string());
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -183,6 +253,46 @@ fn main() -> windows::core::Result<()> {
         )?;
         let (device, context): (ID3D11Device, ID3D11DeviceContext) =
             (device.unwrap(), context.unwrap());
+        if arg("--texture-probe", 0u32) != 0 {
+            // Isolate hardware support from FFmpeg's scaler implementation.
+            let mut results = Vec::new();
+            for array_size in [1, 10] {
+                for flags in [
+                    D3D11_BIND_RENDER_TARGET.0,
+                    D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_VIDEO_ENCODER.0,
+                ] {
+                    let mut texture = None;
+                    let result = device.CreateTexture2D(
+                        &D3D11_TEXTURE2D_DESC {
+                            Width: 1920,
+                            Height: 1080,
+                            MipLevels: 1,
+                            ArraySize: array_size,
+                            Format: DXGI_FORMAT_NV12,
+                            SampleDesc: DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
+                            Usage: D3D11_USAGE_DEFAULT,
+                            BindFlags: flags as u32,
+                            ..Default::default()
+                        },
+                        None,
+                        Some(&mut texture),
+                    );
+                    results.push(serde_json::json!({"array_size":array_size,"bind_flags":flags,
+                        "success":result.is_ok(),"error":result.err().map(|e|format!("{:?}", e.code()))}));
+                }
+            }
+            std::fs::write(
+                &log,
+                serde_json::to_vec_pretty(&serde_json::json!({"adapter":name,"textures":results}))
+                    .unwrap(),
+            )
+            .ok();
+            let _ = DestroyWindow(hwnd);
+            return Ok(());
+        }
         // One frame in flight, so the time stamped into a frame is close to
         // when it reaches the screen (a deep render-ahead queue would make the
         // stamp drift against display time and look like capture judder).
@@ -242,6 +352,8 @@ fn main() -> windows::core::Result<()> {
             Some(&mut cb),
         )?;
         let cb = cb.unwrap();
+        let mut gpu_timer = GpuTimer::new(&device).ok();
+        let mut gpu_times = Vec::new();
 
         let start = Instant::now();
         let mut presents: Vec<f64> = Vec::with_capacity(200_000);
@@ -266,7 +378,7 @@ fn main() -> windows::core::Result<()> {
                 code: ((t * 4000.0) as u32) & 0xFF_FFFF,
                 iters,
                 t: t as f32,
-                pad: 0.,
+                pad: detail as f32,
                 res: [sw as f32, sh as f32],
                 pad2: [0.; 2],
             };
@@ -282,7 +394,27 @@ fn main() -> windows::core::Result<()> {
             context.VSSetShader(vs.as_ref(), None);
             context.PSSetShader(ps.as_ref(), None);
             context.PSSetConstantBuffers(0, Some(&[Some(cb.clone())]));
+            if let Some(timer) = &mut gpu_timer {
+                if let Some((t, ms)) = timer.poll(&context) {
+                    gpu_times.push(serde_json::json!({"t":t,"ms":ms}));
+                }
+            }
+            let sampled = presents.len().is_multiple_of(64)
+                && gpu_timer
+                    .as_ref()
+                    .is_some_and(|timer| timer.pending.is_none());
+            if sampled {
+                let timer = gpu_timer.as_mut().unwrap();
+                context.Begin(&timer.disjoint);
+                context.End(&timer.begin);
+                timer.pending = Some((Instant::now(), t));
+            }
             context.Draw(3, 0);
+            if sampled {
+                let timer = gpu_timer.as_ref().unwrap();
+                context.End(&timer.end);
+                context.End(&timer.disjoint);
+            }
             let present_flags = if tearing_ok {
                 DXGI_PRESENT_ALLOW_TEARING
             } else {
@@ -300,8 +432,9 @@ fn main() -> windows::core::Result<()> {
         let now = qpc as f64 / freq as f64;
         let start_qpc = now - start.elapsed().as_secs_f64();
         let report = serde_json::json!({
-            "adapter": name, "width": sw, "height": sh, "iters": iters, "cpu_us": cpu_us,
+            "adapter": name, "width": sw, "height": sh, "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
+            "fixture_draw_gpu_ms":gpu_times,
         });
         std::fs::write(&log, serde_json::to_vec(&report).unwrap()).ok();
         println!(

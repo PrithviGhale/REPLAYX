@@ -1,6 +1,10 @@
-# Known limitations — 0.3.1-alpha.7
+# Known limitations — 0.3.1-alpha.8
 
-REPLAYX is **alpha** software. The reported ~45% real-game FPS loss remains unresolved. Current synthetic measurements do not establish real-game improvement or Discord compatibility. Physical microphone, editor multitrack playback and fullscreen stretched transitions require manual testing. Evidence for what does work is in [VALIDATION.md](VALIDATION.md); measurement limits are in [PERFORMANCE.md](PERFORMANCE.md).
+REPLAYX is **alpha** software. New Fortnite screenshot averages suggest roughly 13% overhead; the earlier ~45% report and the new samples are not controlled benchmarks. The real-game overhead remains unresolved. Current synthetic measurements do not establish real-game improvement or Discord compatibility. Physical microphone, editor multitrack playback and fullscreen stretched transitions require manual testing. Evidence is in [VALIDATION.md](VALIDATION.md) and [the alpha.8 investigation](PERFORMANCE_ALPHA8.md).
+
+- Detailed GPU-fixture A/B/A runs generally measured about 5-8% overhead with current quality settings. This does not qualify Fortnite or establish the under-5% goal.
+- The bundled D3D11 NV12 scaler fails on this GPU; direct BGRA-to-NVENC works. Exact resizing can therefore fall back to CPU processing. Smooth mode may use native pixels plus aspect metadata instead of encoding exact 1920x1080 pixels.
+- Live per-frame capture/conversion/encoder latency and unique source FPS remain unavailable. Driver encoder statistics and fixture GPU draw timings are different measurements.
 
 ## Updates and the microphone switch (0.3.1-alpha.7)
 

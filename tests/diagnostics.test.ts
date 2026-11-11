@@ -16,3 +16,17 @@ test('shareable diagnostics omit paths, identities and arbitrary error strings',
   assert.deepEqual(r.audioQueueMs, [20]);
   assert.doesNotMatch(JSON.stringify(r), /private|secret|Users|token=/i);
 });
+
+test('GPU input paths survive redaction without leaking fallback stderr', () => {
+  const s = { scaling: 'GPU zero-copy (Direct3D 11 → encoder)', error: null,
+    geometry: { adapter_vendor: 0x10de, desktop_width: 1920, desktop_height: 1080 },
+    start_timings: [{ stage: 'Encoder GPU priority raised (high)', elapsed_ms: 1 }],
+    state: 'Buffering', capture: 'desktop-duplication', encoder: 'h264_nvenc',
+    scaling_detail: 'private path' } as Status;
+  const r = diagnosticReport(s, { encoder: 'auto', fps: 60 } as Settings, '0.3.1-alpha.7');
+  assert.equal(r.scaling, 'd3d11');
+  assert.equal(r.encoderInput, 'GPU BGRA');
+  assert.equal(r.captureAdapterVendor, 0x10de);
+  assert.equal(r.captureGpuPriority, 'high');
+  assert.doesNotMatch(JSON.stringify(r), /private/);
+});

@@ -49,11 +49,19 @@ pub fn raise_cpu_priority(child: &Child) -> bool {
 /// GPU device. HIGH, not REALTIME: realtime could starve the compositor.
 /// Allowed without admin rights for a process we own. Returns the NTSTATUS.
 pub fn raise_gpu_priority(child: &Child) -> i32 {
+    set_gpu_priority(child, 4)
+}
+
+/// Bounded scheduling experiment for a process we own. Production uses HIGH;
+/// above-normal and normal are available for profiling. Realtime is rejected.
+pub fn set_gpu_priority(child: &Child, class: i32) -> i32 {
     use windows::{
         core::{s, w},
         Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
     };
-    const D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH: i32 = 4;
+    if !(2..=4).contains(&class) {
+        return -1;
+    }
     unsafe {
         let Ok(gdi) = LoadLibraryW(w!("gdi32.dll")) else {
             return -1;
@@ -62,10 +70,7 @@ pub fn raise_gpu_priority(child: &Child) -> i32 {
             return -1;
         };
         let set: unsafe extern "system" fn(HANDLE, i32) -> i32 = std::mem::transmute(f);
-        set(
-            HANDLE(child.as_raw_handle()),
-            D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH,
-        )
+        set(HANDLE(child.as_raw_handle()), class)
     }
 }
 

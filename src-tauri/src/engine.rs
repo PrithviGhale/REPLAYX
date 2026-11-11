@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::{Child, Stdio},
     sync::{
@@ -20,6 +20,37 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+/// FFmpeg's CSV list is append-only for this segment configuration. Poll only
+/// newly appended bytes, keeping replay maintenance independent of session age.
+/// The caller commits complete rows after validation; unfinished rows are retried.
+fn manifest_tail(path: &Path, offset: u64) -> Result<String> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && offset == 0 => {
+            return Ok(String::new())
+        }
+        Err(e) => return Err(e).context("Cannot read replay segment manifest"),
+    };
+    let size = file.metadata()?.len();
+    if size < offset {
+        bail!("Replay segment manifest was truncated unexpectedly")
+    }
+    if size == offset {
+        return Ok(String::new());
+    }
+    const MAX_PENDING_BYTES: u64 = 1024 * 1024;
+    if size - offset > MAX_PENDING_BYTES {
+        bail!("Replay segment manifest backlog exceeded its bound")
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut tail = String::new();
+    file.take(MAX_PENDING_BYTES + 1).read_to_string(&mut tail)?;
+    if tail.len() as u64 > MAX_PENDING_BYTES {
+        bail!("Replay segment manifest backlog exceeded its bound")
+    }
+    Ok(tail)
+}
 
 #[derive(Default, Clone, Serialize)]
 pub struct Status {
@@ -164,7 +195,7 @@ struct Pipeline {
     discard_tail: bool,
     feeds: Vec<AudioFeed>,
     dir: PathBuf,
-    seen: usize,
+    manifest_offset: u64,
     progress: Arc<Progress>,
     started: Instant,
     expected_audio: usize,
@@ -1508,7 +1539,7 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             discard_tail: false,
             feeds,
             dir,
-            seen: 0,
+            manifest_offset: 0,
             progress,
             started,
             expected_audio,
@@ -1946,14 +1977,14 @@ impl Inner {
         if p.discard_tail {
             return Ok(());
         }
-        let csv = fs::read_to_string(p.dir.join("segments.csv")).unwrap_or_default();
+        let csv = manifest_tail(&p.dir.join("segments.csv"), p.manifest_offset)?;
         // Ignore a concurrently written partial CSV line until its newline is visible.
         let lines: Vec<_> = csv
             .split_inclusive('\n')
             .filter(|s| s.ends_with('\n'))
-            .map(str::trim)
             .collect();
-        for line in lines.iter().skip(p.seen) {
+        for raw in lines {
+            let line = raw.trim();
             let pieces: Vec<_> = line.rsplitn(3, ',').collect();
             if pieces.len() != 3 {
                 break;
@@ -2018,7 +2049,9 @@ impl Inner {
                 }
             }
             self.ring.add(segment);
-            p.seen += 1;
+            // Commit only after the segment was validated and retained. A
+            // partial row or failed segment never advances the cursor.
+            p.manifest_offset += raw.len() as u64;
             p.last_segment_ms = p.started.elapsed().as_millis() as u64;
         }
         self.ring.prune(
@@ -2199,10 +2232,18 @@ impl Inner {
             if ms > 0 {
                 p.reported_first_frame = true;
                 if media::tuning().gpu_priority {
-                    let status = crate::process_job::raise_gpu_priority(&p.child);
+                    let class = media::tuning().gpu_priority_class;
+                    let status = crate::process_job::set_gpu_priority(&p.child, class);
                     self.status.start_timings.push(media::StageTiming {
                         stage: if status == 0 {
-                            "Encoder GPU priority raised (high)".into()
+                            format!(
+                                "Encoder GPU priority raised ({})",
+                                match class {
+                                    3 => "above normal",
+                                    2 => "normal",
+                                    _ => "high",
+                                }
+                            )
                         } else {
                             format!("Encoder GPU priority unchanged (status {status:#x})")
                         },
@@ -2518,6 +2559,71 @@ impl Drop for Inner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Explicit manifest polling microbenchmark, not a timing assertion"]
+    fn manifest_poll_cost() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("segments.csv");
+        let history = "segment-00000001.mkv,0,2\n".repeat(20_000);
+        fs::write(&path, &history).unwrap();
+        let started = Instant::now();
+        for _ in 0..1000 {
+            let text = fs::read_to_string(&path).unwrap();
+            std::hint::black_box(
+                text.split_inclusive('\n')
+                    .filter(|s| s.ends_with('\n'))
+                    .map(str::trim)
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let old = started.elapsed();
+        let started = Instant::now();
+        for _ in 0..1000 {
+            std::hint::black_box(manifest_tail(&path, history.len() as u64).unwrap());
+        }
+        println!(
+            "MANIFEST_BENCH bytes={} polls=1000 full_scan_ms={:.3} incremental_ms={:.3}",
+            history.len(),
+            old.as_secs_f64() * 1000.,
+            started.elapsed().as_secs_f64() * 1000.
+        );
+    }
+    #[test]
+    fn manifest_cursor_retains_partial_rows_and_reads_only_new_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("segments.csv");
+        assert_eq!(manifest_tail(&path, 0).unwrap(), "");
+        let history = "segment-00000001.mkv,0,2\n".repeat(20_000);
+        fs::write(&path, &history).unwrap();
+        let offset = history.len() as u64;
+        assert_eq!(
+            manifest_tail(&path, offset).unwrap(),
+            "",
+            "old history is not read or reparsed"
+        );
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b"segment-00020001.mkv,2,").unwrap();
+        let partial = manifest_tail(&path, offset).unwrap();
+        assert_eq!(partial.lines().count(), 1);
+        assert!(!partial.ends_with('\n'));
+        file.write_all(b"4\nsegment-00020002.mkv,4,6\n").unwrap();
+        let tail = manifest_tail(&path, offset).unwrap();
+        assert_eq!(tail, "segment-00020001.mkv,2,4\nsegment-00020002.mkv,4,6\n");
+        assert!(manifest_tail(&path, offset + tail.len() as u64)
+            .unwrap()
+            .is_empty());
+        fs::write(&path, b"").unwrap();
+        assert!(manifest_tail(&path, offset)
+            .unwrap_err()
+            .to_string()
+            .contains("truncated"));
+        assert!(manifest_tail(&dir.path().join("missing.csv"), 1).is_err());
+        fs::write(&path, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+        assert!(manifest_tail(&path, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("backlog"));
+    }
     #[test]
     fn successful_part_cleanup_preserves_quarantined_media() {
         let root = tempfile::tempdir().unwrap();

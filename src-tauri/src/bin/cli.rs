@@ -417,6 +417,17 @@ fn main() -> Result<()> {
             Some(("mode", v)) => settings.canvas_mode = v.into(),
             Some(("height", v)) => settings.height = v.parse()?,
             Some(("width", v)) => settings.width = v.parse()?,
+            Some(("region", v)) => {
+                let (w, h) = v
+                    .split_once('x')
+                    .ok_or_else(|| anyhow::anyhow!("Use region=WIDTHxHEIGHT"))?;
+                settings.source_rect = Some(replayx_core::geometry::CaptureRect {
+                    x: 0,
+                    y: 0,
+                    width: w.parse()?,
+                    height: h.parse()?,
+                });
+            }
             Some(("preset", v)) => settings.preset = v.into(),
             Some(("scale_policy", v)) => settings.scale_policy = v.into(),
             Some(("encoder", v)) => settings.encoder = v.into(),

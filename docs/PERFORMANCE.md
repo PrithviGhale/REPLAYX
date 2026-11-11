@@ -1,5 +1,14 @@
 # Performance evidence and pending benchmark
 
+## Current alpha.8 investigation
+
+See [PERFORMANCE_ALPHA8.md](PERFORMANCE_ALPHA8.md) for the pipeline audit,
+hardware experiments and limits, and [FORTNITE_ABA.md](FORTNITE_ABA.md) for the
+manual game comparison. The meaningful production change is incremental replay
+maintenance; no real-game FPS improvement or under-5% qualification is claimed.
+The new detailed scene generally costs 5-8% in the synthetic A/B/A runs, so the
+older 2.9-3.3% simple-scene figures below are not representative of every workload.
+
 ## 0.3.1-alpha.7: November 11 validation
 
 **15-minute synthetic replay soak:** `test-output/nov11-soak/summary.json`.

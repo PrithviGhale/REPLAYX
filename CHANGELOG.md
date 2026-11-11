@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1-alpha.8 - local performance investigation
+
+Not published. No Fortnite FPS improvement or ShadowPlay-equivalent overhead is claimed.
+
+- Incremental replay-manifest polling removes repeated full-history reads. A release microbenchmark of 1,000 polls over 20,000 rows measured 429 ms before versus 26 ms after; this is maintenance time, not a game-FPS result.
+- Added repeatable A/B/A tooling, a detailed motion fixture, bounded nonblocking GPU draw timestamps, optional NVIDIA clock/power sampling and a read-only PresentMon CSV analyzer with cap/drift checks.
+- Diagnostics now retain known GPU paths and input formats while redacting private data. Adapter vendor, desktop pixels and confirmed scheduling priority are included.
+- Quality, lookahead, audio processing and default GPU priority are preserved. Disabling lookahead caused 34% repeated frames; lower scheduling priority did not improve the tested workload. Those alternatives were rejected as defaults.
+- Hardware codec/ROI regressions passed for H.264, HEVC, AV1, 1280x960 and 1440x1080. Physical fullscreen resolution changes, Fortnite and Discord remain manual acceptance checks. See `docs/PERFORMANCE_ALPHA8.md` and `docs/FORTNITE_ABA.md`.
+
 ## 0.3.1-alpha.7 - local validation build
 
 Not published. Built and tested locally; see docs/VALIDATION.md.
