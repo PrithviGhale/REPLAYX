@@ -25,6 +25,8 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rel = os.path.join(root, "src-tauri", "target", "release")
 CLI, PROXY = os.path.join(rel, "replayx-cli.exe"), os.path.join(rel, "replayx-gameproxy.exe")
 PROBE = os.path.join(rel, "replayx-dda-profile.exe")
+WGC_PROBE = os.path.join(rel, "replayx-wgc-profile.exe")
+import random
 
 # label -> (capture-test overrides, REPLAYX_VIDEO_TUNING); None = no capture (control).
 CONFIGS = {
@@ -76,6 +78,17 @@ CONFIGS = {
     # recommendation). Separates the duplication cost from the NVENC cost.
     "dda-early": ("probe", ["--hold", "0", "--copies", "2"]),
     "dda-hold": ("probe", ["--hold", "1", "--copies", "2"]),
+    "dda-1copy": ("probe", ["--hold", "0", "--copies", "1"]),
+    # Windows Graphics Capture alone (replayx-wgc-profile: one GPU copy of the
+    # newest frame per 60 Hz slot, Windows limited to 60 updates/s, border on).
+    "wgc-monitor": ("wgc", ["--mode", "monitor"]),
+    "wgc-window": ("wgc", ["--mode", "window"]),
+    "wgc-monitor-unlimited": ("wgc", ["--mode", "monitor", "--limit", "0"]),
+    "wgc-monitor-noborder": ("wgc", ["--mode", "monitor", "--border", "0"]),
+    # WGC through REPLAYX's real pipeline (FFmpeg gfxcapture -> same filters
+    # and NVENC settings as the production Desktop Duplication path).
+    "wgc-h264": (["codec=h264"], "capture_api=wgc"),
+    "wgc-window-h264": (["codec=h264"], "capture_api=wgc,wgc_window=replayx-gameproxy.exe"),
 }
 
 GPU_PS = r"""
@@ -125,6 +138,12 @@ def require_fixture_foreground(proxy):
 PRESENTATION_MODES = {0: 'composed', 1: 'overlay', 2: 'direct', 3: 'composition_failure'}
 
 
+def gpu_state_window(telemetry, lo, hi):
+    """Mean NVIDIA graphics clock in a window (None without telemetry)."""
+    rows = [v['values'][0] for v in telemetry if lo < v['t'] < hi]
+    return statistics.mean(rows) if rows else None
+
+
 def stats(times):
     ft = [(b - a) * 1000 for a, b in zip(times, times[1:])]
     if len(ft) < 20:
@@ -137,6 +156,8 @@ def stats(times):
         "low1_fps": round(1000 / statistics.mean(worst1), 1),
         "low01_fps": round(1000 / statistics.mean(worst01), 1),
         "frametime_p99_ms": round(s[int(0.99 * (len(s) - 1))], 2),
+        "frametime_p95_ms": round(s[int(0.95 * (len(s) - 1))], 3),
+        "frametime_stdev_ms": round(statistics.pstdev(ft), 3),
         "spikes_over_2x_median": sum(1 for f in ft if f > 2 * statistics.median(ft)),
     }
 
@@ -162,7 +183,8 @@ def run(label, args, fps, height, mode, out):
     input_before = last_input_tick()
     proxy_log = os.path.join(out, "proxy.json")
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
-                              "--cpu-us", str(args.cpu_us), "--detail", str(args.detail)])
+                              "--cpu-us", str(args.cpu_us), "--detail", str(args.detail),
+                              "--windowed", str(args.windowed)])
     time.sleep(1.5)
     # The fixture opens its own full-screen window. Never manipulate unrelated
     # windows or focus through a second UI automation implementation.
@@ -176,8 +198,8 @@ def run(label, args, fps, height, mode, out):
         raise
     t0 = time.perf_counter()
     probe_report = None
-    if cfg and cfg[0] == "probe":
-        out_probe = subprocess.run([PROBE, "--pid", str(proxy.pid), "--seconds", str(args.capture), *cfg[1]],
+    if cfg and cfg[0] in ("probe", "wgc"):
+        out_probe = subprocess.run([PROBE if cfg[0] == "probe" else WGC_PROBE, "--pid", str(proxy.pid), "--seconds", str(args.capture), *cfg[1]],
                                    capture_output=True, text=True, timeout=args.capture + 60)
         try:
             probe_report = json.loads(out_probe.stdout)
@@ -269,9 +291,14 @@ def run(label, args, fps, height, mode, out):
         clip.pop("advance_histogram_ms", None)
     control_fps = statistics.mean([base['fps'], after['fps']]) if base and after else None
     drift = 100 * (after['fps'] / base['fps'] - 1) if base and after else None
-    valid = bool(base and during and after and drift is not None and abs(drift) <= 5
+    # Thermal or power throttling during B makes the comparison meaningless.
+    clocks = [gpu_state_window(telemetry, lo, hi) for lo, hi in
+              ((log['start_qpc_s']+2, t0-.5), (t0+5, t0+args.capture-1))]
+    clock_drop = bool(all(clocks) and clocks[1] < 0.9 * clocks[0])
+    valid = bool(base and during and after and drift is not None and abs(drift) <= 5 and not clock_drop
                  and log.get('detail', 0) == args.detail and not user_input)
-    report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "baseline": base, "capture": during,
+    report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "windowed": log.get("windowed", False),
+              "iters": args.iters, "cpu_us": args.cpu_us, "baseline": base, "capture": during,
               "fixture_draw_gpu_timing": gpu_draw,
               "presentation_modes_percent": presentation_modes,
               "counter_sampler_enabled": args.counters,
@@ -281,6 +308,7 @@ def run(label, args, fps, height, mode, out):
               "fixture_matches_request": log.get('detail', 0) == args.detail,
               "valid_comparison": valid,
               "user_input_during_run": user_input,
+              "gpu_clock_drop_during_capture": clock_drop,
               "limitations": "Synthetic only. Drift >5%, missing controls or fixture mismatch invalidate comparisons. Present-call times are not displayed-frame times.",
               "aba_drop_pct": round(100 * (1 - during['fps'] / control_fps), 2) if control_fps and during else None,
               "control_drift_pct": round(100 * (after['fps'] / base['fps'] - 1), 2) if base and after else None,
@@ -310,11 +338,18 @@ def main():
     ap.add_argument("--detail", type=int, choices=[0, 1], default=1)
     ap.add_argument("--capture", type=int, default=20)
     ap.add_argument("--tag", default=time.strftime("%H%M%S"))
+    ap.add_argument("--shuffle", action="store_true", help="Random config order in each repeat")
+    ap.add_argument("--windowed", type=int, choices=[0, 1], default=0, help="Fixture in a 1280x720 window")
+    ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
     results = []
+    rng = random.Random(args.seed)
     for r in range(args.repeat):
         for fps in args.fps.split(","):
-            for label in args.configs.split(","):
+            labels = args.configs.split(",")
+            if args.shuffle:
+                rng.shuffle(labels)  # counterbalance order effects (drift, heat)
+            for label in labels:
                 out = os.path.join(root, "test-output", "overhead", args.tag, f"{label}-{fps}-r{r + 1}")
                 rep = run(label, args, int(fps), args.height, args.mode, out)
                 results.append(rep)

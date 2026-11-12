@@ -154,6 +154,18 @@ impl Drop for PhysicalPixels {
         }
     }
 }
+/// The Windows monitor handle of a display index (the same DXGI output the
+/// Desktop Duplication path uses), for Windows Graphics Capture.
+pub fn monitor_handle(index: u32) -> Result<u64> {
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
+        let output = factory
+            .EnumAdapters1(0)?
+            .EnumOutputs(index)
+            .context("Selected display disconnected or unavailable on the default DXGI adapter")?;
+        Ok(output.GetDesc()?.Monitor.0 as usize as u64)
+    }
+}
 pub fn displays() -> Vec<DisplayGeometry> {
     (0..16).filter_map(|index| display(index).ok()).collect()
 }

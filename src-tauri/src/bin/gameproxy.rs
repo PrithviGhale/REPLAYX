@@ -212,16 +212,38 @@ fn main() -> windows::core::Result<()> {
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             ..Default::default()
         });
-        let (sw, sh) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        // Borderless full screen (the default, like most games' "fullscreen"),
+        // or a 1280x720 client area in a normal window (--windowed 1).
+        let windowed = arg("--windowed", 0u32) != 0;
+        let (sw, sh) = if windowed {
+            (1280, 720)
+        } else {
+            (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        };
+        let style = if windowed {
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE
+        } else {
+            WS_POPUP | WS_VISIBLE
+        };
+        let mut outer = windows::Win32::Foundation::RECT {
+            left: 0,
+            top: 0,
+            right: sw,
+            bottom: sh,
+        };
+        if windowed {
+            AdjustWindowRect(&mut outer, style, false)?;
+        }
+        let origin = if windowed { 100 } else { 0 };
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
             w!("REPLAYX game proxy - Escape closes"),
-            WS_POPUP | WS_VISIBLE,
-            0,
-            0,
-            sw,
-            sh,
+            style,
+            origin,
+            origin,
+            outer.right - outer.left,
+            outer.bottom - outer.top,
             None,
             None,
             Some(instance.into()),
@@ -447,7 +469,7 @@ fn main() -> windows::core::Result<()> {
         let now = qpc as f64 / freq as f64;
         let start_qpc = now - start.elapsed().as_secs_f64();
         let report = serde_json::json!({
-            "adapter": name, "width": sw, "height": sh, "iters": iters, "cpu_us": cpu_us, "detail": detail,
+            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
             "fixture_draw_gpu_ms":gpu_times,
             // DXGI_FRAME_PRESENTATION_MODE: 0 composed, 1 overlay, 2 none

@@ -909,6 +909,14 @@ pub struct Tuning {
     pub nvenc_lookahead: Option<u32>,
     /// Profiling control only; production keeps spatial AQ enabled.
     pub nvenc_aq: bool,
+    /// Experimental capture API for the display path: false = Desktop
+    /// Duplication (ddagrab, production), true = Windows Graphics Capture
+    /// (FFmpeg gfxcapture). Development/benchmark only.
+    pub wgc: bool,
+    /// WGC window capture instead of the display: executable-name pattern.
+    pub wgc_window: Option<String>,
+    /// Keep Windows' capture border (its privacy indicator). Default on.
+    pub wgc_border: bool,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -927,12 +935,18 @@ impl Default for Tuning {
             video_queue: None,
             nvenc_lookahead: Some(20),
             nvenc_aq: true,
+            wgc: false,
+            wgc_window: None,
+            wgc_border: true,
         }
     }
 }
 pub fn tuning() -> Tuning {
+    parse_tuning(&std::env::var("REPLAYX_VIDEO_TUNING").unwrap_or_default())
+}
+fn parse_tuning(spec: &str) -> Tuning {
     let mut t = Tuning::default();
-    if let Ok(spec) = std::env::var("REPLAYX_VIDEO_TUNING") {
+    {
         for (k, v) in spec.split(',').filter_map(|kv| kv.split_once('=')) {
             match k.trim() {
                 "qsv_low_power" => t.qsv_low_power = v.parse::<u8>().ok().map(|v| v == 1),
@@ -951,6 +965,16 @@ pub fn tuning() -> Tuning {
                 "video_queue" => t.video_queue = v.parse().ok(),
                 "nvenc_lookahead" => t.nvenc_lookahead = v.parse().ok(),
                 "nvenc_aq" => t.nvenc_aq = v != "0",
+                "capture_api" => t.wgc = v.trim() == "wgc",
+                // Executable names only: no characters that end the filter option.
+                "wgc_window"
+                    if !v.is_empty()
+                        && v.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) =>
+                {
+                    t.wgc_window = Some(v.trim().to_string())
+                }
+                "wgc_border" => t.wgc_border = v != "0",
                 _ => {}
             }
         }
@@ -1057,15 +1081,16 @@ pub fn video_input(
         if let Some(q) = tuning().video_queue {
             c.args(["-thread_queue_size", &q.to_string()]);
         }
-        c.args([
-            "-f",
-            "lavfi",
-            "-i",
-            &format!(
+        let t = tuning();
+        let source = if t.wgc {
+            wgc_source(s, &t, rect)?
+        } else {
+            format!(
                 "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
-                s.display, s.fps * tuning().oversample, u8::from(tuning().draw_mouse), rect.width, rect.height, rect.x, rect.y
-            ),
-        ]);
+                s.display, s.fps * t.oversample, u8::from(t.draw_mouse), rect.width, rect.height, rect.x, rect.y
+            )
+        };
+        c.args(["-f", "lavfi", "-i", &source]);
         let timing = if tuning().oversample > 1 {
             // Several captures per output slot: keep the one nearest each slot.
             format!("fps={}:round=near", s.fps)
@@ -1084,6 +1109,34 @@ pub fn video_input(
         s.output_width(),
         s.height,
         &s.canvas_mode,
+    ))
+}
+/// Windows Graphics Capture source (experimental; benchmark only). Frames are
+/// Direct3D 11 BGRA textures like ddagrab's, so the same filters and encoders
+/// apply. WGC delivers a frame only when the content changes, at most
+/// `max_framerate` per second; the output's CFR mode repeats frames to fill
+/// slots, as it does for Desktop Duplication stalls.
+fn wgc_source(s: &Settings, t: &Tuning, rect: crate::geometry::CaptureRect) -> Result<String> {
+    let common = format!(
+        "max_framerate={}:capture_cursor={}:display_border={}",
+        s.fps * t.oversample,
+        u8::from(t.draw_mouse),
+        u8::from(t.wgc_border)
+    );
+    if let Some(exe) = &t.wgc_window {
+        return Ok(format!(
+            "gfxcapture=window_exe=(?i){exe}:capture_border=0:{common}"
+        ));
+    }
+    let display = crate::geometry::display(s.display)?;
+    let (w, h) = (display.desktop_width, display.desktop_height);
+    Ok(format!(
+        "gfxcapture=hmonitor={}:crop_left={}:crop_top={}:crop_right={}:crop_bottom={}:{common}",
+        crate::geometry::monitor_handle(s.display)?,
+        rect.x,
+        rect.y,
+        w.saturating_sub(rect.x + rect.width),
+        h.saturating_sub(rect.y + rect.height)
     ))
 }
 /// Video bitrate for a preset at an output size and frame rate. Anchored at
@@ -1615,6 +1668,39 @@ mod tests {
         };
         assert_eq!(target_bitrate_mbps(&custom, 1920, 1080), 33);
     }
+    #[test]
+    fn windows_graphics_capture_is_opt_in_and_window_names_are_sanitized() {
+        // Production stays on Desktop Duplication; WGC is a benchmark switch.
+        let d = Tuning::default();
+        assert!(!d.wgc && d.wgc_window.is_none() && d.wgc_border);
+        let t = parse_tuning("capture_api=wgc,wgc_window=replayx-gameproxy.exe,wgc_border=0");
+        assert!(t.wgc && !t.wgc_border);
+        assert_eq!(t.wgc_window.as_deref(), Some("replayx-gameproxy.exe"));
+        // Characters that would end or extend the filter option are refused.
+        for bad in ["a:b", "x'y", "a[b]", "a;b", r"a\b"] {
+            assert!(
+                parse_tuning(&format!("wgc_window={bad}"))
+                    .wgc_window
+                    .is_none(),
+                "{bad}"
+            );
+        }
+        let s = Settings {
+            fps: 60,
+            ..Default::default()
+        };
+        let rect = crate::geometry::CaptureRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let f = wgc_source(&s, &t, rect).unwrap();
+        assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
+        assert!(f.contains("max_framerate=60") && f.contains("display_border=0"));
+        assert!(f.contains("capture_cursor=1"));
+    }
+
     #[test]
     fn video_and_audio_never_share_a_filter_graph() {
         // Regression guard for the 0.2.1-alpha.3 stutter fix (57% -> 0.28%).
