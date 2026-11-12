@@ -97,6 +97,12 @@ CONFIGS = {
     # The user-facing setting (not the benchmark switch), and its fallback:
     # a WGC window that does not exist must fall back to Desktop Duplication.
     "wgc-setting-h264": (["codec=h264", "capture_api=wgc"], ""),
+    # NVENC selected on an Intel-driven display (the November 12 Fortnite
+    # test): the three paths, all through the user-facing setting.
+    "dda-nvenc": (["codec=h264", "encoder=h264_nvenc"], ""),
+    "wgc-nvenc-hybrid": (["codec=h264", "encoder=h264_nvenc", "capture_api=wgc"], "wgc_gpu=0"),
+    "wgc-nvenc-gpu": (["codec=h264", "encoder=h264_nvenc", "capture_api=wgc"], "wgc_gpu=1"),
+    "wgc-qsv": (["codec=h264", "encoder=auto", "capture_api=wgc"], ""),
     "wgc-fallback-h264": (["codec=h264", "capture_api=wgc"], "wgc_window=no-such-game.exe"),
 }
 
@@ -319,7 +325,8 @@ def run(label, args, fps, height, mode, out):
     engine = None
     for f in glob.glob(os.path.join(out, "test-output", "capture-test-*", "report.json")):
         st_ = json.load(open(f, encoding="utf-8")).get("status", {})
-        engine = {k: st_.get(k) for k in ("capture_api", "scaling", "scaling_detail", "encoder", "fps", "dropped_frames")}
+        engine = {k: st_.get(k) for k in ("capture_api", "capture_filter", "capture_fallback", "scaling", "scaling_detail",
+                                          "encoder", "fps", "dropped_frames", "duplicated_frames", "memory_mb", "cpu_percent")}
     clip = None
     clips = sorted(glob.glob(os.path.join(out, "test-output", "capture-test-*", "clips", "**", "*.mkv"), recursive=True),
                    key=os.path.getsize)

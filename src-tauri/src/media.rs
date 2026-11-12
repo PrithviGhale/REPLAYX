@@ -326,7 +326,12 @@ impl Media {
         c.args(["-hide_banner", "-v", "error", "-nostdin"]);
         let filter = video_input(&mut c, s, scaler, false, plan).map_err(|e| e.to_string())?;
         let (ffmpeg_encoder, low_power) = ffmpeg_encoder(encoder);
-        c.args(["-vf", &filter, "-c:v", ffmpeg_encoder]);
+        if source_in_graph(&filter) {
+            c.args(["-filter_complex", &format!("{filter}[v]"), "-map", "[v]"]);
+        } else {
+            c.args(["-vf", &filter]);
+        }
+        c.args(["-c:v", ffmpeg_encoder]);
         if low_power {
             c.args(["-low_power", "1"]);
         }
@@ -680,6 +685,10 @@ pub enum Scaler {
     QsvHybrid,
     /// Full-resolution download and software scaling.
     Cpu,
+    /// Windows Graphics Capture delivers frames to a Direct3D 11 device on
+    /// the encoder's GPU (Windows copies across adapters on hybrid laptops),
+    /// FFmpeg's gfxcapture scales them there, NVENC encodes them: no CPU copy.
+    WgcGpu,
 }
 impl Scaler {
     pub fn label(self) -> &'static str {
@@ -689,6 +698,7 @@ impl Scaler {
             Scaler::QsvZeroCopy => "GPU zero-copy (Intel Quick Sync)",
             Scaler::QsvHybrid => "GPU scaling (Intel VPP) + scaled-frame transfer",
             Scaler::Cpu => "CPU fallback",
+            Scaler::WgcGpu => "GPU zero-copy (Windows Graphics Capture → NVENC)",
         }
     }
     /// Whether the scaler can produce this plan's frame (padding needs system
@@ -699,7 +709,7 @@ impl Scaler {
                 !plan.padded()
                     && (plan.source.width, plan.source.height) == (plan.width, plan.height)
             }
-            Scaler::QsvZeroCopy | Scaler::Cuda => !plan.padded(),
+            Scaler::QsvZeroCopy | Scaler::Cuda | Scaler::WgcGpu => !plan.padded(),
             Scaler::QsvHybrid | Scaler::Cpu => true,
         }
     }
@@ -791,10 +801,12 @@ pub const VENDOR_AMD: u32 = 0x1002;
 pub fn scaling_candidates(requested: &str, vendor: u32) -> Vec<(Scaler, &'static str)> {
     let all = [
         (VENDOR_NVIDIA, Scaler::D3d11, "h264_nvenc"),
+        (VENDOR_NVIDIA, Scaler::WgcGpu, "h264_nvenc"),
         (VENDOR_NVIDIA, Scaler::Cuda, "h264_nvenc"),
         (VENDOR_AMD, Scaler::D3d11, "h264_amf"),
         (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv_lp"),
         (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv"),
+        (VENDOR_INTEL, Scaler::WgcGpu, "h264_nvenc"),
         (VENDOR_INTEL, Scaler::QsvHybrid, "h264_nvenc"),
         (VENDOR_INTEL, Scaler::QsvHybrid, "h264_amf"),
     ];
@@ -826,13 +838,25 @@ fn summarize_error(text: &str) -> String {
 /// audio stalled the video chain, which blocked the desktop grabber. With
 /// audio, 57% of frames repeated (0.2.1-alpha.3); separate graphs plus NVENC
 /// lookahead brought it to 0.0-0.28%. See docs/PERFORMANCE.md.
+/// Whether a video filter string starts with its own capture source (no
+/// `-i` input for video).
+pub fn source_in_graph(video_filter: &str) -> bool {
+    video_filter.starts_with("gfxcapture=")
+}
 pub fn filter_graphs(
     video_filter: &str,
     chains: &[String],
     separate: bool,
     split: bool,
 ) -> Vec<String> {
-    let video = format!("[0:v]{video_filter}[v]");
+    // A capture source inside the graph (WgcGpu) is not input 0.
+    let in_graph = source_in_graph(video_filter);
+    let first_audio = if in_graph { 0 } else { 1 };
+    let video = if in_graph {
+        format!("{video_filter}[v]")
+    } else {
+        format!("[0:v]{video_filter}[v]")
+    };
     if chains.is_empty() {
         return vec![video];
     }
@@ -841,7 +865,7 @@ pub fn filter_graphs(
         if n > 0 {
             audio += ";";
         }
-        audio += &format!("[{}:a]aresample=async=1000:first_pts=0", n + 1);
+        audio += &format!("[{}:a]aresample=async=1000:first_pts=0", n + first_audio);
         if !chain.is_empty() {
             audio += &format!(",{chain}");
         }
@@ -922,6 +946,12 @@ pub struct Tuning {
     /// 120 FPS arrived at about 53/s at 1x and 15% of recorded frames were
     /// repeats; 2x kept repeats at 0-0.7% (measured, synthetic).
     pub wgc_oversample: u32,
+    /// Development switch for the WgcGpu path (WGC frames delivered to the
+    /// NVIDIA GPU, scaled there, NVENC zero-copy). Off: on the Intel-driven
+    /// laptop panel it cost 29.9% game FPS against 5.6% for Intel scaling +
+    /// a scaled-frame transfer (Windows copies every full-size frame across
+    /// adapters onto the game's GPU). Unmeasured on NVIDIA-driven displays.
+    pub wgc_gpu: bool,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -944,6 +974,7 @@ impl Default for Tuning {
             wgc_window: None,
             wgc_border: true,
             wgc_oversample: 2,
+            wgc_gpu: false,
         }
     }
 }
@@ -981,6 +1012,7 @@ fn parse_tuning(spec: &str) -> Tuning {
                     t.wgc_window = Some(v.trim().to_string())
                 }
                 "wgc_border" => t.wgc_border = v != "0",
+                "wgc_gpu" => t.wgc_gpu = v != "0",
                 "wgc_oversample" => t.wgc_oversample = v.parse::<u32>().unwrap_or(2).clamp(1, 4),
                 _ => {}
             }
@@ -1002,7 +1034,7 @@ const BGRA_TAGS: &str =
     "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=smpte170m";
 /// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
 pub fn converts_bt709(scaler: Scaler) -> bool {
-    !matches!(scaler, Scaler::D3d11 | Scaler::Cuda)
+    !matches!(scaler, Scaler::D3d11 | Scaler::Cuda | Scaler::WgcGpu)
 }
 pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     let t = tuning();
@@ -1019,7 +1051,9 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         // BGRA frames go to the encoder, which converts them to limited-range
         // YUV (see BGRA_TAGS): say so on the frames so the stream and
         // container are tagged correctly.
-        Scaler::D3d11 => format!("setsar={}/{},{BGRA_TAGS}", plan.sar.0, plan.sar.1),
+        Scaler::D3d11 | Scaler::WgcGpu => {
+            format!("setsar={}/{},{BGRA_TAGS}", plan.sar.0, plan.sar.1)
+        }
         Scaler::Cuda => format!(
             "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1,{BGRA_TAGS}"
         ),
@@ -1095,8 +1129,28 @@ pub fn video_input(
         } else {
             t.oversample
         };
+        let timing = if oversample > 1 {
+            // Several captures per output slot: keep the one nearest each slot.
+            format!("fps={}:round=near", s.fps)
+        } else {
+            regrid_filter(s.fps)
+        };
+        if wgc && scaler == Scaler::WgcGpu {
+            // The source lives in the filter graph so it can use a device on
+            // the encoder's GPU (a lavfi input cannot be given one).
+            let index = crate::geometry::adapter_index(VENDOR_NVIDIA)
+                .context("No NVIDIA adapter for Windows Graphics Capture → NVENC")?;
+            c.args([
+                "-init_hw_device",
+                &format!("d3d11va=wgc:{index}"),
+                "-filter_hw_device",
+                "wgc",
+            ]);
+            let source = wgc_source(s, &t, rect, Some((plan.width, plan.height)))?;
+            return Ok(format!("{source},{timing},{}", video_filter(plan, scaler)));
+        }
         let source = if wgc {
-            wgc_source(s, &t, rect)?
+            wgc_source(s, &t, rect, None)?
         } else {
             format!(
                 "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
@@ -1104,12 +1158,6 @@ pub fn video_input(
             )
         };
         c.args(["-f", "lavfi", "-i", &source]);
-        let timing = if oversample > 1 {
-            // Several captures per output slot: keep the one nearest each slot.
-            format!("fps={}:round=near", s.fps)
-        } else {
-            regrid_filter(s.fps)
-        };
         return Ok(format!("{},{}", timing, video_filter(plan, scaler)));
     }
     c.args(["-f", "gdigrab", "-framerate", &s.fps.to_string(), "-i"]);
@@ -1138,13 +1186,22 @@ pub fn capture_api(s: &Settings) -> &'static str {
 /// apply. WGC delivers a frame only when the content changes, at most
 /// `max_framerate` per second; the output's CFR mode repeats frames to fill
 /// slots, as it does for Desktop Duplication stalls.
-fn wgc_source(s: &Settings, t: &Tuning, rect: crate::geometry::CaptureRect) -> Result<String> {
-    let common = format!(
+fn wgc_source(
+    s: &Settings,
+    t: &Tuning,
+    rect: crate::geometry::CaptureRect,
+    scale_to: Option<(u32, u32)>,
+) -> Result<String> {
+    let mut common = format!(
         "max_framerate={}:capture_cursor={}:display_border={}",
         s.fps * t.oversample.max(t.wgc_oversample),
         u8::from(t.draw_mouse),
         u8::from(t.wgc_border)
     );
+    if let Some((w, h)) = scale_to {
+        // gfxcapture scales on the GPU to the encoded size (stretch).
+        common += &format!(":width={w}:height={h}:resize_mode=scale");
+    }
     if let Some(exe) = &t.wgc_window {
         return Ok(format!(
             "gfxcapture=window_exe=(?i){exe}:capture_border=0:{common}"
@@ -1519,17 +1576,23 @@ mod tests {
             .all(|c| c.0 != Scaler::D3d11 && c.0 != Scaler::Cuda));
         // NVIDIA-driven display (desktop PC, or Advanced Optimus during a
         // full-screen game): NVENC only, zero copy first; no Quick Sync probes.
+        // WgcGpu (GPU scaling inside Windows Graphics Capture) is offered
+        // only when WGC is the capture method (select_video_path skips it).
         let nvidia = scaling_candidates("auto", VENDOR_NVIDIA);
         assert_eq!(
             nvidia,
-            vec![(Scaler::D3d11, "h264_nvenc"), (Scaler::Cuda, "h264_nvenc")]
+            vec![
+                (Scaler::D3d11, "h264_nvenc"),
+                (Scaler::WgcGpu, "h264_nvenc"),
+                (Scaler::Cuda, "h264_nvenc")
+            ]
         );
         assert_eq!(
             scaling_candidates("auto", VENDOR_AMD),
             vec![(Scaler::D3d11, "h264_amf")]
         );
         // Unknown vendor: everything; an explicit encoder filters the list.
-        assert_eq!(scaling_candidates("auto", 0).len(), 7);
+        assert_eq!(scaling_candidates("auto", 0).len(), 9);
         assert!(scaling_candidates("h264_nvenc", 0)
             .iter()
             .all(|c| c.1 == "h264_nvenc"));
@@ -1727,15 +1790,39 @@ mod tests {
             width: 1920,
             height: 1080,
         };
-        let f = wgc_source(&s, &t, rect).unwrap();
+        let f = wgc_source(&s, &t, rect, None).unwrap();
         assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
         // Twice the output rate by default (see Tuning::wgc_oversample).
         assert!(f.contains("max_framerate=120") && f.contains("display_border=0"));
         let once = parse_tuning("capture_api=wgc,wgc_window=game.exe,wgc_oversample=1");
-        assert!(wgc_source(&s, &once, rect)
+        assert!(wgc_source(&s, &once, rect, None)
             .unwrap()
             .contains("max_framerate=60"));
         assert!(f.contains("capture_cursor=1"));
+    }
+
+    #[test]
+    fn capture_source_inside_the_graph_numbers_audio_from_zero() {
+        let src = "gfxcapture=hmonitor=1:width=1920:height=1080:resize_mode=scale,fps=60:round=near,setsar=1/1";
+        assert!(source_in_graph(src) && !source_in_graph("setsar=1/1"));
+        let g = filter_graphs(src, &["".into(), "".into()], true, true);
+        assert_eq!(g[0], format!("{src}[v]"));
+        assert!(g[1].contains("[0:a]") && g[1].contains("[1:a]") && !g[1].contains("[2:a]"));
+        // Ordinary inputs keep video as input 0 and audio from 1.
+        let g = filter_graphs("setsar=1", &["".into()], true, true);
+        assert!(g[0].starts_with("[0:v]") && g[1].contains("[1:a]"));
+        // NVENC on an Intel-driven display: WgcGpu is listed, but
+        // select_video_path skips it unless wgc_gpu=1 (measured slower).
+        assert!(!Tuning::default().wgc_gpu);
+        let intel = scaling_candidates("h264_nvenc", VENDOR_INTEL);
+        assert_eq!(
+            intel,
+            vec![
+                (Scaler::WgcGpu, "h264_nvenc"),
+                (Scaler::QsvHybrid, "h264_nvenc")
+            ]
+        );
+        assert!(!converts_bt709(Scaler::WgcGpu));
     }
 
     #[test]

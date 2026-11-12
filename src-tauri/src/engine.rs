@@ -91,6 +91,12 @@ pub struct Status {
     /// Display capture API in use: "dda" (Desktop Duplication) or "wgc"
     /// (Windows Graphics Capture); empty for other sources.
     pub capture_api: String,
+    /// FFmpeg capture filter actually started: "gfxcapture" (WGC),
+    /// "ddagrab" (Desktop Duplication), "gdigrab" or "synthetic".
+    pub capture_filter: String,
+    /// Set when WGC was selected but could not start, so Desktop
+    /// Duplication is recording instead: the reason.
+    pub capture_fallback: Option<String>,
     /// Why faster scaling paths were not used (probe errors), if any.
     pub scaling_detail: Option<String>,
     pub output_width: u32,
@@ -160,6 +166,8 @@ struct Prepared {
     encoder: String,
     scaling_detail: Option<String>,
     capture_api: &'static str,
+    capture_filter: &'static str,
+    capture_fallback: Option<String>,
     plan: Option<geometry::VideoPlan>,
     expected_audio: usize,
     cache: Option<(String, Scaler, String)>,
@@ -1048,7 +1056,7 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v5|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
+        "v6|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
         g.adapter_vendor,
         g.device,
         g.desktop_width,
@@ -1204,7 +1212,11 @@ fn select_video_path(
     };
     for (scaler, encoder) in candidates {
         let encoder = encoder.as_str();
-        if !scaler.supports(plan) {
+        // WgcGpu is a Windows Graphics Capture path only.
+        if !scaler.supports(plan)
+            || (scaler == Scaler::WgcGpu
+                && (media::capture_api(s) != "wgc" || !media::tuning().wgc_gpu))
+        {
             continue;
         }
         if let Some(reason) = denied(scaler, encoder) {
@@ -1310,11 +1322,11 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     };
     let plan = anamorphic.map(|p| p.anamorphic()).or(plan);
     mark(&mut timings, began, "Display measured");
-    let (path, req) = match (
+    let (path, req, capture_fallback) = match (
         select_video_path(&req, geometry.as_ref(), plan.as_ref()),
         &fallback,
     ) {
-        (Ok(path), _) => (path, &req),
+        (Ok(path), _) => (path, &req, None),
         (Err(e), Some(dda)) => {
             let mut path = select_video_path(dda, geometry.as_ref(), plan.as_ref())?;
             let note = format!(
@@ -1322,9 +1334,9 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             );
             path.detail = Some(match path.detail {
                 Some(d) => format!("{note}; {d}"),
-                None => note,
+                None => note.clone(),
             });
-            (path, dda)
+            (path, dda, Some(note))
         }
         (Err(e), None) => return Err(e),
     };
@@ -1604,6 +1616,16 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
         } else {
             capture_api
         },
+        capture_filter: if synthetic {
+            "synthetic"
+        } else if s.capture != "desktop-duplication" {
+            "gdigrab"
+        } else if capture_api == "wgc" {
+            "gfxcapture"
+        } else {
+            "ddagrab"
+        },
+        capture_fallback,
         plan,
         expected_audio,
         cache: path.cache,
@@ -1978,6 +2000,8 @@ impl Inner {
         };
         self.status.scaling_detail = p.scaling_detail;
         self.status.capture_api = p.capture_api.into();
+        self.status.capture_filter = p.capture_filter.into();
+        self.status.capture_fallback = p.capture_fallback;
         (self.status.output_width, self.status.output_height) =
             p.plan.map(|p| (p.width, p.height)).unwrap_or_default();
         let rate = media::rate_plan(

@@ -30,3 +30,23 @@ test('GPU input paths survive redaction without leaking fallback stderr', () => 
   assert.equal(r.captureGpuPriority, 'high');
   assert.doesNotMatch(JSON.stringify(r), /private/);
 });
+
+test('capture method reports what ran, not the source setting, and a fallback', () => {
+  const ran = { capture: 'desktop-duplication', capture_api: 'wgc', capture_filter: 'gfxcapture', capture_fallback: null,
+    scaling: 'GPU zero-copy (Windows Graphics Capture → NVENC)', state: 'Buffering', encoder: 'h264_nvenc' } as unknown as Status;
+  const wgc = { encoder: 'h264_nvenc', fps: 60, capture_api: 'wgc' } as Settings;
+  const r = diagnosticReport(ran, wgc, '0.3.1-alpha.8');
+  assert.equal(r.captureSource, 'display');
+  assert.equal(r.captureMethod, 'windows-graphics-capture');
+  assert.equal(r.captureFilter, 'gfxcapture');
+  assert.equal(r.captureFallback, false);
+  assert.equal(r.scaling, 'wgc to nvenc');
+  assert.equal(r.encoderInput, 'GPU BGRA');
+  const fell = { ...ran, capture_api: 'dda', capture_filter: 'ddagrab', capture_fallback: 'Failed C:\private' } as unknown as Status;
+  const f = diagnosticReport(fell, wgc, '0.3.1-alpha.8');
+  assert.equal(f.captureMethod, 'desktop-duplication');
+  assert.equal(f.requestedCaptureMethod, 'windows-graphics-capture');
+  assert.equal(f.captureFilter, 'ddagrab');
+  assert.equal(f.captureFallback, true);
+  assert.doesNotMatch(JSON.stringify(f), /private/);
+});

@@ -13,12 +13,20 @@ export function diagnosticReport(s: Status, settings: Settings, version: string)
     'GPU scaling (CUDA) + one frame transfer': { path: 'cuda with CPU transfer', input: 'GPU BGRA' },
     'GPU scaling (Intel VPP) + scaled-frame transfer': { path: 'qsv with CPU transfer', input: 'system NV12' },
     'CPU fallback': { path: 'cpu', input: 'system YUV420P' },
+    'GPU zero-copy (Windows Graphics Capture → NVENC)': { path: 'wgc to nvenc', input: 'GPU BGRA' },
   };
+  // What actually ran, never inferred from settings: capture source setting,
+  // capture API, FFmpeg filter, and whether WGC fell back.
+  const methods: Record<string, string> = { wgc: 'windows-graphics-capture', dda: 'desktop-duplication' };
   const path = paths[s.scaling];
   const errorCategory = !error ? null : error.includes('audio') ? 'audio' : error.includes('space') || error.includes('storage') ? 'storage' : error.includes('display') || error.includes('geometry') ? 'display' : error.includes('encoder') || error.includes('nvenc') ? 'encoder' : 'capture';
   return {
     version: token(version), state: token(s.state), recording: s.recording, replay: s.replay,
-    backend: token(s.capture), encoder: token(s.encoder), requestedEncoder: token(settings.encoder),
+    captureSource: s.capture === 'desktop-duplication' ? 'display' : token(s.capture),
+    captureMethod: methods[s.capture_api] ?? 'unavailable', requestedCaptureMethod: methods[settings.capture_api] ?? 'unavailable',
+    captureFilter: ['gfxcapture', 'ddagrab', 'gdigrab', 'synthetic'].includes(s.capture_filter) ? s.capture_filter : 'unavailable',
+    captureFallback: !!s.capture_fallback,
+    encoder: token(s.encoder), requestedEncoder: token(settings.encoder),
     fallbackReported: !!s.scaling_detail, scaling: path?.path ?? 'unavailable',
     encoderInput: path?.input ?? 'unavailable',
     captureAdapterVendor: typeof s.geometry?.adapter_vendor === 'number' ? number(s.geometry.adapter_vendor) : null,

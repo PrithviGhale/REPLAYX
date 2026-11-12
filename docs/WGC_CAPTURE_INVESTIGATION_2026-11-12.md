@@ -276,7 +276,7 @@ drives the panel.
 3. **Fallback** (`engine.rs`): if no WGC capture path starts, the start
    repeats path selection with Desktop Duplication and records why in the
    scaling detail. The capture API is part of both video-path cache keys
-   (remembered key bumped to v5), so a failing WGC path is never reused for
+   (remembered key bumped to v5, then v6 when the WgcGpu path was added), so a failing WGC path is never reused for
    Desktop Duplication, or the reverse.
 4. **Diagnostics:** `Status.capture_api` is shown on the Performance page as
    "Capture method", with an "experimental" badge.
