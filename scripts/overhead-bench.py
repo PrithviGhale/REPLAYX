@@ -38,6 +38,8 @@ CONFIGS = {
     "nvenc-hybrid": (["encoder=h264_nvenc"], ""),
     "nvenc-hybrid-sfc": (["encoder=h264_nvenc"], "vpp_scale_mode=1"),
     "cpu-scale-nvenc": (["encoder=h264_nvenc", "gpu=0"], ""),
+    # Software fallback (no hardware encoder), as used when none is available.
+    "openh264": (["encoder=libopenh264"], ""),
     # Automatic path selection with and without raised capture priority.
     "smooth": (["scale_policy=smooth"], ""),
     "wallclock": ([], "audio_wallclock=1"),
@@ -103,6 +105,22 @@ def last_input_tick():
     return info.dwTime if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)) else None
 
 
+def foreground_pid():
+    """Process owning the foreground window. Windows may refuse the fixture's
+    request to come to the front (foreground lock after recent input); a
+    capture would then record whatever else is on screen."""
+    import ctypes
+    pid = ctypes.c_ulong(0)
+    ctypes.windll.user32.GetWindowThreadProcessId(ctypes.windll.user32.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value
+
+
+def require_fixture_foreground(proxy):
+    if foreground_pid() != proxy.pid:
+        raise RuntimeError('The game fixture is not the foreground window; refusing to capture the desktop. '
+                           'Leave the computer idle for a few minutes and run again.')
+
+
 # DXGI_FRAME_PRESENTATION_MODE values reported by IDXGISwapChainMedia.
 PRESENTATION_MODES = {0: 'composed', 1: 'overlay', 2: 'direct', 3: 'composition_failure'}
 
@@ -151,6 +169,11 @@ def run(label, args, fps, height, mode, out):
     time.sleep(args.warm - 1.5)
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                            stdout=subprocess.PIPE, text=True) if cfg and args.counters else None
+    try:
+        require_fixture_foreground(proxy)
+    except RuntimeError:
+        proxy.kill()
+        raise
     t0 = time.perf_counter()
     probe_report = None
     if cfg and cfg[0] == "probe":
@@ -175,6 +198,7 @@ def run(label, args, fps, height, mode, out):
                 while recorder.poll() is None:
                     if proxy.poll() is not None:
                         raise RuntimeError('Fixture ended early; stopping capture instead of recording the uncovered desktop')
+                    require_fixture_foreground(proxy)
                     if time.monotonic() > deadline:
                         raise TimeoutError('Capture exceeded its deadline')
                     time.sleep(.1)

@@ -11,6 +11,14 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def fixture_in_front(fixture):
+    """Windows may refuse the fixture's request to come to the front (for a
+    few minutes after recent input); never record whatever else is shown."""
+    import ctypes
+    pid = ctypes.c_ulong(0)
+    ctypes.windll.user32.GetWindowThreadProcessId(ctypes.windll.user32.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value == fixture.pid
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
@@ -32,12 +40,16 @@ def main():
             cmd = [str(rel/'replayx-cli.exe'),'capture-test','8','silent','fps=60','height=1080','width=1920',
                    'mode=stretch',f'codec={codec}','encoder=h264_nvenc',f'scale_policy={policy}']
             if region: cmd.append(f'region={region}')
+            if not fixture_in_front(fixture):
+                fixture.kill()
+                raise RuntimeError('The fixture is not the foreground window; refusing to capture the desktop')
             with (case/'capture.log').open('w') as log:
                 recorder = subprocess.Popen(cmd,cwd=case,stdout=log,stderr=log)
                 deadline = time.monotonic()+60
                 try:
                     while recorder.poll() is None:
                         if fixture.poll() is not None: raise RuntimeError('Fixture closed; aborting uncovered capture')
+                        if not fixture_in_front(fixture): raise RuntimeError('Fixture lost the foreground; aborting uncovered capture')
                         if time.monotonic()>deadline: raise TimeoutError('Capture deadline')
                         time.sleep(.1)
                 finally:
