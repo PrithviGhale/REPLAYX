@@ -941,10 +941,8 @@ pub struct Tuning {
     pub wgc_window: Option<String>,
     /// Keep Windows' capture border (its privacy indicator). Default on.
     pub wgc_border: bool,
-    /// WGC capture rate as a multiple of the output rate. Windows' minimum
-    /// update interval is a floor between frames, so a game between 60 and
-    /// 120 FPS arrived at about 53/s at 1x and 15% of recorded frames were
-    /// repeats; 2x kept repeats at 0-0.7% (measured, synthetic).
+    /// WGC capture rate as a multiple of the output rate (the engine raises a
+    /// session to 2x when 1x misses slots; see `wgc_rate_multiple`).
     pub wgc_oversample: u32,
     /// Development switch for the WgcGpu path (WGC frames delivered to the
     /// NVIDIA GPU, scaled there, NVENC zero-copy). Off: on the Intel-driven
@@ -952,6 +950,10 @@ pub struct Tuning {
     /// a scaled-frame transfer (Windows copies every full-size frame across
     /// adapters onto the game's GPU). Unmeasured on NVIDIA-driven displays.
     pub wgc_gpu: bool,
+    /// WGC minimum update interval in microseconds at 1x. 16 ms, slightly
+    /// under one 60 FPS slot: on a 240 Hz display updates land on refresh
+    /// boundaries, and a 16.7 ms floor would sometimes slip a refresh.
+    pub wgc_floor_us: Option<u32>,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -973,8 +975,9 @@ impl Default for Tuning {
             wgc: false,
             wgc_window: None,
             wgc_border: true,
-            wgc_oversample: 2,
+            wgc_oversample: 1,
             wgc_gpu: false,
+            wgc_floor_us: Some(16_000),
         }
     }
 }
@@ -1013,6 +1016,12 @@ fn parse_tuning(spec: &str) -> Tuning {
                 }
                 "wgc_border" => t.wgc_border = v != "0",
                 "wgc_gpu" => t.wgc_gpu = v != "0",
+                "wgc_floor_us" => {
+                    t.wgc_floor_us = v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|&us| (4000..=33334).contains(&us))
+                }
                 "wgc_oversample" => t.wgc_oversample = v.parse::<u32>().unwrap_or(2).clamp(1, 4),
                 _ => {}
             }
@@ -1125,7 +1134,7 @@ pub fn video_input(
         let t = tuning();
         let wgc = capture_api(s) == "wgc";
         let oversample = if wgc {
-            t.oversample.max(t.wgc_oversample)
+            wgc_rate_multiple(s, &t)
         } else {
             t.oversample
         };
@@ -1181,6 +1190,19 @@ pub fn capture_api(s: &Settings) -> &'static str {
         "dda"
     }
 }
+/// WGC capture rate as a multiple of the output rate. Each delivered frame
+/// costs a full-screen copy in Windows and in gfxcapture: at about 550 game
+/// FPS, 2x cost 7.0-8.0% game FPS and 1x 3.6-3.9% (synthetic, 0% repeated
+/// frames either way). But Windows' update floor makes a game between 60 and
+/// 120 FPS arrive below 60/s at 1x (18% repeated frames at ~95 FPS), so the
+/// engine switches a session to 2x when it sees that (`Settings::wgc_boost`).
+pub fn wgc_rate_multiple(s: &Settings, t: &Tuning) -> u32 {
+    if s.wgc_boost {
+        t.oversample.max(2)
+    } else {
+        t.oversample.max(t.wgc_oversample)
+    }
+}
 /// Windows Graphics Capture source (experimental). Frames are
 /// Direct3D 11 BGRA textures like ddagrab's, so the same filters and encoders
 /// apply. WGC delivers a frame only when the content changes, at most
@@ -1192,9 +1214,15 @@ fn wgc_source(
     rect: crate::geometry::CaptureRect,
     scale_to: Option<(u32, u32)>,
 ) -> Result<String> {
+    // At 1x, an update floor slightly under one output slot (wgc_floor_us)
+    // keeps Windows from slipping a whole display refresh past the slot.
+    let rate = match (t.wgc_floor_us, wgc_rate_multiple(s, t)) {
+        (Some(us), 1) => format!("1000000/{us}"),
+        (_, n) => (s.fps * n).to_string(),
+    };
     let mut common = format!(
         "max_framerate={}:capture_cursor={}:display_border={}",
-        s.fps * t.oversample.max(t.wgc_oversample),
+        rate,
         u8::from(t.draw_mouse),
         u8::from(t.wgc_border)
     );
@@ -1792,12 +1820,20 @@ mod tests {
         };
         let f = wgc_source(&s, &t, rect, None).unwrap();
         assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
-        // Twice the output rate by default (see Tuning::wgc_oversample).
-        assert!(f.contains("max_framerate=120") && f.contains("display_border=0"));
-        let once = parse_tuning("capture_api=wgc,wgc_window=game.exe,wgc_oversample=1");
-        assert!(wgc_source(&s, &once, rect, None)
+        // 1x with a 16 ms update floor by default; 2x once a session is boosted.
+        assert!(f.contains("max_framerate=1000000/16000") && f.contains("display_border=0"));
+        let boosted = Settings {
+            fps: 60,
+            wgc_boost: true,
+            ..Default::default()
+        };
+        assert!(wgc_source(&boosted, &t, rect, None)
             .unwrap()
-            .contains("max_framerate=60"));
+            .contains("max_framerate=120"));
+        let forced = parse_tuning("capture_api=wgc,wgc_window=game.exe,wgc_oversample=2");
+        assert!(wgc_source(&s, &forced, rect, None)
+            .unwrap()
+            .contains("max_framerate=120"));
         assert!(f.contains("capture_cursor=1"));
     }
 

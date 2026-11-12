@@ -17,7 +17,7 @@ not enough: they show one instant. This procedure records frame times.
 3. **PresentMon:** start a terminal **as administrator** (your choice; REPLAYX
    never asks for it). Use the official console app, for example
    `PresentMon-2.x-x64.exe`.
-4. **REPLAYX test build:** `src-tauri\target-wgc2\release\replayx.exe`. Quit the
+4. **REPLAYX test build:** `src-tauri\target-wgc3\release\replayx.exe`. Quit the
    installed REPLAYX (and any other test build) first.
 5. **NVIDIA Instant Replay:** set it to 1080p60 if possible, so it is
    comparable with REPLAYX's 1920x1080 at 60 FPS.

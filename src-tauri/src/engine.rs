@@ -223,6 +223,11 @@ struct Pipeline {
     /// When the start was requested (for first-frame/first-segment timings).
     began: Instant,
     reported_first_frame: bool,
+    /// WGC at 1x: watch output-grid duplicates for missed capture slots.
+    wgc_adaptive: bool,
+    /// (window start, frames, duplicates) of the current 10 s window.
+    dup_window: Option<(Instant, u64, u64)>,
+    starving_windows: u32,
 }
 struct Recovery {
     replay: bool,
@@ -1266,6 +1271,37 @@ fn select_video_path(
         how: "probed",
     })
 }
+/// One 10 s window of WGC output-grid duplicates at 1x. Starvation shows as
+/// 3-35% duplicates (18% measured for a ~95 FPS game); a static screen or a
+/// game under 60 FPS shows more and is not helped by a faster capture, a
+/// healthy capture shows almost none. Two starving windows in a row: true.
+fn wgc_missing_slots(
+    window: &mut Option<(Instant, u64, u64)>,
+    starving: &mut u32,
+    running: Duration,
+    now: Instant,
+    frames: u64,
+    duplicates: u64,
+) -> bool {
+    if running < Duration::from_secs(6) {
+        return false; // start-up duplicates
+    }
+    match *window {
+        None => *window = Some((now, frames, duplicates)),
+        Some((start, f0, d0)) if now.duration_since(start) >= Duration::from_secs(10) => {
+            let ratio =
+                duplicates.saturating_sub(d0) as f64 / frames.saturating_sub(f0).max(1) as f64;
+            *starving = if (0.03..0.35).contains(&ratio) {
+                *starving + 1
+            } else {
+                0
+            };
+            *window = Some((now, frames, duplicates));
+        }
+        _ => {}
+    }
+    *starving >= 2
+}
 /// Everything slow about starting capture: runtime check, display query,
 /// capture-path probes, audio devices and the encoder process. Runs without
 /// the engine lock. Each stage is timed from the start request.
@@ -1608,6 +1644,12 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             synthetic,
             began,
             reported_first_frame: false,
+            wgc_adaptive: !synthetic
+                && s.capture == "desktop-duplication"
+                && capture_api == "wgc"
+                && media::wgc_rate_multiple(s, &media::tuning()) == 1,
+            dup_window: None,
+            starving_windows: 0,
         },
         encoder,
         scaling_detail: path.detail,
@@ -2393,6 +2435,28 @@ impl Inner {
         self.status.duplicated_frames = p.progress.duplicated.load(Ordering::Relaxed);
         self.status.fps = f64::from_bits(p.progress.fps.load(Ordering::Relaxed));
         self.status.elapsed = p.started.elapsed().as_secs_f64();
+        if p.wgc_adaptive
+            && wgc_missing_slots(
+                &mut p.dup_window,
+                &mut p.starving_windows,
+                p.started.elapsed(),
+                Instant::now(),
+                self.status.frames,
+                self.status.duplicated_frames,
+            )
+        {
+            // WGC at 1x missed output slots (a game between 60 and 120 FPS):
+            // capture at 2x for the rest of this session. The bounded restart
+            // keeps the replay buffer.
+            self.settings.wgc_boost = true;
+            self.status.notice = Some(
+                "Capture switched to a higher Windows Graphics Capture rate for smooth video."
+                    .into(),
+            );
+            return self.begin_recovery(
+                "Windows Graphics Capture rate raised for smoother video; previous footage is preserved.",
+            );
+        }
         self.status.audio_peaks = p
             .feeds
             .iter()
@@ -2631,6 +2695,53 @@ impl Drop for Inner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wgc_rate_is_raised_only_for_sustained_missed_slots() {
+        let t0 = Instant::now();
+        let sec = |n| t0 + Duration::from_secs(n);
+        let run = Duration::from_secs(30);
+        // Healthy 60 FPS capture: no duplicates.
+        let (mut w, mut n) = (None, 0);
+        for k in 0..4u64 {
+            assert!(!wgc_missing_slots(
+                &mut w,
+                &mut n,
+                run,
+                sec(10 * k),
+                600 * k,
+                0
+            ));
+        }
+        // ~18% duplicates (a ~95 FPS game at 1x) in two windows in a row.
+        let (mut w, mut n) = (None, 0);
+        assert!(!wgc_missing_slots(&mut w, &mut n, run, sec(0), 0, 0));
+        assert!(!wgc_missing_slots(&mut w, &mut n, run, sec(10), 600, 108));
+        assert!(wgc_missing_slots(&mut w, &mut n, run, sec(20), 1200, 216));
+        // A static screen (almost every frame repeated) is not starvation.
+        let (mut w, mut n) = (None, 0);
+        for k in 0..4u64 {
+            assert!(!wgc_missing_slots(
+                &mut w,
+                &mut n,
+                run,
+                sec(10 * k),
+                600 * k,
+                590 * k
+            ));
+        }
+        // Start-up duplicates are ignored.
+        let (mut w, mut n) = (None, 0);
+        assert!(!wgc_missing_slots(
+            &mut w,
+            &mut n,
+            Duration::from_secs(2),
+            sec(0),
+            10,
+            10
+        ));
+        assert!(w.is_none());
+    }
+
     use super::*;
     #[test]
     #[ignore = "Explicit manifest polling microbenchmark, not a timing assertion"]

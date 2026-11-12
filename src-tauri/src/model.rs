@@ -113,6 +113,10 @@ pub struct Settings {
     /// "wgc" (Windows Graphics Capture, experimental). If WGC cannot start,
     /// the start falls back to Desktop Duplication and says why.
     pub capture_api: String,
+    /// Runtime only (never saved): this session's WGC capture missed output
+    /// slots at 1x, so capture runs at 2x the output rate.
+    #[serde(skip)]
+    pub wgc_boost: bool,
     /// In-game status overlay (replay, recording, microphone).
     pub overlay: crate::status_overlay::OverlaySettings,
     /// Close-to-tray explanation already shown once.
@@ -173,6 +177,7 @@ impl Default for Settings {
             game_notifications: true,
             scale_policy: "smooth".into(),
             capture_api: "dda".into(),
+            wgc_boost: false,
             overlay: Default::default(),
             tray_hint_shown: false,
             tour_done: false,

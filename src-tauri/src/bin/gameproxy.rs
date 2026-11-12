@@ -199,6 +199,28 @@ fn main() -> windows::core::Result<()> {
     let seconds: f64 = arg("--seconds", 30.0);
     let iters: u32 = arg("--iters", 200);
     let cpu_us: u64 = arg("--cpu-us", 0);
+    // Fixed CPU *work* per frame (not time): lower CPU clocks lower FPS, as
+    // in a CPU-bound game. Plus background threads computing continuously,
+    // like an engine's worker threads, which load the CPU package.
+    let cpu_work: u64 = arg("--cpu-work", 0);
+    let workers: u32 = arg("--workers", 0);
+    let stop_workers = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_threads: Vec<_> = (0..workers)
+        .map(|i| {
+            let stop = stop_workers.clone();
+            std::thread::spawn(move || {
+                let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ i as u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    for _ in 0..100_000 {
+                        x = x
+                            .wrapping_mul(6364136223846793005)
+                            .wrapping_add(1442695040888963407);
+                    }
+                    std::hint::black_box(x);
+                }
+            })
+        })
+        .collect();
     let detail: u32 = arg("--detail", 0);
     let log: String = arg("--log", "gameproxy.json".to_string());
     unsafe {
@@ -336,8 +358,18 @@ fn main() -> windows::core::Result<()> {
             )
             .is_ok()
             && tearing.as_bool();
-        let flags = if tearing_ok {
+        // --waitable 1: pace each frame on the swapchain's frame-latency
+        // waitable object (latency 1), as engines with low-latency modes do.
+        // Its signal depends on how Windows presents the frame (direct flip
+        // or DWM composition), so it shows whether capture-forced composition
+        // caps such games.
+        let waitable = arg("--waitable", 0u32) != 0;
+        let flags = (if tearing_ok {
             DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING.0 as u32
+        } else {
+            0
+        }) | if waitable {
+            DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as u32
         } else {
             0
         };
@@ -353,7 +385,8 @@ fn main() -> windows::core::Result<()> {
                     Quality: 0,
                 },
                 BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-                BufferCount: 3,
+                // --buffers 2: a two-buffer flip chain, as some engines use.
+                BufferCount: arg("--buffers", 3u32).clamp(2, 4),
                 SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
                 Flags: flags,
                 ..Default::default()
@@ -391,6 +424,13 @@ fn main() -> windows::core::Result<()> {
         let mut presentation = Vec::new();
 
         let start = Instant::now();
+        let latency_wait = if waitable {
+            let swap2 = swap.cast::<IDXGISwapChain2>()?;
+            swap2.SetMaximumFrameLatency(1)?;
+            Some(swap2.GetFrameLatencyWaitableObject())
+        } else {
+            None
+        };
         let mut presents: Vec<f64> = Vec::with_capacity(200_000);
         let mut msg = MSG::default();
         'run: while start.elapsed().as_secs_f64() < seconds {
@@ -400,6 +440,19 @@ fn main() -> windows::core::Result<()> {
                 }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            if let Some(handle) = latency_wait {
+                let _ =
+                    windows::Win32::System::Threading::WaitForSingleObjectEx(handle, 1000, true);
+            }
+            if cpu_work > 0 {
+                let mut x = 0x2545_F491_4F6C_DD1Du64;
+                for _ in 0..cpu_work {
+                    x = x
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                }
+                std::hint::black_box(x);
             }
             if cpu_us > 0 {
                 // Simulated game logic on the main thread.
@@ -475,8 +528,12 @@ fn main() -> windows::core::Result<()> {
         let _ = windows::Win32::System::Performance::QueryPerformanceFrequency(&mut freq);
         let now = qpc as f64 / freq as f64;
         let start_qpc = now - start.elapsed().as_secs_f64();
+        stop_workers.store(true, std::sync::atomic::Ordering::Relaxed);
+        for t in worker_threads {
+            let _ = t.join();
+        }
         let report = serde_json::json!({
-            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "topmost": topmost, "iters": iters, "cpu_us": cpu_us, "detail": detail,
+            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "topmost": topmost, "waitable": waitable, "cpu_work": cpu_work, "workers": workers, "buffers": arg("--buffers", 3u32).clamp(2, 4), "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
             "fixture_draw_gpu_ms":gpu_times,
             // DXGI_FRAME_PRESENTATION_MODE: 0 composed, 1 overlay, 2 none

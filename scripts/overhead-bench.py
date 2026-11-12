@@ -26,6 +26,8 @@ rel = os.path.join(root, "src-tauri", "target", "release")
 CLI, PROXY = os.path.join(rel, "replayx-cli.exe"), os.path.join(rel, "replayx-gameproxy.exe")
 PROBE = os.path.join(rel, "replayx-dda-profile.exe")
 WGC_PROBE = os.path.join(rel, "replayx-wgc-profile.exe")
+_lock = json.load(open(os.path.join(root, "tools", "ffmpeg-lock.json"), encoding="utf-8-sig"))
+FFMPEG = os.path.join(root, "tools", _lock["runtime_dir"], "ffmpeg.exe")
 import random
 
 # label -> (capture-test overrides, REPLAYX_VIDEO_TUNING); None = no capture (control).
@@ -103,6 +105,21 @@ CONFIGS = {
     "wgc-nvenc-hybrid": (["codec=h264", "encoder=h264_nvenc", "capture_api=wgc"], "wgc_gpu=0"),
     "wgc-nvenc-gpu": (["codec=h264", "encoder=h264_nvenc", "capture_api=wgc"], "wgc_gpu=1"),
     "wgc-qsv": (["codec=h264", "encoder=auto", "capture_api=wgc"], ""),
+    "wgc-qsv-prio0": (["codec=h264", "encoder=auto", "capture_api=wgc"], "gpu_priority=0"),
+    "wgc-qsv-1x": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=1"),
+    "wgc-qsv-1x16": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=1,wgc_floor_us=16000"),
+    "wgc-qsv-2x": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=2"),
+    # The WGC + Quick Sync chain one stage at a time, raw FFmpeg into a null
+    # output (nothing saved): which stage costs the game frames?
+    "ff-wgc120": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=120:display_border=1", "fps=60"),
+    "ff-wgc120-map": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=120:display_border=1",
+                      "fps=60,hwmap=derive_device=qsv,format=qsv"),
+    "ff-wgc120-vpp": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=120:display_border=1",
+                      "fps=60,hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12"),
+    "ff-wgc120-qsv": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=120:display_border=1",
+                      "fps=60,hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12", "h264_qsv"),
+    "ff-wgc60-qsv": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=60:display_border=1",
+                     "fps=60,hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12", "h264_qsv"),
     "wgc-fallback-h264": (["codec=h264", "capture_api=wgc"], "wgc_window=no-such-game.exe"),
 }
 
@@ -220,10 +237,28 @@ def run(label, args, fps, height, mode, out):
         telemetry_thread.start()
     total = args.warm + args.capture + 9 + args.post
     input_before = last_input_tick()
+    # Effective CPU clock (% of base) once a second: on laptops the iGPU and
+    # the CPU cores share one power budget, so GPU work can lower CPU clocks.
+    cpu_perf = []
+    perf_process = subprocess.Popen(["typeperf", r"\Processor Information(_Total)\% Processor Performance",
+                                     "-si", "1", "-sc", str(total + 5)], stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+    def collect_perf():
+        for line in perf_process.stdout:
+            parts = line.strip().strip('"').split('","')
+            try:
+                cpu_perf.append((time.perf_counter(), float(parts[1])))
+            except (IndexError, ValueError):
+                pass
+    perf_thread = threading.Thread(target=collect_perf, daemon=True)
+    perf_thread.start()
     proxy_log = os.path.join(out, "proxy.json")
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
                               "--cpu-us", str(args.cpu_us), "--detail", str(args.detail),
-                              "--windowed", str(args.windowed), "--topmost", str(args.topmost)])
+                              "--windowed", str(args.windowed), "--topmost", str(args.topmost),
+                              "--waitable", str(args.waitable),
+                              "--cpu-work", str(args.cpu_work), "--workers", str(args.workers),
+                              "--buffers", str(args.buffers)])
     time.sleep(1.5)
     # The fixture opens its own full-screen window. Never manipulate unrelated
     # windows or focus through a second UI automation implementation.
@@ -247,6 +282,21 @@ def run(label, args, fps, height, mode, out):
             probe_report = {"error": (out_probe.stderr or out_probe.stdout)[-400:]}
         if not probe_report.get("success"):
             raise RuntimeError(f"Duplication probe failed: {probe_report.get('error')}")
+        time.sleep(4)
+    elif cfg and cfg[0] == "ffmpeg":
+        source, graph = cfg[1], cfg[2]
+        encode = ["-c:v", cfg[3], "-low_power", "1", "-b:v", "16M", "-g", "120"] if len(cfg) > 3 else []
+        with open(os.path.join(out, "capture.log"), "w") as capture_log:
+            ff = subprocess.Popen([FFMPEG, "-hide_banner", "-nostdin", "-f", "lavfi", "-i", source, "-vf", graph,
+                                   *encode, "-t", str(args.capture), "-f", "null", "-"],
+                                  stdout=capture_log, stderr=capture_log)
+            try:
+                while ff.poll() is None:
+                    require_fixture_foreground(proxy, args.windowed)
+                    time.sleep(.1)
+            finally:
+                if ff.poll() is None:
+                    ff.terminate(); ff.wait(timeout=15)
         time.sleep(4)
     elif cfg:
         overrides, tuning = cfg
@@ -276,6 +326,8 @@ def run(label, args, fps, height, mode, out):
     t1 = time.perf_counter()
     proxy.wait(timeout=total + 60)
     user_input = input_before is None or last_input_tick() != input_before
+    perf_process.terminate()
+    perf_thread.join(timeout=3)
     if telemetry_process:
         telemetry_process.terminate()
         telemetry_process.wait(timeout=10)
@@ -312,6 +364,9 @@ def run(label, args, fps, height, mode, out):
     presentation_modes = dict(before=presentation(log['start_qpc_s']+2, t0-.5),
                               capture=presentation(t0+5, t0+args.capture-1),
                               after=presentation(t1+3, log['start_qpc_s']+total-1))
+    def perf_window(lo, hi):
+        v = [p for t, p in cpu_perf if lo < t < hi]
+        return round(statistics.mean(v), 1) if v else None
     gpu_draw = dict(before=draw_time(log['start_qpc_s']+2, t0-.5),
                     capture=draw_time(t0+5, t0+args.capture-1),
                     after=draw_time(t1+3, log['start_qpc_s']+total-1))
@@ -342,9 +397,12 @@ def run(label, args, fps, height, mode, out):
     clock_drop = bool(all(clocks) and clocks[1] < 0.9 * clocks[0])
     valid = bool(base and during and after and drift is not None and abs(drift) <= 5 and not clock_drop
                  and log.get('detail', 0) == args.detail and not user_input)
-    report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "windowed": log.get("windowed", False),
-              "iters": args.iters, "cpu_us": args.cpu_us, "baseline": base, "capture": during,
+    report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "windowed": log.get("windowed", False), "waitable": log.get("waitable", False),
+              "iters": args.iters, "cpu_us": args.cpu_us, "cpu_work": args.cpu_work, "workers": args.workers, "buffers": args.buffers, "baseline": base, "capture": during,
               "fixture_draw_gpu_timing": gpu_draw,
+              "cpu_performance_percent": dict(before=perf_window(t0 - args.warm + 2, t0 - .5),
+                                              capture=perf_window(t0 + 5, t0 + args.capture - 1),
+                                              after=perf_window(t1 + 3, t1 + args.post)),
               "presentation_modes_percent": presentation_modes,
               "counter_sampler_enabled": args.counters,
               "gpu_state": dict(before=gpu_state(log['start_qpc_s']+2, t0-.5),
@@ -384,6 +442,9 @@ def main():
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--cpu-us", type=int, default=0)
+    ap.add_argument("--cpu-work", type=int, default=0, help="Fixed CPU work per frame (iterations), not time")
+    ap.add_argument("--workers", type=int, default=0, help="Background CPU worker threads in the fixture")
+    ap.add_argument("--buffers", type=int, choices=[2, 3, 4], default=3, help="Fixture swapchain buffer count")
     ap.add_argument("--warm", type=int, default=10)
     ap.add_argument("--post", type=int, default=20, help="Capture-off A2 window after saves finish")
     ap.add_argument("--detail", type=int, choices=[0, 1], default=1)
@@ -391,6 +452,8 @@ def main():
     ap.add_argument("--tag", default=time.strftime("%H%M%S"))
     ap.add_argument("--shuffle", action="store_true", help="Random config order in each repeat")
     ap.add_argument("--windowed", type=int, choices=[0, 1], default=0, help="Fixture in a 1280x720 window")
+    ap.add_argument("--waitable", type=int, choices=[0, 1], default=0,
+                    help="Fixture paces frames on a frame-latency waitable swapchain (latency 1)")
     ap.add_argument("--topmost", type=int, choices=[0, 1], default=1,
                     help="Keep the fixture above other windows (Windows may refuse it the foreground)")
     ap.add_argument("--seed", type=int, default=1)
