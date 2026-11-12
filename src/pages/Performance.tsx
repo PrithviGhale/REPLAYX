@@ -21,7 +21,7 @@ export function PerformancePage() {
   const active = useStatus(activeOf);
   const s = useStatus(x => ({
     fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, start: x.start_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
-    buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, detail: x.scaling_detail,
+    buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, captureApi: x.capture_api, detail: x.scaling_detail,
     ow: x.output_width, oh: x.output_height, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, state: x.state,
     speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label, error: x.error, capture: x.capture,
     geo: x.geometry ? `${x.geometry.active_width}×${x.geometry.active_height} @ ${x.geometry.refresh_hz} Hz` : '',
@@ -55,6 +55,7 @@ export function PerformancePage() {
             <div><dt>Encoder</dt><dd>{active ? encoderName(s.encoder) : '—'} {active && s.label && <span className="muted small mono">{s.label}</span>}</dd></div>
             <div><dt>Encoder speed</dt><dd>{active && s.speed > 0 ? <>{s.speed.toFixed(2)}× real time {s.speed >= 0.99 ? <Badge tone="ok">keeping up</Badge> : <Badge tone="warn">falling behind</Badge>}</> : '—'}</dd></div>
             <div><dt>Video behind real time</dt><dd>{active ? `${(s.lag / 1000).toFixed(1)} s` : '—'}</dd></div>
+            <div><dt>Capture method</dt><dd>{active && s.captureApi ? (s.captureApi === 'wgc' ? 'Windows Graphics Capture' : 'Desktop Duplication') : '—'} {active && s.captureApi === 'wgc' && <Badge tone="warn">experimental</Badge>}</dd></div>
             <div><dt>Scaling path</dt><dd>{active ? s.scaling || '—' : '—'} {active && s.scaling.startsWith('GPU zero-copy') && <Badge tone="ok">no CPU copy</Badge>}{active && s.scaling === 'CPU fallback' && <Badge tone="warn">higher CPU</Badge>}</dd></div>
             <div><dt>Display mode</dt><dd>{s.geo || '—'}</dd></div>
             <div><dt>Encoded size</dt><dd>{active && s.ow ? `${s.ow}×${s.oh}` : '—'}</dd></div>

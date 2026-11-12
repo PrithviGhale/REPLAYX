@@ -89,6 +89,15 @@ CONFIGS = {
     # and NVENC settings as the production Desktop Duplication path).
     "wgc-h264": (["codec=h264"], "capture_api=wgc"),
     "wgc-window-h264": (["codec=h264"], "capture_api=wgc,wgc_window=replayx-gameproxy.exe"),
+    # WGC's minimum update interval is a floor between frames: content at a
+    # rate that is not a multiple of 60 arrives below 60/s and the encoder
+    # repeats frames. Capture at twice the rate, keep the frame nearest each slot.
+    "wgc-h264-os2": (["codec=h264"], "capture_api=wgc,oversample=2"),
+    "wgc-h264-1x": (["codec=h264"], "capture_api=wgc,wgc_oversample=1"),
+    # The user-facing setting (not the benchmark switch), and its fallback:
+    # a WGC window that does not exist must fall back to Desktop Duplication.
+    "wgc-setting-h264": (["codec=h264", "capture_api=wgc"], ""),
+    "wgc-fallback-h264": (["codec=h264", "capture_api=wgc"], "wgc_window=no-such-game.exe"),
 }
 
 GPU_PS = r"""
@@ -128,8 +137,31 @@ def foreground_pid():
     return pid.value
 
 
-def require_fixture_foreground(proxy):
-    if foreground_pid() != proxy.pid:
+def fixture_covers(pid, windowed):
+    """The fixture's window is what the display shows at the screen centre
+    (and, full screen, near each corner), even when Windows' focus-stealing
+    protection keeps another app in the foreground and the fixture is only
+    topmost."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    w, h = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    points = [(w // 2, h // 2)] if windowed else [(w // 2, h // 2), (8, 8), (w - 9, 8), (8, h - 9), (w - 9, h - 9)]
+    for x, y in points:
+        hwnd = user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), 2)  # GA_ROOT
+        owner = ctypes.c_ulong(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value != pid:
+            return False
+    return True
+
+
+def require_fixture_foreground(proxy, windowed=False):
+    if foreground_pid() != proxy.pid and not fixture_covers(proxy.pid, windowed):
         raise RuntimeError('The game fixture is not the foreground window; refusing to capture the desktop. '
                            'Leave the computer idle for a few minutes and run again.')
 
@@ -149,6 +181,7 @@ def stats(times):
     if len(ft) < 20:
         return None
     s = sorted(ft)
+    median = s[len(s) // 2]  # once: per-frame recomputation was quadratic
     worst1 = s[-max(1, len(s) // 100):]
     worst01 = s[-max(1, len(s) // 1000):]
     return {
@@ -158,7 +191,7 @@ def stats(times):
         "frametime_p99_ms": round(s[int(0.99 * (len(s) - 1))], 2),
         "frametime_p95_ms": round(s[int(0.95 * (len(s) - 1))], 3),
         "frametime_stdev_ms": round(statistics.pstdev(ft), 3),
-        "spikes_over_2x_median": sum(1 for f in ft if f > 2 * statistics.median(ft)),
+        "spikes_over_2x_median": sum(1 for f in ft if f > 2 * median),
     }
 
 
@@ -184,7 +217,7 @@ def run(label, args, fps, height, mode, out):
     proxy_log = os.path.join(out, "proxy.json")
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
                               "--cpu-us", str(args.cpu_us), "--detail", str(args.detail),
-                              "--windowed", str(args.windowed)])
+                              "--windowed", str(args.windowed), "--topmost", str(args.topmost)])
     time.sleep(1.5)
     # The fixture opens its own full-screen window. Never manipulate unrelated
     # windows or focus through a second UI automation implementation.
@@ -192,7 +225,8 @@ def run(label, args, fps, height, mode, out):
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                            stdout=subprocess.PIPE, text=True) if cfg and args.counters else None
     try:
-        require_fixture_foreground(proxy)
+        require_fixture_foreground(proxy, args.windowed)
+        fixture_focused = foreground_pid() == proxy.pid
     except RuntimeError:
         proxy.kill()
         raise
@@ -220,7 +254,7 @@ def run(label, args, fps, height, mode, out):
                 while recorder.poll() is None:
                     if proxy.poll() is not None:
                         raise RuntimeError('Fixture ended early; stopping capture instead of recording the uncovered desktop')
-                    require_fixture_foreground(proxy)
+                    require_fixture_foreground(proxy, args.windowed)
                     if time.monotonic() > deadline:
                         raise TimeoutError('Capture exceeded its deadline')
                     time.sleep(.1)
@@ -282,6 +316,10 @@ def run(label, args, fps, height, mode, out):
         names = ['graphics_mhz', 'memory_mhz', 'power_w', 'gpu_busy_percent', 'memory_used_mb', 'temperature_c']
         return {name: dict(mean=statistics.mean(v), minimum=min(v), maximum=max(v))
                 for name, v in zip(names, zip(*rows))}
+    engine = None
+    for f in glob.glob(os.path.join(out, "test-output", "capture-test-*", "report.json")):
+        st_ = json.load(open(f, encoding="utf-8")).get("status", {})
+        engine = {k: st_.get(k) for k in ("capture_api", "scaling", "scaling_detail", "encoder", "fps", "dropped_frames")}
     clip = None
     clips = sorted(glob.glob(os.path.join(out, "test-output", "capture-test-*", "clips", "**", "*.mkv"), recursive=True),
                    key=os.path.getsize)
@@ -309,16 +347,22 @@ def run(label, args, fps, height, mode, out):
               "valid_comparison": valid,
               "user_input_during_run": user_input,
               "gpu_clock_drop_during_capture": clock_drop,
+              "fixture_focused": fixture_focused, "fixture_topmost": bool(args.topmost),
               "limitations": "Synthetic only. Drift >5%, missing controls or fixture mismatch invalidate comparisons. Present-call times are not displayed-frame times.",
               "aba_drop_pct": round(100 * (1 - during['fps'] / control_fps), 2) if control_fps and during else None,
               "control_drift_pct": round(100 * (after['fps'] / base['fps'] - 1), 2) if base and after else None,
               "fps_drop_pct": round(100 * (1 - during["fps"] / base["fps"]), 1) if base and during else None,
-              "usage": usage, "clip": clip, "duplication_probe": probe_report}
+              "usage": usage, "clip": clip, "engine": engine, "duplication_probe": probe_report}
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1)
     return report
 
 
 def main():
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # per-monitor v2
+    except (AttributeError, OSError):
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--configs", default="none,qsv")
     ap.add_argument("--cli", default=CLI, help="Recorder binary to compare; fixture stays identical")
@@ -340,8 +384,15 @@ def main():
     ap.add_argument("--tag", default=time.strftime("%H%M%S"))
     ap.add_argument("--shuffle", action="store_true", help="Random config order in each repeat")
     ap.add_argument("--windowed", type=int, choices=[0, 1], default=0, help="Fixture in a 1280x720 window")
+    ap.add_argument("--topmost", type=int, choices=[0, 1], default=1,
+                    help="Keep the fixture above other windows (Windows may refuse it the foreground)")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
+    # Results apply only to this display setup (panel, GPU, refresh rate).
+    try:
+        displays = json.loads(subprocess.check_output([CLI, "displays"], text=True, timeout=30))
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+        displays = None
     results = []
     rng = random.Random(args.seed)
     for r in range(args.repeat):
@@ -352,6 +403,8 @@ def main():
             for label in labels:
                 out = os.path.join(root, "test-output", "overhead", args.tag, f"{label}-{fps}-r{r + 1}")
                 rep = run(label, args, int(fps), args.height, args.mode, out)
+                rep["displays"] = displays
+                json.dump(rep, open(os.path.join(out, "report.json"), "w"), indent=1)
                 results.append(rep)
                 b, c, k = rep["baseline"] or {}, rep["capture"] or {}, rep["clip"] or {}
                 print(f"{label:<20} {fps:>3}fps  game {b.get('fps')} -> {c.get('fps')} fps ({rep['fps_drop_pct']}%), "

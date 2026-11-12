@@ -34,7 +34,7 @@ export type Settings = {
   source_rect: Rect | null; fps: number; encoder: string; codec: 'auto' | 'h264' | 'hevc' | 'av1'; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string; window_hotkey: string;
-  close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
+  close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean; capture_api: string;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
@@ -58,7 +58,7 @@ export type Status = {
   audio_peaks: number[]; audio_packets: number[]; audio_gaps: number[]; audio_discontinuities: number[];
   audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null; notice: string | null;
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
-  scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
+  capture_api: string; scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
   pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
@@ -158,7 +158,7 @@ export const emptyStatus: Status = {
   buffer_bytes: 0, free_bytes: 0, frames: 0, dropped_frames: 0, fps: 0, elapsed: 0, write_mbps: 0, memory_mb: 0,
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
   audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
-  scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
+  scaling: '', capture_api: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],
   encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null, play_width: 0, play_height: 0,
@@ -171,7 +171,7 @@ export const previewSettings: Settings = {
   fps: 60, encoder: 'auto', codec: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8', window_hotkey: 'Control+Shift+F11',
-  close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
+  close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, capture_api: 'dda', audio_bitrate_kbps: 192,
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 6, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
   playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,

@@ -109,6 +109,10 @@ pub struct Settings {
     /// marked to play at the chosen shape; "exact" resizes through a CPU copy,
     /// which can repeat frames while a demanding game runs.
     pub scale_policy: String,
+    /// Display capture API: "dda" (Desktop Duplication, the default) or
+    /// "wgc" (Windows Graphics Capture, experimental). If WGC cannot start,
+    /// the start falls back to Desktop Duplication and says why.
+    pub capture_api: String,
     /// In-game status overlay (replay, recording, microphone).
     pub overlay: crate::status_overlay::OverlaySettings,
     /// Close-to-tray explanation already shown once.
@@ -168,6 +172,7 @@ impl Default for Settings {
             game_mappings: Vec::new(),
             game_notifications: true,
             scale_policy: "smooth".into(),
+            capture_api: "dda".into(),
             overlay: Default::default(),
             tray_hint_shown: false,
             tour_done: false,

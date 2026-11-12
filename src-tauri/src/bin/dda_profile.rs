@@ -11,7 +11,7 @@ use std::{
 use windows::{
     core::Interface,
     Win32::{
-        Foundation::HMODULE,
+        Foundation::{HMODULE, HWND, POINT},
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
             Direct3D11::*,
@@ -20,7 +20,13 @@ use windows::{
                 DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
             },
         },
-        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsIconic},
+        UI::{
+            HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            WindowsAndMessaging::{
+                GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId,
+                IsIconic, WindowFromPoint, GA_ROOT, SM_CXSCREEN, SM_CYSCREEN,
+            },
+        },
     },
 };
 
@@ -45,13 +51,30 @@ fn stats(mut values: Vec<f64>) -> serde_json::Value {
         "max_ms":values.last()})
 }
 
-fn foreground(pid: u32) -> bool {
+/// The selected process's window: the foreground window, or (REPLAYX's
+/// fixture kept topmost when Windows refuses it the foreground) the
+/// top-level window covering the centre of the primary display.
+fn target_window(pid: u32) -> Option<HWND> {
     unsafe {
-        let window = GetForegroundWindow();
-        let mut actual = 0;
-        GetWindowThreadProcessId(window, Some(&mut actual));
-        actual == pid && !IsIconic(window).as_bool()
+        let owner = |window: HWND| {
+            let mut actual = 0;
+            GetWindowThreadProcessId(window, Some(&mut actual));
+            actual
+        };
+        let foreground = GetForegroundWindow();
+        if owner(foreground) == pid && !IsIconic(foreground).as_bool() {
+            return Some(foreground);
+        }
+        let centre = POINT {
+            x: GetSystemMetrics(SM_CXSCREEN) / 2,
+            y: GetSystemMetrics(SM_CYSCREEN) / 2,
+        };
+        let window = GetAncestor(WindowFromPoint(centre), GA_ROOT);
+        (owner(window) == pid && !IsIconic(window).as_bool()).then_some(window)
     }
+}
+fn foreground(pid: u32) -> bool {
+    target_window(pid).is_some()
 }
 
 struct Timer {
@@ -134,6 +157,9 @@ fn main() -> Result<()> {
         bail!("Use --pid EXISTING_GAME_PID --seconds 5..120 --hold 0|1 --copies 1|2")
     }
     // Public process metadata only; never open game memory or send any input.
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
     let mut sys = sysinfo::System::new();
     let id = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[id]), true);

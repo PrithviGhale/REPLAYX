@@ -917,6 +917,11 @@ pub struct Tuning {
     pub wgc_window: Option<String>,
     /// Keep Windows' capture border (its privacy indicator). Default on.
     pub wgc_border: bool,
+    /// WGC capture rate as a multiple of the output rate. Windows' minimum
+    /// update interval is a floor between frames, so a game between 60 and
+    /// 120 FPS arrived at about 53/s at 1x and 15% of recorded frames were
+    /// repeats; 2x kept repeats at 0-0.7% (measured, synthetic).
+    pub wgc_oversample: u32,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -938,6 +943,7 @@ impl Default for Tuning {
             wgc: false,
             wgc_window: None,
             wgc_border: true,
+            wgc_oversample: 2,
         }
     }
 }
@@ -975,6 +981,7 @@ fn parse_tuning(spec: &str) -> Tuning {
                     t.wgc_window = Some(v.trim().to_string())
                 }
                 "wgc_border" => t.wgc_border = v != "0",
+                "wgc_oversample" => t.wgc_oversample = v.parse::<u32>().unwrap_or(2).clamp(1, 4),
                 _ => {}
             }
         }
@@ -1082,7 +1089,13 @@ pub fn video_input(
             c.args(["-thread_queue_size", &q.to_string()]);
         }
         let t = tuning();
-        let source = if t.wgc {
+        let wgc = capture_api(s) == "wgc";
+        let oversample = if wgc {
+            t.oversample.max(t.wgc_oversample)
+        } else {
+            t.oversample
+        };
+        let source = if wgc {
             wgc_source(s, &t, rect)?
         } else {
             format!(
@@ -1091,7 +1104,7 @@ pub fn video_input(
             )
         };
         c.args(["-f", "lavfi", "-i", &source]);
-        let timing = if tuning().oversample > 1 {
+        let timing = if oversample > 1 {
             // Several captures per output slot: keep the one nearest each slot.
             format!("fps={}:round=near", s.fps)
         } else {
@@ -1111,7 +1124,16 @@ pub fn video_input(
         &s.canvas_mode,
     ))
 }
-/// Windows Graphics Capture source (experimental; benchmark only). Frames are
+/// The display capture API a start uses: the setting, or the benchmark
+/// override `REPLAYX_VIDEO_TUNING=capture_api=wgc`.
+pub fn capture_api(s: &Settings) -> &'static str {
+    if s.capture_api == "wgc" || tuning().wgc {
+        "wgc"
+    } else {
+        "dda"
+    }
+}
+/// Windows Graphics Capture source (experimental). Frames are
 /// Direct3D 11 BGRA textures like ddagrab's, so the same filters and encoders
 /// apply. WGC delivers a frame only when the content changes, at most
 /// `max_framerate` per second; the output's CFR mode repeats frames to fill
@@ -1119,7 +1141,7 @@ pub fn video_input(
 fn wgc_source(s: &Settings, t: &Tuning, rect: crate::geometry::CaptureRect) -> Result<String> {
     let common = format!(
         "max_framerate={}:capture_cursor={}:display_border={}",
-        s.fps * t.oversample,
+        s.fps * t.oversample.max(t.wgc_oversample),
         u8::from(t.draw_mouse),
         u8::from(t.wgc_border)
     );
@@ -1670,7 +1692,17 @@ mod tests {
     }
     #[test]
     fn windows_graphics_capture_is_opt_in_and_window_names_are_sanitized() {
-        // Production stays on Desktop Duplication; WGC is a benchmark switch.
+        // Production stays on Desktop Duplication; WGC is opt-in (setting or
+        // benchmark switch).
+        assert_eq!(Settings::default().capture_api, "dda");
+        if std::env::var_os("REPLAYX_VIDEO_TUNING").is_none() {
+            assert_eq!(capture_api(&Settings::default()), "dda");
+            let opted = Settings {
+                capture_api: "wgc".into(),
+                ..Default::default()
+            };
+            assert_eq!(capture_api(&opted), "wgc");
+        }
         let d = Tuning::default();
         assert!(!d.wgc && d.wgc_window.is_none() && d.wgc_border);
         let t = parse_tuning("capture_api=wgc,wgc_window=replayx-gameproxy.exe,wgc_border=0");
@@ -1697,7 +1729,12 @@ mod tests {
         };
         let f = wgc_source(&s, &t, rect).unwrap();
         assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
-        assert!(f.contains("max_framerate=60") && f.contains("display_border=0"));
+        // Twice the output rate by default (see Tuning::wgc_oversample).
+        assert!(f.contains("max_framerate=120") && f.contains("display_border=0"));
+        let once = parse_tuning("capture_api=wgc,wgc_window=game.exe,wgc_oversample=1");
+        assert!(wgc_source(&s, &once, rect)
+            .unwrap()
+            .contains("max_framerate=60"));
         assert!(f.contains("capture_cursor=1"));
     }
 

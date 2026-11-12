@@ -364,7 +364,7 @@ fn main() -> Result<()> {
     ]
     .contains(&action)
     {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E codec=C preset=P bitrate=MBPS] | probe FILE | recover DATA_DIR | overlay-test [out-dir]");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E codec=C preset=P bitrate=MBPS capture_api=dda|wgc] | probe FILE | recover DATA_DIR | overlay-test [out-dir]");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -437,6 +437,7 @@ fn main() -> Result<()> {
                 settings.preset = "custom".into();
             }
             Some(("gpu", v)) => settings.gpu_scaling = v != "0",
+            Some(("capture_api", v)) => settings.capture_api = v.into(),
             Some(("replay", v)) => settings.replay_seconds = v.parse()?,
             Some(("buffer", v)) => settings.buffer_mb = v.parse()?,
             _ => {}

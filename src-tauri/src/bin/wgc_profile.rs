@@ -23,7 +23,7 @@ use windows::{
         SizeInt32,
     },
     Win32::{
-        Foundation::HMODULE,
+        Foundation::{HMODULE, HWND, POINT},
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
             Direct3D11::*,
@@ -38,7 +38,13 @@ use windows::{
                 RoInitialize, RO_INIT_MULTITHREADED,
             },
         },
-        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsIconic},
+        UI::{
+            HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            WindowsAndMessaging::{
+                GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId,
+                IsIconic, WindowFromPoint, GA_ROOT, SM_CXSCREEN, SM_CYSCREEN,
+            },
+        },
     },
 };
 
@@ -63,13 +69,30 @@ fn stats(mut values: Vec<f64>) -> serde_json::Value {
         "p99_ms":values[(values.len()-1)*99/100], "max_ms":values.last()})
 }
 
-fn foreground(pid: u32) -> bool {
+/// The selected process's window: the foreground window, or (REPLAYX's
+/// fixture kept topmost when Windows refuses it the foreground) the
+/// top-level window covering the centre of the primary display.
+fn target_window(pid: u32) -> Option<HWND> {
     unsafe {
-        let window = GetForegroundWindow();
-        let mut actual = 0;
-        GetWindowThreadProcessId(window, Some(&mut actual));
-        actual == pid && !IsIconic(window).as_bool()
+        let owner = |window: HWND| {
+            let mut actual = 0;
+            GetWindowThreadProcessId(window, Some(&mut actual));
+            actual
+        };
+        let foreground = GetForegroundWindow();
+        if owner(foreground) == pid && !IsIconic(foreground).as_bool() {
+            return Some(foreground);
+        }
+        let centre = POINT {
+            x: GetSystemMetrics(SM_CXSCREEN) / 2,
+            y: GetSystemMetrics(SM_CYSCREEN) / 2,
+        };
+        let window = GetAncestor(WindowFromPoint(centre), GA_ROOT);
+        (owner(window) == pid && !IsIconic(window).as_bool()).then_some(window)
     }
+}
+fn foreground(pid: u32) -> bool {
+    target_window(pid).is_some()
 }
 
 /// QueryPerformanceCounter in 100 ns units: the clock of SystemRelativeTime.
@@ -171,6 +194,9 @@ fn main() -> Result<()> {
     {
         bail!("Use --pid PID --seconds 5..120 --mode monitor|window --border 1|0 --cursor 1|0 --fps 60 --buffers 1..4 --limit 1|0")
     }
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
     let mut sys = sysinfo::System::new();
     let id = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[id]), true);
@@ -186,7 +212,7 @@ fn main() -> Result<()> {
         if !GraphicsCaptureSession::IsSupported()? {
             bail!("Windows Graphics Capture is not supported on this system")
         }
-        let window = GetForegroundWindow();
+        let window = target_window(pid).context("The selected window is no longer visible")?;
         let monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
         // The adapter driving the primary display, as Desktop Duplication uses.
         let factory_dxgi: IDXGIFactory1 = CreateDXGIFactory1()?;

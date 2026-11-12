@@ -88,6 +88,9 @@ pub struct Status {
     pub recovery_sessions: usize,
     pub geometry: Option<DisplayGeometry>,
     pub scaling: String,
+    /// Display capture API in use: "dda" (Desktop Duplication) or "wgc"
+    /// (Windows Graphics Capture); empty for other sources.
+    pub capture_api: String,
     /// Why faster scaling paths were not used (probe errors), if any.
     pub scaling_detail: Option<String>,
     pub output_width: u32,
@@ -140,6 +143,7 @@ struct Starting {
     began: Instant,
 }
 /// What a start needs, copied out of the engine under the lock.
+#[derive(Clone)]
 struct PipelineRequest {
     settings: Settings,
     media: Media,
@@ -155,6 +159,7 @@ struct Prepared {
     pipeline: Pipeline,
     encoder: String,
     scaling_detail: Option<String>,
+    capture_api: &'static str,
     plan: Option<geometry::VideoPlan>,
     expected_audio: usize,
     cache: Option<(String, Scaler, String)>,
@@ -1043,7 +1048,7 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v4|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+        "v5|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
         g.adapter_vendor,
         g.device,
         g.desktop_width,
@@ -1056,6 +1061,7 @@ fn remembered_key(
         s.fps,
         s.preset,
         s.gpu_scaling,
+        media::capture_api(s),
         req.media.ffmpeg.display()
     )
 }
@@ -1136,8 +1142,16 @@ fn select_video_path(
         });
     };
     let key = format!(
-        "{}|{}|{:?}|{}|{}|{}|{}|{}",
-        g.adapter_luid, s.display, plan, s.encoder, s.codec, s.fps, s.preset, s.gpu_scaling
+        "{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+        g.adapter_luid,
+        s.display,
+        plan,
+        s.encoder,
+        s.codec,
+        s.fps,
+        s.preset,
+        s.gpu_scaling,
+        media::capture_api(s)
     );
     if let Some((cached, scaler, encoder)) = &req.cache {
         if *cached == key {
@@ -1244,6 +1258,16 @@ fn select_video_path(
 /// capture-path probes, audio devices and the encoder process. Runs without
 /// the engine lock. Each stage is timed from the start request.
 fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
+    // Experimental Windows Graphics Capture: when none of its capture paths
+    // starts, record with Desktop Duplication instead and say why.
+    let fallback = (!req.synthetic
+        && req.settings.capture == "desktop-duplication"
+        && media::capture_api(&req.settings) == "wgc")
+        .then(|| {
+            let mut r = req.clone();
+            r.settings.capture_api = "dda".into();
+            r
+        });
     let began = req.began;
     let s = &req.settings;
     let synthetic = req.synthetic;
@@ -1286,7 +1310,26 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     };
     let plan = anamorphic.map(|p| p.anamorphic()).or(plan);
     mark(&mut timings, began, "Display measured");
-    let path = select_video_path(&req, geometry.as_ref(), plan.as_ref())?;
+    let (path, req) = match (
+        select_video_path(&req, geometry.as_ref(), plan.as_ref()),
+        &fallback,
+    ) {
+        (Ok(path), _) => (path, &req),
+        (Err(e), Some(dda)) => {
+            let mut path = select_video_path(dda, geometry.as_ref(), plan.as_ref())?;
+            let note = format!(
+                "Windows Graphics Capture could not start ({e}); using Desktop Duplication"
+            );
+            path.detail = Some(match path.detail {
+                Some(d) => format!("{note}; {d}"),
+                None => note,
+            });
+            (path, dda)
+        }
+        (Err(e), None) => return Err(e),
+    };
+    let s = &req.settings;
+    let capture_api = media::capture_api(s);
     let (scaler, encoder) = (path.scaler, path.encoder.clone());
     mark(
         &mut timings,
@@ -1556,6 +1599,11 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
         },
         encoder,
         scaling_detail: path.detail,
+        capture_api: if synthetic || s.capture != "desktop-duplication" {
+            ""
+        } else {
+            capture_api
+        },
         plan,
         expected_audio,
         cache: path.cache,
@@ -1929,6 +1977,7 @@ impl Inner {
             scaler.label().into()
         };
         self.status.scaling_detail = p.scaling_detail;
+        self.status.capture_api = p.capture_api.into();
         (self.status.output_width, self.status.output_height) =
             p.plan.map(|p| (p.width, p.height)).unwrap_or_default();
         let rate = media::rate_plan(

@@ -194,6 +194,16 @@ export function CapturePage() {
           <Segmented label="Frame rate" value={draft.fps} disabled={active} onChange={v => patch({ fps: v })}
             options={[30, 60, 120, 144].map(f => ({ value: f, label: `${f} fps`, hint: f > 60 ? 'Needs GPU headroom' : undefined }))} />
         </Field>
+        {draft.capture === 'desktop-duplication' && (
+          <Field label="Capture method"
+            hint="Windows Graphics Capture is experimental. In testing on a laptop display driven by the integrated GPU it cost games far fewer frames than Desktop Duplication; other setups are not yet verified. If it can't start, REPLAYX records with Desktop Duplication and says so on the Performance page. Windows may draw a border around the screen while it captures.">
+            <Segmented label="Capture method" value={draft.capture_api} disabled={active} onChange={v => patch({ capture_api: v })}
+              options={[
+                { value: 'dda', label: 'Desktop Duplication', hint: 'The proven default' },
+                { value: 'wgc', label: 'Windows Graphics Capture (experimental)', hint: 'Lower game impact on some laptops; falls back automatically' },
+              ]} />
+          </Field>
+        )}
         <p className="muted small">Stretched 4:3 games (for example 1440×1080 shown full-screen) change the display mode itself. REPLAYX detects the change, restarts capture on the new mode and validates the encoded size, so the desktop can't leak into the frame.</p>
       </Card>
 

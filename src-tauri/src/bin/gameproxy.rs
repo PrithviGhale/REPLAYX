@@ -235,8 +235,15 @@ fn main() -> windows::core::Result<()> {
             AdjustWindowRect(&mut outer, style, false)?;
         }
         let origin = if windowed { 100 } else { 0 };
+        // --topmost 1 keeps the fixture above other windows when Windows'
+        // focus-stealing protection leaves another app in the foreground.
+        let topmost = arg("--topmost", 0u32) != 0;
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+            if topmost {
+                WS_EX_TOPMOST
+            } else {
+                WINDOW_EX_STYLE(0)
+            },
             class,
             w!("REPLAYX game proxy - Escape closes"),
             style,
@@ -469,7 +476,7 @@ fn main() -> windows::core::Result<()> {
         let now = qpc as f64 / freq as f64;
         let start_qpc = now - start.elapsed().as_secs_f64();
         let report = serde_json::json!({
-            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "iters": iters, "cpu_us": cpu_us, "detail": detail,
+            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "topmost": topmost, "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
             "fixture_draw_gpu_ms":gpu_times,
             // DXGI_FRAME_PRESENTATION_MODE: 0 composed, 1 overlay, 2 none
