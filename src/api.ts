@@ -89,6 +89,8 @@ export type UpdateSettings = {
 export type UpdateStage = 'idle' | 'checking' | 'up_to_date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'installing' | 'failed';
 /** Sent by the engine (`update-status` event). `simulated` marks test data. */
 export type UpdateStatus = {
+  /** Increases with every change; an older status is never applied over a newer one. */
+  revision: number;
   stage: UpdateStage; current: string; latest: string | null; notes: string | null; date: string | null;
   downloaded: number; total: number | null; error: string | null; detail: string | null; last_checked: number | null;
   simulated: boolean; configured: boolean; installable: boolean; waiting: boolean; prompt: boolean; release_url: string | null;

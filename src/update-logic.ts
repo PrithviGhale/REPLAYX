@@ -29,6 +29,11 @@ export function applyMode(s: UpdateSettings, mode: Exclude<UpdateMode, 'custom'>
   return { ...s, auto_check: true, auto_download: true, auto_install: true };
 }
 
+/** Should `next` replace what the window shows? Events and the start-up
+ * snapshot can arrive out of order; an older revision never wins. */
+export function isNewerStatus(shown: Pick<UpdateStatus, 'revision'>, next: Pick<UpdateStatus, 'revision'>): boolean {
+  return typeof next.revision === 'number' && next.revision >= shown.revision;
+}
 /** A newer version is known: drives the Settings dot and the Updates badge. */
 export function hasUpdate(s: UpdateStatus): boolean {
   return !!s.latest && ['available', 'downloading', 'verifying', 'ready', 'installing'].includes(s.stage);

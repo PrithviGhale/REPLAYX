@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyMode, formatBytes, hasUpdate, highlights, lastChecked, microphoneOn, microphoneLabel, modeOf, normalize, percent, progressText, stageLabel } from '../src/update-logic.ts';
+import { isNewerStatus, applyMode, formatBytes, hasUpdate, highlights, lastChecked, microphoneOn, microphoneLabel, modeOf, normalize, percent, progressText, stageLabel } from '../src/update-logic.ts';
 
 const prefs = { auto_check: true, interval_hours: 6, auto_download: false, auto_install: false, notify: true, idle_minutes: 5 };
 const status = (over: object = {}) => ({
-  stage: 'idle', current: '0.3.1-alpha.6', latest: null, notes: null, date: null, downloaded: 0, total: null, error: null, detail: null,
+  revision: 1, stage: 'idle', current: '0.3.1-alpha.6', latest: null, notes: null, date: null, downloaded: 0, total: null, error: null, detail: null,
   last_checked: null, simulated: false, configured: true, installable: true, waiting: false, prompt: false, release_url: null, ...over,
 }) as Parameters<typeof hasUpdate>[0];
 
@@ -91,4 +91,12 @@ test('microphone labels distinguish intent from active capture and device failur
   assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Recovering'), 'Unavailable');
   assert.equal(microphoneLabel({ enabled: true, muted: false }, 'Error'), 'Unavailable');
   assert.equal(microphoneOn([{ kind: 'microphone', enabled: true, muted: true }, { kind: 'microphone', enabled: true, muted: false }]), true);
+});
+
+test('an older status never replaces a newer one (events and the start-up snapshot can cross)', () => {
+  assert.equal(isNewerStatus({ revision: 0 }, { revision: 1 }), true, 'first status after start');
+  assert.equal(isNewerStatus({ revision: 7 }, { revision: 8 }), true);
+  assert.equal(isNewerStatus({ revision: 7 }, { revision: 7 }), true, 'the same revision again (command answer + its event)');
+  assert.equal(isNewerStatus({ revision: 8 }, { revision: 7 }), false, 'a slow snapshot taken before an event already shown');
+  assert.equal(isNewerStatus({ revision: 3 }, {} as { revision: number }), false, 'malformed status is ignored');
 });

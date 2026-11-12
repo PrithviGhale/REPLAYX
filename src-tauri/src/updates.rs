@@ -143,6 +143,10 @@ pub enum Stage {
 /// What the interface shows. Sent as the `update-status` event.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct UpdateStatus {
+    /// Increases with every change. Events are sent after the lock is released
+    /// and the window also fetches a snapshot at start, so updates can arrive
+    /// out of order: the window never applies one older than it shows.
+    pub revision: u64,
     pub stage: Stage,
     pub current: String,
     pub latest: Option<String>,

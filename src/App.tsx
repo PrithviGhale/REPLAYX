@@ -125,7 +125,7 @@ export function App() {
   const pollError = usePollError();
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const updateWaiting = hasUpdate(useUpdate());
-  useEffect(() => { startPolling(); startUpdates(); }, []);
+  useEffect(() => { startPolling(); void startUpdates(); }, []);
   const title = NAV.flatMap(g => g.items).find(i => i.id === page)!.label;
   // Tray "Settings…" and similar open a page by name.
   // "settings:updates" opens a Settings tab (tray "Update available").

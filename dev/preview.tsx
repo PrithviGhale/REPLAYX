@@ -69,11 +69,12 @@ const clips: Clip[] = scenario === 'empty' ? [] : [
   clip('Desktop', 'Desktop_2026-11-06_22-02-12.mkv', 'Replay', 1794106932, 30, ['Playback mix', 'System audio']),
 ];
 const updateScenario = new URLSearchParams(window.location.search).get('update') ?? 'uptodate';
+let updateRevision = 0;
 function updateStatus(dismissed: boolean) {
   const stage = ({ uptodate: 'up_to_date' } as Record<string, string>)[updateScenario] ?? updateScenario;
   const offered = ['available', 'downloading', 'verifying', 'ready', 'failed'].includes(stage);
   return {
-    stage, current: '0.3.1-alpha.6', latest: offered ? '0.3.1-alpha.7' : null,
+    revision: ++updateRevision, stage, current: '0.3.1-alpha.6', latest: offered ? '0.3.1-alpha.7' : null,
     notes: offered ? ["## What's New", '', '- Updates install from inside REPLAYX', '- Microphone switch on the home page', '- Smoother clip saving', '- Fixes for audio devices'].join('\n') : null,
     date: offered ? '2026-11-12' : null, downloaded: stage === 'downloading' ? 26_400_000 : stage === 'ready' || stage === 'verifying' ? 61_138_175 : 0,
     total: ['downloading', 'verifying', 'ready'].includes(stage) ? 61_138_175 : null,

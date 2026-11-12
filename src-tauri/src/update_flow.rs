@@ -190,7 +190,10 @@ impl UpdateRuntime {
         );
         let status = {
             let mut s = self.status.lock().unwrap();
+            // Kept across changes that replace the whole status (reset).
+            let revision = s.revision;
             change(&mut s);
+            s.revision = revision + 1;
             let offered = matches!(s.stage, Stage::Available | Stage::Ready);
             s.prompt = match (&s.latest, offered) {
                 (Some(_), true) if preview => {

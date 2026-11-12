@@ -121,13 +121,21 @@ app.stdout.pipe(log); app.stderr.pipe(log);
 const stopApp = () => { try { execSync(`taskkill /PID ${app.pid} /T /F`, { stdio: 'ignore' }); } catch { /* gone */ } };
 process.on('exit', stopApp);
 const startedAt = Date.now();
+// If `tauri dev` ends (for example port 1420 already taken by another dev
+// server), stop at once instead of waiting out the build allowance.
+let appExit = null;
+app.on('exit', code => { appExit = code; });
 let target;
-for (let i = 0; i < 2400 && !target; i++) { // the first debug build can take many minutes
+for (let i = 0; i < 2400 && !target && appExit === null; i++) { // the first debug build can take many minutes
   try { target = (await (await fetch(`http://127.0.0.1:${cdp}/json`)).json()).find(t => t.type === 'page' && t.url.startsWith('http://localhost:1420')); } catch { /* starting */ }
   if (!target) await sleep(500);
 }
-if (!target) { console.log('The development app did not start (see', path.join(work, 'tauri-dev.log') + ').'); process.exit(2); }
-console.log(`app ready after ${Math.round((Date.now() - startedAt) / 1000)} s; test server on port ${port}; data folder ${dataDir}`);
+if (!target) {
+  const tail = fs.existsSync(path.join(work, 'tauri-dev.log')) ? fs.readFileSync(path.join(work, 'tauri-dev.log'), 'utf8').slice(-600) : '';
+  console.log(`The development app did not start${appExit !== null ? ` (tauri dev exited with ${appExit})` : ''}; see`, path.join(work, 'tauri-dev.log'), `\n${tail}`);
+  process.exit(2);
+}
+const targetAfter = Math.round((Date.now() - startedAt) / 1000);
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r => ws.addEventListener('open', r, { once: true }));
 let id = 0; const pending = new Map();
@@ -136,8 +144,31 @@ const js = expression => new Promise(resolve => { const n = ++id; pending.set(n,
 const invoke = (cmd, args = {}) => js(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}).then(v => v === undefined || v === null ? { __ok: true } : v, e => ({ __rejected: String(e) }))`);
 const status = () => invoke('update_status');
 const until = async (what, test, timeout = 30000) => { const end = Date.now() + timeout; let s; do { s = await status(); if (test(s)) return s; await sleep(100); } while (Date.now() < end); console.log(`   timed out waiting for ${what}; last status:`, JSON.stringify(s)); return s; };
+// A live fullscreen workload can delay WebView painting/timers. Wait for the
+// actual native answer and rendered condition instead of assuming 600 ms is
+// enough. The same assertions and bounded failure deadlines still apply.
+const untilUI = async expression => {
+  const end = Date.now() + 10000;
+  do { if (await js(expression) === true) return true; await sleep(100); } while (Date.now() < end);
+  console.log('   timed out waiting for rendered UI condition:', expression);
+  return false;
+};
 const use = s => { scenario = s; };
-for (let i = 0; i < 100; i++) { if (await js(`!!window.__TAURI_INTERNALS__ && !!document.querySelector('nav')`) === true) break; await sleep(200); }
+// The debug target shows the app's URL as soon as navigation *starts*; the
+// document itself stays about:blank (no Tauri bridge) until the Vite dev
+// server answers its first request, which took 16-20 s on a cold start and
+// longer under a game's load. "Ready" therefore means: the app's document is
+// loaded, the Tauri bridge is present and the interface has rendered. If that
+// never happens the run stops with an error instead of reporting test failures
+// that are really start-up timing.
+const appLoaded = `location.href.startsWith('http://localhost:1420') && typeof window.__TAURI_INTERNALS__?.invoke === 'function' && !!document.querySelector('nav')`;
+let loaded = false;
+for (const end = Date.now() + 300_000; !loaded && Date.now() < end;) { loaded = await js(appLoaded) === true; if (!loaded) await sleep(250); }
+if (!loaded) {
+  console.log('The app page never finished loading within 5 minutes:', JSON.stringify(await js(`({ href: location.href, ready: document.readyState, bridge: typeof window.__TAURI_INTERNALS__ })`)), '(see', path.join(work, 'tauri-dev.log') + ')');
+  process.exit(2);
+}
+console.log(`debug target after ${targetAfter} s, app page loaded after ${Math.round((Date.now() - startedAt) / 1000)} s; test server on port ${port}; data folder ${dataDir}`);
 
 // ---------------------------------------------------------------- tests
 let s = await status();
@@ -150,7 +181,7 @@ check('the result is labelled as test data and offers the pop-up', s.simulated =
 check('release notes arrive with the update', (s.notes ?? '').includes('TEST DATA from the local test server'));
 
 // 2. Interface: Settings dot and pop-up follow the engine state.
-await sleep(600);
+await untilUI(`!!document.querySelector('.nav-dot') && (document.querySelector('.update-pop')?.textContent ?? '').includes(${JSON.stringify(newer)})`);
 check('Settings shows the update dot', await js(`!!document.querySelector('.nav-dot')`) === true);
 check('the update pop-up is shown with the version', await js(`(document.querySelector('.update-pop')?.textContent ?? '').includes(${JSON.stringify(newer)})`) === true);
 await js(`[...document.querySelectorAll('.update-pop button')].find(b => b.textContent.trim() === 'Not Now')?.click()`);
