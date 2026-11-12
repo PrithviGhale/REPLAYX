@@ -9,6 +9,29 @@ spec.loader.exec_module(m)
 
 
 class FrameTimes(unittest.TestCase):
+    def test_spikes_variance_p95_and_gpu_wait(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d)/'spikes.csv'
+            f.write_text('Application,FrameTime,GPUWait\n' + 'game.exe,4,0.5\n'*4900
+                         + 'game.exe,20,1.5\n'*100)
+            r = m.summarize(f, trim=0)
+            self.assertEqual(r['p95_ms'], 4)
+            self.assertEqual(r['p99_ms'], 20)
+            self.assertEqual(r['spikes_over_2x_median'], 100)
+            self.assertEqual(r['spikes_over_16_67ms'], 100)
+            self.assertAlmostEqual(r['variance_ms2'], 5.0176)
+            self.assertAlmostEqual(r['optional_frame_metrics']['gpu_wait_ms']['mean'], .52)
+
+    def test_mismatched_identity_or_interval_rejects_comparison(self):
+        a = dict(fps=250, cap_limited=False, application='game.exe', process_id='1',
+                 selected_swapchain='main', interval_column='FrameTime')
+        for field, value in [('process_id','2'), ('selected_swapchain','menu'),
+                             ('application','other.exe'), ('interval_column','MsBetweenPresents')]:
+            b = {**a, field:value}
+            result = m.compare(a, b, a)
+            self.assertFalse(result['valid_comparison'])
+            self.assertTrue(any(field in reason for reason in result['invalid_reasons']))
+
     def test_optional_gpu_metrics_are_reported_as_milliseconds(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d)/'metrics.csv'

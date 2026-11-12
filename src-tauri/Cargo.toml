@@ -22,6 +22,11 @@ path = "src/bin/cli.rs"
 name = "replayx-gameproxy"
 path = "src/bin/gameproxy.rs"
 
+# Read-only, bounded Desktop Duplication timing probe; no encoding or UI input.
+[[bin]]
+name = "replayx-dda-profile"
+path = "src/bin/dda_profile.rs"
+
 [features]
 default = []
 desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance", "dep:reqwest", "dep:rustls"]

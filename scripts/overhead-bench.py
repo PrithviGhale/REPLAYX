@@ -24,6 +24,7 @@ import threading
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rel = os.path.join(root, "src-tauri", "target", "release")
 CLI, PROXY = os.path.join(rel, "replayx-cli.exe"), os.path.join(rel, "replayx-gameproxy.exe")
+PROBE = os.path.join(rel, "replayx-dda-profile.exe")
 
 # label -> (capture-test overrides, REPLAYX_VIDEO_TUNING); None = no capture (control).
 CONFIGS = {
@@ -67,22 +68,43 @@ CONFIGS = {
     # Attribution experiments, not proposed production quality changes.
     "aq-off": (["codec=h264"], "nvenc_aq=0"),
     "lookahead-off": (["codec=h264"], "nvenc_lookahead=0"),
+    # Desktop Duplication alone, no encoder (replayx-dda-profile, 60 acquisitions/s,
+    # two GPU copies like ddagrab): release right after copying (as FFmpeg's
+    # ddagrab does) or hold until just before the next acquisition (Microsoft's
+    # recommendation). Separates the duplication cost from the NVENC cost.
+    "dda-early": ("probe", ["--hold", "0", "--copies", "2"]),
+    "dda-hold": ("probe", ["--hold", "1", "--copies", "2"]),
 }
 
 GPU_PS = r"""
 Start-Sleep -Seconds 5
 $names = @{{}}
-Get-Process -Name ffmpeg,replayx-cli,replayx-gameproxy,dwm -ErrorAction SilentlyContinue | ForEach-Object {{ $names[[string]$_.Id]=$_.ProcessName }}
+Get-Process -Name ffmpeg,replayx-cli,replayx-gameproxy,replayx-dda-profile,dwm -ErrorAction SilentlyContinue | ForEach-Object {{ $names[[string]$_.Id]=$_.ProcessName }}
 $s = Get-Counter -Counter '\GPU Engine(*)\Utilization Percentage','\Process(*)\% Processor Time' -SampleInterval 1 -MaxSamples {n} -ErrorAction SilentlyContinue
 $acc = @{{}}; $cpu = @{{}}
 foreach ($set in $s) {{ foreach ($x in $set.CounterSamples) {{
   if ($x.Path -like '*gpu engine*' -and $x.InstanceName -match 'pid_(\d+)_luid_(0x\w+_0x\w+)_phys_\d+_eng_\d+_engtype_(.*)$') {{
     $p = $names[$matches[1]]; if (!$p) {{ continue }}
     $k = "$p|$($matches[2])|$($matches[3])"; $acc[$k] += $x.CookedValue / {n} }}
-  elseif ($x.Path -like '*% processor time*' -and $x.InstanceName -match '^(ffmpeg|replayx-cli|replayx-gameproxy|dwm|robloxplayerbeta)') {{
+  elseif ($x.Path -like '*% processor time*' -and $x.InstanceName -match '^(ffmpeg|replayx-cli|replayx-gameproxy|replayx-dda-profile|dwm|robloxplayerbeta)') {{
     $k = $x.InstanceName -replace '#\d+$',''; $cpu[$k] += $x.CookedValue / {n} / [Environment]::ProcessorCount }} }} }}
 @{{ gpu = $acc; cpu = $cpu }} | ConvertTo-Json -Compress
 """
+
+
+def last_input_tick():
+    """GetLastInputInfo: changes with any keyboard or mouse input. A run during
+    which someone used the computer measured a different workload."""
+    import ctypes
+
+    class LASTINPUTINFO(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+    info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
+    return info.dwTime if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)) else None
+
+
+# DXGI_FRAME_PRESENTATION_MODE values reported by IDXGISwapChainMedia.
+PRESENTATION_MODES = {0: 'composed', 1: 'overlay', 2: 'direct', 3: 'composition_failure'}
 
 
 def stats(times):
@@ -119,6 +141,7 @@ def run(label, args, fps, height, mode, out):
         telemetry_thread = threading.Thread(target=collect, daemon=True)
         telemetry_thread.start()
     total = args.warm + args.capture + 9 + args.post
+    input_before = last_input_tick()
     proxy_log = os.path.join(out, "proxy.json")
     proxy = subprocess.Popen([PROXY, "--seconds", str(total), "--log", proxy_log, "--iters", str(args.iters),
                               "--cpu-us", str(args.cpu_us), "--detail", str(args.detail)])
@@ -129,7 +152,18 @@ def run(label, args, fps, height, mode, out):
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                            stdout=subprocess.PIPE, text=True) if cfg and args.counters else None
     t0 = time.perf_counter()
-    if cfg:
+    probe_report = None
+    if cfg and cfg[0] == "probe":
+        out_probe = subprocess.run([PROBE, "--pid", str(proxy.pid), "--seconds", str(args.capture), *cfg[1]],
+                                   capture_output=True, text=True, timeout=args.capture + 60)
+        try:
+            probe_report = json.loads(out_probe.stdout)
+        except json.JSONDecodeError:
+            probe_report = {"error": (out_probe.stderr or out_probe.stdout)[-400:]}
+        if not probe_report.get("success"):
+            raise RuntimeError(f"Duplication probe failed: {probe_report.get('error')}")
+        time.sleep(4)
+    elif cfg:
         overrides, tuning = cfg
         env = dict(os.environ, REPLAYX_VIDEO_TUNING=tuning)
         cmd = [args.cli, "capture-test", str(args.capture), args.audio, f"fps={fps}", f"height={height}", f"mode={mode}",
@@ -155,6 +189,7 @@ def run(label, args, fps, height, mode, out):
         time.sleep(args.capture + 4)
     t1 = time.perf_counter()
     proxy.wait(timeout=total + 60)
+    user_input = input_before is None or last_input_tick() != input_before
     if telemetry_process:
         telemetry_process.terminate()
         telemetry_process.wait(timeout=10)
@@ -179,6 +214,18 @@ def run(label, args, fps, height, mode, out):
             return None
         return dict(samples=len(samples), mean_ms=statistics.mean(samples),
                     p95_ms=sorted(samples)[int(.95*(len(samples)-1))])
+    def presentation(lo, hi):
+        # How Windows showed the fixture's frames (sampled every 32 presents):
+        # composed by DWM, an overlay plane, or direct/independent flip.
+        modes = [v['mode'] for v in log.get('presentation_modes', [])
+                 if lo < log['start_qpc_s'] + v['t'] < hi]
+        if not modes:
+            return None
+        return {name: round(100 * sum(m == code for m in modes) / len(modes), 1)
+                for code, name in PRESENTATION_MODES.items()} | {'samples': len(modes)}
+    presentation_modes = dict(before=presentation(log['start_qpc_s']+2, t0-.5),
+                              capture=presentation(t0+5, t0+args.capture-1),
+                              after=presentation(t1+3, log['start_qpc_s']+total-1))
     gpu_draw = dict(before=draw_time(log['start_qpc_s']+2, t0-.5),
                     capture=draw_time(t0+5, t0+args.capture-1),
                     after=draw_time(t1+3, log['start_qpc_s']+total-1))
@@ -199,20 +246,22 @@ def run(label, args, fps, height, mode, out):
     control_fps = statistics.mean([base['fps'], after['fps']]) if base and after else None
     drift = 100 * (after['fps'] / base['fps'] - 1) if base and after else None
     valid = bool(base and during and after and drift is not None and abs(drift) <= 5
-                 and log.get('detail', 0) == args.detail)
+                 and log.get('detail', 0) == args.detail and not user_input)
     report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "baseline": base, "capture": during,
               "fixture_draw_gpu_timing": gpu_draw,
+              "presentation_modes_percent": presentation_modes,
               "counter_sampler_enabled": args.counters,
               "gpu_state": dict(before=gpu_state(log['start_qpc_s']+2, t0-.5),
                                 capture=gpu_state(t0+5,t0+args.capture-1), after=gpu_state(t1+3,log['start_qpc_s']+total-1)),
               "after": after, "detail": log.get('detail', 0), "requested_detail": args.detail,
               "fixture_matches_request": log.get('detail', 0) == args.detail,
               "valid_comparison": valid,
+              "user_input_during_run": user_input,
               "limitations": "Synthetic only. Drift >5%, missing controls or fixture mismatch invalidate comparisons. Present-call times are not displayed-frame times.",
               "aba_drop_pct": round(100 * (1 - during['fps'] / control_fps), 2) if control_fps and during else None,
               "control_drift_pct": round(100 * (after['fps'] / base['fps'] - 1), 2) if base and after else None,
               "fps_drop_pct": round(100 * (1 - during["fps"] / base["fps"]), 1) if base and during else None,
-              "usage": usage, "clip": clip}
+              "usage": usage, "clip": clip, "duplication_probe": probe_report}
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1)
     return report
 
@@ -248,7 +297,9 @@ def main():
                 b, c, k = rep["baseline"] or {}, rep["capture"] or {}, rep["clip"] or {}
                 print(f"{label:<20} {fps:>3}fps  game {b.get('fps')} -> {c.get('fps')} fps ({rep['fps_drop_pct']}%), "
                       f"1% low {b.get('low1_fps')} -> {c.get('low1_fps')}; clip {k.get('size')} repeated {k.get('repeated_pct')}% "
-                      f"freeze {k.get('longest_freeze_ms')} ms jumps {k.get('jumps_over_1_5x_pct')}%", flush=True)
+                      f"freeze {k.get('longest_freeze_ms')} ms jumps {k.get('jumps_over_1_5x_pct')}%; "
+                      f"presentation {rep['presentation_modes_percent']}; valid {rep['valid_comparison']}"
+                      f"{' (user input)' if rep['user_input_during_run'] else ''}", flush=True)
                 time.sleep(3)
     json.dump(results, open(os.path.join(root, "test-output", "overhead", args.tag, "all.json"), "w"), indent=1)
 

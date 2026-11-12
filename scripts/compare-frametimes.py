@@ -37,6 +37,7 @@ def summarize(file, process=None, trim=5.0, cap=0):
             for metric, aliases in {
                 'gpu_time_ms': ['msgputime', 'gputime'],
                 'gpu_busy_ms': ['msgpubusy', 'gpubusy'],
+                'gpu_wait_ms': ['msgpuwait', 'gpuwait'],
                 'cpu_busy_ms': ['mscpubusy', 'cpubusy'],
                 'cpu_wait_ms': ['mscpuwait', 'cpuwait'],
             }.items():
@@ -61,10 +62,18 @@ def summarize(file, process=None, trim=5.0, cap=0):
         raise ValueError('Need at least 300 frames and ten seconds after warmup')
     ordered = sorted(used)
     fps = 1000 * len(used) / sum(used)
+    median = statistics.median(used)
     return dict(frames=len(used), seconds=sum(used)/1000, fps=fps,
         low1_fps=1000/statistics.mean(ordered[-max(1, len(used)//100):]),
+        p95_ms=ordered[int(.95*(len(used)-1))],
         p99_ms=ordered[int(.99*(len(used)-1))],
+        median_ms=median, mean_ms=statistics.mean(used),
+        variance_ms2=statistics.pvariance(used), stddev_ms=statistics.pstdev(used),
+        max_ms=max(used), spikes_over_2x_median=sum(v > 2*median for v in used),
+        spikes_over_8_33ms=sum(v > 1000/120 for v in used),
+        spikes_over_16_67ms=sum(v > 1000/60 for v in used),
         cap_limited=bool(cap and fps >= cap*.95),
+        application=key[0], process_id=key[1],
         selected_swapchain=key[2], groups_seen=len(groups), discarded=discarded,
         interval_column=column,
         optional_frame_metrics={name: dict(mean=statistics.mean(v), p99=sorted(v)[int(.99*(len(v)-1))]) for name,v in metrics.items()})
@@ -73,10 +82,19 @@ def summarize(file, process=None, trim=5.0, cap=0):
 def compare(a1, b, a2):
     controls = statistics.mean([a1['fps'], a2['fps']])
     drift = 100*(a2['fps']/a1['fps']-1)
+    phases = [a1, b, a2]
+    reasons = []
+    if abs(drift) > 5:
+        reasons.append('Control FPS drift exceeds 5%')
+    if any(x['cap_limited'] for x in phases):
+        reasons.append('A phase is within 5% of the configured frame cap')
+    for field in ['application', 'process_id', 'selected_swapchain', 'interval_column']:
+        if len({str(x.get(field, '')).lower() for x in phases}) > 1:
+            reasons.append(f'Phase {field} does not match')
     return dict(before=a1, capture=b, after=a2,
         overhead_percent=100*(1-b['fps']/controls), control_drift_percent=drift,
-        valid_comparison=abs(drift) <= 5 and not any(x['cap_limited'] for x in [a1,b,a2]),
-        limits='Present-call intervals, not displayed FPS. Drift >5% or a frame cap prevents a reliable overhead conclusion. Compare identical scenes and settings; repeat three times.')
+        valid_comparison=not reasons, invalid_reasons=reasons,
+        limits='Present-call intervals, not displayed FPS. This checks CSV comparability only; foreground, scene, idle throttling and settings must also be verified. A cap, >5% drift or mismatched process/swapchain/interval prevents a reliable overhead conclusion. Repeat three times.')
 
 
 if __name__ == '__main__':

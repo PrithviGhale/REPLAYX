@@ -354,6 +354,12 @@ fn main() -> windows::core::Result<()> {
         let cb = cb.unwrap();
         let mut gpu_timer = GpuTimer::new(&device).ok();
         let mut gpu_times = Vec::new();
+        // How Windows actually showed our frames (no ETW needed): composed by
+        // DWM, an overlay/MPO plane, or presented directly (independent flip).
+        // A capture tool that forces composition costs a game GPU time and
+        // latency that a direct-flip-only measurement would not show.
+        let media = swap.cast::<IDXGISwapChainMedia>().ok();
+        let mut presentation = Vec::new();
 
         let start = Instant::now();
         let mut presents: Vec<f64> = Vec::with_capacity(200_000);
@@ -422,6 +428,15 @@ fn main() -> windows::core::Result<()> {
             };
             let _ = swap.Present(0, present_flags);
             presents.push(start.elapsed().as_secs_f64());
+            if presents.len().is_multiple_of(32) {
+                if let Some(media) = &media {
+                    let mut stats = DXGI_FRAME_STATISTICS_MEDIA::default();
+                    if media.GetFrameStatisticsMedia(&mut stats).is_ok() {
+                        presentation
+                            .push(serde_json::json!({"t":t,"mode":stats.CompositionMode.0}));
+                    }
+                }
+            }
         }
         let _ = DestroyWindow(hwnd);
         // QPC-based wall time of the start, so other tools can align windows.
@@ -435,6 +450,9 @@ fn main() -> windows::core::Result<()> {
             "adapter": name, "width": sw, "height": sh, "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
             "fixture_draw_gpu_ms":gpu_times,
+            // DXGI_FRAME_PRESENTATION_MODE: 0 composed, 1 overlay, 2 none
+            // (direct/independent flip), 3 composition failure.
+            "presentation_modes": presentation,
         });
         std::fs::write(&log, serde_json::to_vec(&report).unwrap()).ok();
         println!(
