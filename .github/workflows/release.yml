@@ -2,7 +2,7 @@
 #
 # - Pushing a version tag (v1.2.3 or v1.2.3-alpha.4) builds the installer and the
 #   FFmpeg corresponding-source package and creates a DRAFT release for that tag.
-#   A maintainer checks it (docs/RELEASING.md) and publishes it by hand.
+#   A maintainer checks it (docs/development/RELEASING.md) and publishes it by hand.
 # - Run manually without a tag: a test build only. The installer, checksums and a
 #   source-package report are kept as workflow artifacts; no release is created,
 #   so a run on a branch can never make a release named after the branch.
@@ -13,7 +13,7 @@
 # Signed in-app updates: a release build needs the repository secrets
 #   TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 # (the private half of the key whose public half is in src-tauri/tauri.conf.json;
-# see docs/RELEASING.md). The installer is signed, the signature is verified
+# see docs/development/RELEASING.md). The installer is signed, the signature is verified
 # against the built-in public key, and latest.json is attached to the draft, so
 # installed copies find the update once the release is published. A release
 # without the secret fails early; test builds without it are unsigned.
@@ -118,7 +118,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
-            throw 'The repository secret TAURI_SIGNING_PRIVATE_KEY is missing. Installed copies only accept updates signed with the key whose public half is in src-tauri/tauri.conf.json; see docs/RELEASING.md (Signed updates).'
+            throw 'The repository secret TAURI_SIGNING_PRIVATE_KEY is missing. Installed copies only accept updates signed with the key whose public half is in src-tauri/tauri.conf.json; see docs/development/RELEASING.md (Signed updates).'
           }
       - name: Build installer
         shell: pwsh

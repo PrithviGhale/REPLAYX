@@ -844,7 +844,7 @@ fn summarize_error(text: &str) -> String {
 /// one shared graph FFmpeg runs both on one thread, and waiting for real-time
 /// audio stalled the video chain, which blocked the desktop grabber. With
 /// audio, 57% of frames repeated (0.2.1-alpha.3); separate graphs plus NVENC
-/// lookahead brought it to 0.0-0.28%. See docs/PERFORMANCE.md.
+/// lookahead brought it to 0.0-0.28%. See docs/development/PERFORMANCE.md.
 /// Whether a video filter string starts with its own capture source (no
 /// `-i` input for video).
 pub fn source_in_graph(video_filter: &str) -> bool {
@@ -910,7 +910,7 @@ pub fn source_chain(source: &crate::model::AudioSource) -> String {
     }
 }
 /// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
-/// the defaults for benchmarking only (see scripts/overhead-bench.py).
+/// the defaults for benchmarking only (see scripts/bench/overhead-bench.py).
 #[derive(Debug, Clone)]
 pub struct Tuning {
     /// h264_qsv `low_power`: None = FFmpeg default (auto).
@@ -1313,7 +1313,7 @@ pub struct RatePlan {
 /// Bits a codec needs relative to H.264 for the same picture quality,
 /// measured with VMAF on NVENC (RTX 4070 Laptop) on real Roblox gameplay
 /// and a synthetic game-like scene: AV1 about 25% fewer; HEVC within +-3%
-/// of H.264 with these settings, so it gets no discount (docs/PERFORMANCE.md).
+/// of H.264 with these settings, so it gets no discount (docs/development/PERFORMANCE.md).
 fn codec_factor(codec: &str) -> f64 {
     if codec == "av1" {
         0.75

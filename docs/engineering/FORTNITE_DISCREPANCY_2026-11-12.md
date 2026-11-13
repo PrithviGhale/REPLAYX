@@ -112,7 +112,7 @@ Encoder: Auto. Your NVENC choice is not overridden.
 | Measured | Where |
 | --- | --- |
 | WGC delivered rate, source frame interval, Windows-timestamp → taken latency, empty slots, GPU copy span | `replayx-wgc-profile` (development probe) |
-| Repeated frames and frame-advance jumps in the saved clip | `scripts/gameproxy-check.py` (benchmarks) |
+| Repeated frames and frame-advance jumps in the saved clip | `scripts/bench/gameproxy-check.py` (benchmarks) |
 | Recorder output FPS, output-grid drops/duplicates, encoder speed, video lag | The app (Performance page) |
 
 Not measured in the app, and still `null` in diagnostics: source FPS, source

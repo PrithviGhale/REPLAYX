@@ -73,7 +73,7 @@ with the drift, input and coverage checks described in
      `--workers`, `--windowed` and `--topmost`.
    - The benchmark gained raw-FFmpeg stage configurations, per-phase CPU clock
      telemetry, and focus and coverage guards.
-   - `scripts/fortnite-session.py` is the single consolidated real-game
+   - `scripts/bench/fortnite-session.py` is the single consolidated real-game
      measurement.
 
 ## 4. Before and after (synthetic; not game results)
@@ -121,7 +121,7 @@ From the repository root, with Fortnite already running in the same
 Creative scene:
 
 ```powershell
-py -3 scripts/fortnite-session.py --presentmon test-output\fortnite-live-alpha8\PresentMon-2.6.0-x64.exe --cap 360
+py -3 scripts/bench/fortnite-session.py --presentmon test-output\fortnite-live-alpha8\PresentMon-2.6.0-x64.exe --cap 360
 ```
 
 - Run it from an **administrator** terminal if you want frame times. That is

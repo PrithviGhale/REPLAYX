@@ -28,13 +28,13 @@
 ## Features
 
 - **Instant Replay.** Keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the moment is a clip, usually within a second.
-- **Hardware recording.** NVIDIA, Intel and AMD encoders, H.264, HEVC or AV1, 720p–4K output. Synthetic workload measurements are in [Performance](docs/PERFORMANCE.md); real-game overhead remains under investigation.
+- **Hardware recording.** NVIDIA, Intel and AMD encoders, H.264, HEVC or AV1, 720p–4K output. Synthetic workload measurements are in [Performance](docs/development/PERFORMANCE.md); real-game overhead remains under investigation.
 - **Clips sorted by game.** 140 games recognised automatically, each with its own icon, in a library you can search, sort and export to MP4.
 - **Clean voice, separate tracks.** The Voice Enhancer removes background noise; game, chat and microphone each get their own track.
 - **Playtime tracking.** See how long you play each game, by day, week or month, with charts.
 - **Private by design.** Everything stays on your PC: no account, no telemetry, no uploads.
 
-[See every feature →](docs/FEATURES.md)
+[See every feature →](docs/guide/FEATURES.md)
 
 ## Install
 
@@ -42,7 +42,7 @@
 2. Run it. It installs for your account only, without administrator rights.
 3. Builds aren't code-signed yet: if SmartScreen appears, choose **More info → Run anyway**, ideally after checking the file against the release's `SHA256SUMS.txt`.
 
-Requires Windows 10 or 11 (64-bit); a GPU with hardware encoding is recommended. [Full setup guide →](docs/GETTING_STARTED.md)
+Requires Windows 10 or 11 (64-bit); a GPU with hardware encoding is recommended. [Full setup guide →](docs/guide/GETTING_STARTED.md)
 
 ## How Instant Replay works
 
@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File scripts/prepare-bundle.ps1   # pinned, 
 npx tauri dev                              # or: npx tauri build
 ```
 
-Requires Node 24, the Rust MSVC toolchain, the Visual Studio C++ build tools with a Windows SDK, and WebView2. `scripts/check.ps1` runs everything CI runs. Details: [Building](docs/BUILDING.md).
+Requires Node 24, the Rust MSVC toolchain, the Visual Studio C++ build tools with a Windows SDK, and WebView2. `scripts/check.ps1` runs everything CI runs. Details: [Building](docs/development/BUILDING.md).
 
 ## Known limitations
 
@@ -90,15 +90,15 @@ Requires Node 24, the Rust MSVC toolchain, the Visual Studio C++ build tools wit
 - Exclusive full-screen games can hide REPLAYX's on-screen notices (recording itself is not affected).
 - Builds are not code-signed yet.
 
-More: [Known limitations](docs/KNOWN_LIMITATIONS.md).
+More: [Known limitations](docs/guide/KNOWN_LIMITATIONS.md).
 
 ## Learn more
 
-[Documentation](docs/README.md) · [FAQ](docs/FAQ.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build from source](docs/BUILDING.md) · [Report a bug](https://github.com/PrithviGhale/REPLAYX/issues/new/choose) · [Contributing](CONTRIBUTING.md)
+[Documentation](docs/README.md) · [FAQ](docs/guide/FAQ.md) · [Troubleshooting](docs/guide/TROUBLESHOOTING.md) · [Build from source](docs/development/BUILDING.md) · [Report a bug](https://github.com/PrithviGhale/REPLAYX/issues/new/choose) · [Contributing](.github/CONTRIBUTING.md)
 
 ---
 
 > [!NOTE]
-> **REPLAYX is in alpha.** It works well on the PCs it has been tested on, but it hasn't been used on many yet. See the [known limitations](docs/KNOWN_LIMITATIONS.md), and please report anything that goes wrong.
+> **REPLAYX is in alpha.** It works well on the PCs it has been tested on, but it hasn't been used on many yet. See the [known limitations](docs/guide/KNOWN_LIMITATIONS.md), and please report anything that goes wrong.
 
 REPLAYX is [MIT-licensed](LICENSE). It ships an LGPL build of FFmpeg, whose source is published with every release, and other open-source components listed in the [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -1,5 +1,5 @@
 # Builds the FFmpeg corresponding-source package that every public REPLAYX
-# release must carry (see THIRD_PARTY_NOTICES.md and docs/RELEASING.md):
+# release must carry (see THIRD_PARTY_NOTICES.md and docs/development/RELEASING.md):
 #   1. FFmpeg source at the pinned commit + FFmpeg-Builds recipes (../ffmpeg-source.ps1)
 #   2. a download plan read from the recipes as text (never executed)
 #   3. every library's source at its pinned commit/tag/revision (git archive;

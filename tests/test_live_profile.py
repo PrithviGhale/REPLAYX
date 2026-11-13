@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-spec = importlib.util.spec_from_file_location('live_profile', Path(__file__).parents[1]/'scripts/live-game-profile.py')
+spec = importlib.util.spec_from_file_location('live_profile', Path(__file__).parents[1]/'scripts/bench/live-game-profile.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 

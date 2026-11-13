@@ -54,8 +54,8 @@ These confirm what actually ran.
 ## Compare
 
 ```powershell
-py -3 scripts/compare-frametimes.py A1.csv B1.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360
-py -3 scripts/compare-frametimes.py A2.csv B2.csv A3.csv --process FortniteClient-Win64-Shipping.exe --cap 360
+py -3 scripts/bench/compare-frametimes.py A1.csv B1.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360
+py -3 scripts/bench/compare-frametimes.py A2.csv B2.csv A3.csv --process FortniteClient-Win64-Shipping.exe --cap 360
 ```
 
 These report sustained FPS, 1% lows, p95/p99 frame times, control drift and a

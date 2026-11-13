@@ -60,8 +60,8 @@ stays at about 10–14%.
 | `REPLAYX_VIDEO_TUNING=capture_api=wgc` | Benchmark switch: REPLAYX's real pipeline with FFmpeg's `gfxcapture` (the pinned n9.0.2 build includes it) instead of `ddagrab`. |
 | Setting `capture_api` (`"dda"` default, `"wgc"`) | User-facing opt-in. Details below. |
 | `replayx-gameproxy --windowed 1 --topmost 1` | 1280x720 windowed workload. Topmost keeps the fixture above other windows when Windows refuses it the foreground. |
-| `scripts/overhead-bench.py` | Additions listed below. |
-| `scripts/capture-matrix.py --capture-api wgc` | Codec and region matrix through WGC. |
+| `scripts/bench/overhead-bench.py` | Additions listed below. |
+| `scripts/bench/capture-matrix.py --capture-api wgc` | Codec and region matrix through WGC. |
 
 `replayx-wgc-profile` uses only documented WGC/Direct3D 11 APIs:
 
@@ -85,7 +85,7 @@ The `capture_api` setting:
   on the Performance page.
 - Exposes `Status.capture_api`.
 
-`scripts/overhead-bench.py` gains:
+`scripts/bench/overhead-bench.py` gains:
 
 - WGC configurations, counterbalanced order and p95/stdev frame times.
 - Input, foreground/coverage, GPU-clock and drift invalidation.

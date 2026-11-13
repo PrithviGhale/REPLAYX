@@ -12,9 +12,9 @@ Run from the repository root. Python scripts use only the standard library and t
 | `prepare-bundle.ps1` | Copies the runtime, licences and notices into the installer resources |
 | `updater-manifest.ps1` | Writes `latest.json` for signed in-app updates (release workflow) |
 
-## Measurement and testing
+## Measurement and testing (`bench/`)
 
-These capture the screen or start encoders. Run them only on a free desktop, never while someone is playing.
+In `scripts/bench/`, for example `python -I scripts/bench/motion-check.py CLIP`. These capture the screen or start encoders. Run them only on a free desktop, never while someone is playing.
 
 | Script | Measures |
 | --- | --- |

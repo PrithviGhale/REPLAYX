@@ -1,6 +1,6 @@
 import logo from './assets/replayx-logo.png';
 
-/** REPLAYX branding in one place (see docs/BRANDING.md): this mark, the
+/** REPLAYX branding in one place (see docs/development/BRANDING.md): this mark, the
  * BRAND-MARK block in index.html (startup screen), the app icons generated
  * from assets/branding/replayx-logo-1024.png (`npx tauri icon`) and the README banner. */
 export const BRAND = {

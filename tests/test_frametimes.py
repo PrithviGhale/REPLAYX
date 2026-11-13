@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('frametimes', Path(__file__).parents[1]/'scripts/compare-frametimes.py')
+spec = importlib.util.spec_from_file_location('frametimes', Path(__file__).parents[1]/'scripts/bench/compare-frametimes.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 

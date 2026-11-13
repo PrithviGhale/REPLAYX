@@ -271,7 +271,7 @@ Follow [FORTNITE_ABA.md](FORTNITE_ABA.md). In short:
    - A2: replay off.
 4. Repeat the whole sequence three times.
 5. Compare with
-   `py -3 scripts/compare-frametimes.py A1.csv B.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360`.
+   `py -3 scripts/bench/compare-frametimes.py A1.csv B.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360`.
 6. **Also check PresentMon's `PresentMode` column.** If A1/A2 show "Hardware:
    Independent Flip" or "Hardware Composed" and B shows "Composed: Flip", the
    composition effect measured here applies to Fortnite too.

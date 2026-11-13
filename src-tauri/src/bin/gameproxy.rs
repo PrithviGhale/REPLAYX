@@ -6,8 +6,8 @@
 //! display, so frames take the same path as a game's: rendered on the
 //! discrete GPU, presented through the display GPU. Every frame carries its
 //! render time as a 24-bit code (0.25 ms units) in the top-left blocks, at the
-//! same positions as scripts/motion-fixture.py, so recordings can be analysed
-//! frame by frame (scripts/gameproxy-check.py). Its own frame times are
+//! same positions as scripts/bench/motion-fixture.py, so recordings can be analysed
+//! frame by frame (scripts/bench/gameproxy-check.py). Its own frame times are
 //! written to --log (FPS, 1% and 0.1% lows).
 //!
 //! usage: replayx-gameproxy --seconds 30 --log out.json [--iters 200] [--cpu-us 0]

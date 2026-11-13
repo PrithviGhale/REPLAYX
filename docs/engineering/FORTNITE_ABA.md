@@ -20,7 +20,7 @@ overhead or an improvement over the earlier build.
 4. Export each phase to its own CSV. Compare using:
 
    ```powershell
-   py -3 scripts/compare-frametimes.py A1.csv B.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360
+   py -3 scripts/bench/compare-frametimes.py A1.csv B.csv A2.csv --process FortniteClient-Win64-Shipping.exe --cap 360
    ```
 
    The script reads files only. It chooses the dominant swapchain for that

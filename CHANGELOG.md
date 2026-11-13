@@ -32,7 +32,7 @@ Not published. No Fortnite FPS improvement or ShadowPlay-equivalent overhead is 
 
 ## 0.3.1-alpha.7 - local validation build
 
-Not published. Built and tested locally; see docs/VALIDATION.md.
+Not published. Built and tested locally; see docs/development/VALIDATION.md.
 
 - **In-app updates from GitHub Releases.** REPLAYX checks for a newer version shortly after it starts, then every 6 hours, and when you press *Check Now*. A violet dot on **Settings** and a badge on the **Updates** tab show when one is available, and a pop-up offers *Update Now* / *Not Now* with the release's highlights (dismissed versions are not offered again for three days; in the tray a small notice appears once instead, never over a game). Downloads show real progress in bytes; the package is verified against REPLAYX's publisher key before it can install. Modes: **Manual**, **Notify me** (default) and **Auto update**, with switches for checking, the schedule, notifications, automatic download and automatic install (which waits for an idle PC, no game in front, and nothing recording or saving). An install never interrupts a recording, a save, an export or a recovery; Automatic installs wait for Instant Replay to stop. Explicit manual installation may pause and resume replay after a warning. Settings, clips and playtime are kept.
 - **Signed releases.** A dedicated update signing key; the release workflow signs the installer, verifies the signature and its version against the built-in public key, and publishes `latest.json`. Releases without a valid signature cannot be drafted. Older or unsigned packages, packages signed by another key, and packages offered under a different version than they were signed for are refused by the app.
@@ -100,7 +100,7 @@ Not published. User-facing notes: [docs/release-notes/v0.3.1-alpha.1.md](docs/re
 - **Alt+F10 (and any shortcut another program owns):** pick it from *Common…* even when the key press is swallowed (NVIDIA's Instant Replay uses Alt+F10). REPLAYX checks at once whether Windows will give it the shortcut; if another app owns it, it says *Alt+F10 is already used by another application. Change that application's hotkey or choose another shortcut.* and keeps your previous working shortcut. *Try again* re-registers after you free it.
 - **Overlay:** about 19% smaller, a little more transparent; new options for the recording indicator and a recording timer.
 - **Presets:** Instant Replay *Short clips*, *Balanced* (recommended) and *Long sessions* with real disk estimates; *Recommended* marks the video preset suited to your hardware and the *Clear* voice preset.
-- **Startup:** smoother hand-off from the startup screen to the dashboard; branding is centralised so the approved logo (pending) can be applied in one pass (docs/BRANDING.md).
+- **Startup:** smoother hand-off from the startup screen to the dashboard; branding is centralised so the approved logo (pending) can be applied in one pass (docs/development/BRANDING.md).
 
 ## 0.3.0-alpha.1 — Voice Enhancer, startup screen, first-run tour, release preparation
 
@@ -114,7 +114,7 @@ First public preview candidate (not yet published). User-facing notes: [docs/rel
 - **Startup screen.** Painted from the first HTML byte with the REPLAYX mark, a subtle violet glow and progress line; shows only steps that are really running (interface, settings, engine check); disappears as soon as the app is ready (no minimum duration); respects reduced motion; cannot trap the window. Measured: no startup delay added (interface mounted 455 ms before vs 427 ms after, warm; app ready at 483 ms).
 - **First-run tour.** Twelve short steps spotlighting the real components (Record, Instant Replay, Save replay, video, microphone, Voice Enhancer, overlay, clips, game detection, tray, settings). Dims the rest, follows scrolling and resizing, Back/Next/Skip, Esc and arrow keys, "Step n of 12"; never presses anything; remembered once finished or skipped; *Settings → Replay tutorial*.
 - README rewritten with current screenshots; release notes, third-party notices (RNNoise/nnnoiseless) and release workflow prepared locally.
-- Developer tools: `replayx-cli voice-eval`, `scripts/voice-eval.ps1`, `dev/startup-bench.mjs`.
+- Developer tools: `replayx-cli voice-eval`, `scripts/bench/voice-eval.ps1`, `dev/startup-bench.mjs`.
 
 ## 0.2.2-alpha.2 — redesigned Audio page, icon overlay
 
@@ -125,7 +125,7 @@ First public preview candidate (not yet published). User-facing notes: [docs/rel
 
 ## 0.2.2-alpha.1 — quality per GB, codec choice, microphone setup, in-game overlay, tray
 
-Not yet verified by a person in a real game: the microphone listening test, gameplay with the new presets and codecs, and the overlay over a full-screen game are still to do (see docs/VALIDATION.md). Everything below that says "measured" was measured on the development laptop (RTX 4070 Laptop GPU, Intel Quick Sync, Advanced Optimus).
+Not yet verified by a person in a real game: the microphone listening test, gameplay with the new presets and codecs, and the overlay over a full-screen game are still to do (see docs/development/VALIDATION.md). Everything below that says "measured" was measured on the development laptop (RTX 4070 Laptop GPU, Intel Quick Sync, Advanced Optimus).
 
 - **Smaller files at the same quality.** NVENC presets now use constant quality capped at 1.5× the preset rate instead of a fixed average. Measured with VMAF on 20 s of real Roblox gameplay: Balanced H.264 CQ 28 averaged 14.7 Mb/s at VMAF 97.6, against 16.7 Mb/s and 97.9 for the previous 16 Mb/s VBR (12% smaller, same picture); in a very detailed synthetic scene the cap holds it at 24 Mb/s. Quick Sync, AMD and software encoders keep VBR at the preset rate. Game-FPS cost under a GPU-heavy test load: 2.9% (H.264), 0.0% repeated frames.
 - **Codec choice: Automatic (H.264), H.264, HEVC, AV1.** Only codecs this PC can encode are offered (each is probed). Automatic always records H.264 because it plays everywhere; REPLAYX never switches codec by itself. If the GPU driving the display cannot encode the chosen codec (for example AV1 on a display run by an Intel GPU without AV1), capture uses H.264 and the app says so. Measured: AV1 CQ 34 reached VMAF 97.7 at 12.5 Mb/s (about 25% smaller than H.264 at equal quality), 3.0% game-FPS cost, 0.14% repeated frames. HEVC was within ±3% of H.264's size at equal quality on this GPU, so it gets no size discount; it is offered for devices that prefer it.
@@ -137,11 +137,11 @@ Not yet verified by a person in a real game: the microphone listening test, game
 - **In-game status overlay.** A small translucent pill in a corner of the display the game is on: Instant Replay (off, starting, on, saving, error), a red recording dot with timer that appears only once video is actually being written, and the microphone (off, muted, ready, live, error). Click-through, never takes focus, no injection or hooks, and excluded from capture (Windows display affinity), so it never appears in clips; the "game detected" notice is now excluded too. Settings: on/off, corner, opacity, compact, which items, games only or always. Like every desktop window it shows over windowed and borderless games, not exclusive full-screen ones.
 - **Tray.** The menu shows the real state: Instant Replay on/off (check mark), Save replay (only while the buffer runs), Start/Stop recording with its time, the microphone state, Open clips folder, Settings, Quit. Quit (and closing the window when *Minimize to tray when closing* is off) asks first while a recording or a save is in progress; quitting stops capture, finalizes the recording and ends the encoder. The first time the window closes to the tray, a one-time notice says REPLAYX is still running.
 - **Fixed: the app's content area did not scroll** with the mouse wheel or touchpad on any page taller than the window (21 of 21 page/size combinations; now 21 of 21 scroll, checked by `dev/scroll-check.mjs`).
-- Developer tools: `scripts/quality-bench.py` (VMAF/SSIM/PSNR per encoder configuration on real or synthetic footage), `replayx-cli overlay-test` (proves overlay exclusion on Desktop Duplication frames), codec/preset configs in `scripts/overhead-bench.py`. The UI test scripts now use an anonymous headless Chrome: a new Edge profile signed in with the Windows account and synced the user's extensions into the test browser.
+- Developer tools: `scripts/bench/quality-bench.py` (VMAF/SSIM/PSNR per encoder configuration on real or synthetic footage), `replayx-cli overlay-test` (proves overlay exclusion on Desktop Duplication frames), codec/preset configs in `scripts/bench/overhead-bench.py`. The UI test scripts now use an anonymous headless Chrome: a new Edge profile signed in with the Windows account and synced the user's extensions into the test browser.
 
 ## 0.2.1-alpha.3 — lighter capture on gaming laptops, real 1920×1080, sharper presets, recovery fixes
 
-Game-FPS and smoothness improvements in this build are **not yet measured in a real game**. The measurements so far, and how to run the comparison, are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+Game-FPS and smoothness improvements in this build are **not yet measured in a real game**. The measurements so far, and how to run the comparison, are in [docs/development/PERFORMANCE.md](docs/development/PERFORMANCE.md).
 
 - **Fixed: stutter in every recording with sound.** Recordings with audio repeated 57–84% of their frames (a user's Roblox clip showed about 12 new pictures per second while claiming 60 fps). Silent test recordings were smooth, which is why earlier checks missed it. Cause: video and audio shared one FFmpeg filter graph, so waiting for real-time audio stalled the video chain. On top of that, the deliberately held-back audio (the crackle fix) trailed the video by more than FFmpeg's scheduling tolerance, so the desktop grabber was paused again and again. Video and audio now run in separate graphs, and NVENC holds about 1/3 s of video for rate-control lookahead, so video never runs ahead of audio. Measured with system audio under a ~180 FPS game load: 57% → 0.0–0.28% repeated frames. Desktop capture itself delivered 122–133 new frames per second during Roblox.
 - **Smaller files, better picture.** The Balanced preset is now 16 Mb/s at 1080p60 (was 28), matching what NVIDIA's recorder produced on the same laptop (16.5 Mb/s). NVENC uses preset p5, tune hq, spatial AQ and lookahead to spend the bits better.
@@ -157,7 +157,7 @@ Game-FPS and smoothness improvements in this build are **not yet measured in a r
 - **Instant Replay switch.** A real on/off switch (Off, Starting, On, Stopping, Error) in the header, on Home and on the Instant Replay page, driven by the engine's state.
 - **The window costs less while you play.** When REPLAYX is hidden behind a game, it polls the engine every 2 s instead of four times a second.
 - Performance page: encoder speed, video lag, target bitrate and the encoder's low-power state.
-- Developer tools: `replayx-gameproxy` (game-like GPU workload with time-coded frames), `scripts/overhead-bench.py`, `scripts/gameproxy-check.py`.
+- Developer tools: `replayx-gameproxy` (game-like GPU workload with time-coded frames), `scripts/bench/overhead-bench.py`, `scripts/bench/gameproxy-check.py`.
 
 ## 0.2.1-alpha.2 — Record no longer freezes the app; faster starts; interrupted-session fixes
 
@@ -168,7 +168,7 @@ Game-FPS and smoothness improvements in this build are **not yet measured in a r
 - **Honest state.** The app says *Starting recording…* within about 60 ms of the click and *Recording* only once the encoder writes frames. The recording timer counts the recording, not the capture session. The Record button becomes *Cancel* while a recording is starting.
 - **Fixed: "interrupted sessions" piling up.** Stopping replay or recording never deleted the replay buffer, so every stop and every exit added an "interrupted session" on the next launch; frozen/killed processes added more, including empty folders. Stopped buffers are now deleted (retrying if a file is briefly in use), empty folders are not counted, unreadable leftovers are set aside after recovery so a session is never offered twice, and interrupted sessions can be discarded to the Recycle Bin. Footage left by crashes and forced closes is still kept for recovery.
 - **Fixed: pressing Stop/Cancel during a slow start waited for the start to finish** (every action was serialized behind an update guard).
-- New diagnostics: startup stage timings on the Performance page; `replayx-cli start-bench`; `scripts/ui-record-check.mjs` (drives the real window and measures whether it answers Windows messages); `scripts/ui-delete-check.mjs`; `scripts/start-latency.py`.
+- New diagnostics: startup stage timings on the Performance page; `replayx-cli start-bench`; `scripts/bench/ui-record-check.mjs` (drives the real window and measures whether it answers Windows messages); `scripts/bench/ui-delete-check.mjs`; `scripts/bench/start-latency.py`.
 
 ## 0.2.1-alpha.1 — smooth 60 fps, fast saves, game folders, working Delete
 
@@ -212,7 +212,7 @@ Game-FPS and smoothness improvements in this build are **not yet measured in a r
 - Fixed a 21ms audio/video timestamp hole at the first 2s seam of clips containing a session's first segment.
 - Adaptive delivery holdback for high-latency devices; 100ms WASAPI buffer for scheduler stalls under load.
 - New per-source audio counters (discontinuities, drift correction) in Performance and CLI reports.
-- CLI: `device-formats`, `audio-test ... application PID`, `capture-test ... app:PID`; exact f32 producer output saved for analysis. Added `scripts/audio-tone.py` and `scripts/audio-clicks.py`.
+- CLI: `device-formats`, `audio-test ... application PID`, `capture-test ... app:PID`; exact f32 producer output saved for analysis. Added `scripts/bench/audio-tone.py` and `scripts/bench/audio-clicks.py`.
 - 12 new regression tests (45 total).
 
 
