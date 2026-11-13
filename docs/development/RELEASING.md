@@ -12,7 +12,7 @@ Releases are cut by hand from `main`. GitHub Actions builds them, but nothing is
 | Beta | `0.3.0-beta.1` | Feature-complete for the line; bug fixing |
 | Stable | `1.0.0` | Supported release; settings and file layout are stable |
 
-The README's download button and install step name the newest release's installer directly (`.../releases/download/vX.Y.Z/REPLAYX_X.Y.Z_x64-setup.exe`). Update them when a release is **published**, not before. Alpha/beta tags must be marked prerelease. Update discovery is independent of GitHub's Latest badge.
+The README's download button and install step link directly to `.../releases/download/vX.Y.Z/REPLAYX.exe`. Public assets are `REPLAYX.exe`, `latest.json` and `FFmpeg-source.tar`. Checksums appear in the release notes. GitHub also provides its standard source-code archives. Update them when a release is **published**, not before. Alpha/beta tags must be marked prerelease. Update discovery is independent of GitHub's Latest badge.
 
 
 The version lives in six places that must match: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`, plus `VERSION` in `src/api.ts`. The release workflow refuses a tag that does not match `package.json`.
@@ -56,7 +56,7 @@ Installed copies of REPLAYX update themselves from GitHub Releases (Settings →
      ```
    - This is separate from Windows code signing (Authenticode), which REPLAYX does not have yet: SmartScreen warnings are unaffected.
 2. **The signed installer.** A release build runs `tauri build --config src-tauri/tauri.updater.conf.json`, which also writes `REPLAYX_<version>_x64-setup.exe.sig`. The workflow then verifies that signature against the built-in public key and for exactly the release's version (`scripts/verify-update-signature.mjs`), and fails if it doesn't verify. A release build without the secret fails before building.
-3. **The manifest.** `scripts/updater-manifest.ps1` writes `latest.json` (version, highlights from the release notes, download address, signature). The draft step checks that it points at exactly this release's installer and carries the same signature, then attaches `latest.json` and the `.sig` to the draft.
+3. **The manifest.** `scripts/updater-manifest.ps1` writes `latest.json` (version, highlights from the release notes, download address, signature). The draft step checks that it points at exactly this release's installer and carries the same signature, then attaches `latest.json` to the draft. Its embedded signature verifies the installer; the standalone `.sig` stays in build artifacts.
 
 The app queries the repository Releases API (up to the 100 most recent published releases), selects the highest compatible semantic version with a trusted `latest.json` asset, then checks that tag's manifest. Drafts and incorrectly labeled prereleases are rejected. Stable builds follow stable releases; alpha/beta builds follow the same named channel or stable. GitHub errors are failed checks with backoff, never proof that the app is up to date.
 

@@ -9,7 +9,7 @@
 
 ## Install
 
-1. Open the [**Releases**](https://github.com/PrithviGhale/REPLAYX/releases) page and download `REPLAYX_<version>_x64-setup.exe` from the newest release. You don't need the `ffmpeg-corresponding-source` file; it's the source code of the bundled FFmpeg, published for licence reasons.
+1. Open the [**Releases**](https://github.com/PrithviGhale/REPLAYX/releases) page and download `REPLAYX.exe` from the newest release. You don't need the `ffmpeg-corresponding-source` file; it's the source code of the bundled FFmpeg, published for licence reasons.
 2. *(Recommended)* Check the download against `SHA256SUMS.txt` from the same release:
    ```powershell
    Get-FileHash .\REPLAYX_*_x64-setup.exe

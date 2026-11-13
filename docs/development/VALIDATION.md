@@ -18,6 +18,8 @@ The corresponding-source archive is reused from Alpha.6 because its runtime pin 
 
 The installed owner executable still matches the original Alpha.4 hash. The settings and update-state files differ from the older 06:19 UTC baseline, with modification times of 16:21 and 15:17 UTC respectively, both before this release preparation began at 18:40 UTC. The library index and absent playtime file match the older baseline. No owner-profile application or installer was launched and user recordings were not accessed during release preparation. This does not provide new installed-app or hardware qualification.
 
+The owner approved a simpler download layout after publication. Public assets now use `REPLAYX.exe`, `latest.json` and `FFmpeg-source.tar`. The installer bytes and SHA-256 are unchanged. The updated public manifest points to `REPLAYX.exe` and its embedded exact-version signature verifies the downloaded installer. Standalone signature/checksum assets were removed after verification; the checksum remains in the release notes and build records.
+
 # Validation — 0.3.1-alpha.4 (November 9, 2026)
 
 Game icons for installed games, Open/hide shortcut, text-fit fixes. Builds ran at below-normal priority; the running app was not touched.

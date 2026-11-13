@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.9/REPLAYX_0.3.1-alpha.9_x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.9-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.9/REPLAYX.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.9-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
   <br>
   <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.9">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
 </p>
@@ -60,9 +60,9 @@ Details: [alpha.9 release notes](docs/release-notes/v0.3.1-alpha.9.md).
 
 ## Install
 
-1. Download **`REPLAYX_0.3.1-alpha.9_x64-setup.exe`** with the button above.
+1. Download **`REPLAYX.exe`** with the button above.
 2. Run it. It installs for your account only, without administrator rights.
-3. Builds aren't Windows code-signed yet. Compare the file with the release's `SHA256SUMS.txt`. If SmartScreen or Windows Security blocks it, stop and review the warning with security protections enabled.
+3. Builds aren't Windows code-signed yet. Compare the file with the SHA-256 shown on the release page. If SmartScreen or Windows Security blocks it, stop and review the warning with security protections enabled.
 
 Requires Windows 10 or 11 (64-bit). A GPU with hardware encoding is recommended. [Full setup guide →](docs/guide/GETTING_STARTED.md)
 

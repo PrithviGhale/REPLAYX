@@ -19,7 +19,7 @@ No. There's no telemetry, analytics or upload. Playtime, settings and clips stay
 REPLAYX works well on the machines it has been tested on, but it hasn't been used on many PCs yet. Read the [known limitations](KNOWN_LIMITATIONS.md) before relying on it for something you can't replay.
 
 **Why does Windows warn about the installer?**
-The builds aren't Windows code-signed yet. Check the file against the release's `SHA256SUMS.txt`. If Windows blocks it, stop and review the warning with security protections enabled.
+The builds aren't Windows code-signed yet. Check the file against the SHA-256 shown on the release page. If Windows blocks it, stop and review the warning with security protections enabled.
 
 **What is the large `ffmpeg-corresponding-source` file on the release page?**
 The source code of the FFmpeg build REPLAYX ships, with the libraries built into it and their licence texts. Its licences require it to be published with each release. You don't need it to install or use REPLAYX.

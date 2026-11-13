@@ -41,7 +41,7 @@ if (!$notes) {
     platforms = [ordered]@{
         'windows-x86_64' = [ordered]@{
             signature = (Get-Content $sig -Raw).Trim()
-            url       = "https://github.com/$Repository/releases/download/$Tag/$($installer.Name)"
+            url       = "https://github.com/$Repository/releases/download/$Tag/REPLAYX.exe"
         }
     }
 } | ConvertTo-Json -Depth 5 | ForEach-Object {

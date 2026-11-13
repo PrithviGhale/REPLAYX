@@ -242,7 +242,13 @@ jobs:
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::A release for $TAG appeared during the build; nothing uploaded."; exit 1
           fi
-          sha256sum *.exe ffmpeg-corresponding-source-*.tar > SHA256SUMS.txt
+          # User-facing downloads have simple names. The update signature is
+          # embedded in latest.json; retain its standalone file for build checks.
+          original_exe=$(ls *.exe)
+          mv "$original_exe" REPLAYX.exe
+          mv "$original_exe.sig" REPLAYX.exe.sig
+          mv ffmpeg-corresponding-source-*.tar FFmpeg-source.tar
+          sha256sum REPLAYX.exe FFmpeg-source.tar > SHA256SUMS.txt
           cat SHA256SUMS.txt
           notes="../docs/release-notes/$TAG.md"; [[ -f "$notes" ]] || notes=../CHANGELOG.md
           stage=""; [[ "$TAG" == *-alpha* ]] && stage=" — Alpha"; [[ "$TAG" == *-beta* ]] && stage=" — Beta"
@@ -257,5 +263,16 @@ jobs:
           [[ "$(jq -r '.platforms["windows-x86_64"].url' latest.json)" == "$want" ]] || { echo "::error::latest.json does not point at $want"; exit 1; }
           [[ "$(jq -r '.platforms["windows-x86_64"].signature' latest.json)" == "$(tr -d '\r\n' < "$exe.sig")" ]] || { echo "::error::latest.json carries a different signature than $exe.sig"; exit 1; }
           [[ "v$(jq -r '.version' latest.json)" == "$TAG" ]] || { echo "::error::latest.json is for another version"; exit 1; }
-          files=("$exe" SHA256SUMS.txt ffmpeg-corresponding-source-*.tar "$exe.sig" latest.json)
+          display_notes=release-notes.md
+          {
+            printf '## [Download REPLAYX for Windows](%s)\n\n' "$want"
+            printf '**Download REPLAYX.exe to install the app.** Other assets support automatic updates and FFmpeg licensing.\n\n'
+            cat "$notes"
+            printf '\n\n## File checksums\n\n```text\n'
+            cat SHA256SUMS.txt
+            printf '```\n'
+          } > "$display_notes"
+          flags=(--draft --verify-tag --title "REPLAYX $TAG$stage" --notes-file "$display_notes")
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+          files=("$exe" FFmpeg-source.tar latest.json)
           gh release create "$TAG" -R "$GITHUB_REPOSITORY" "${flags[@]}" "${files[@]}"
