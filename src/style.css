@@ -695,9 +695,9 @@ details p { margin-top: 8px; }
 .game-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .game-head h2 { margin: 0; font-size: 22px; }
 .game-head .game-icon { border-radius: 16px; }
-.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.stat-grid .stat { padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 4px; }
-.stat-grid .stat strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.game-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.game-stats .stat { padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 4px; }
+.game-stats .stat strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .sessions li { display: grid; grid-template-columns: 1fr 80px 80px auto; gap: 10px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .mini-clips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -834,3 +834,5 @@ button.en-title:hover { color: #fff; text-decoration: underline; text-underline-
 
 /* Hidden window (tray, minimised): pause every animation. */
 .page-hidden *, .page-hidden *::before, .page-hidden *::after { animation-play-state: paused !important; }
+@media (max-width: 900px) { .game-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.empty-actions { display: flex; justify-content: center; margin-top: 14px; }

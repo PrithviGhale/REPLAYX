@@ -1,4 +1,6 @@
 import { useApp } from '../context';
+import { ErrorNotice } from '../ErrorNotice';
+import { describeError } from '../errors';
 import { activeOf, useHistory, useStatus, useUiStart } from '../store';
 import { bytes, duration, encoderName } from '../format';
 import { Badge, Card, Empty, Sparkline, Stat } from '../ui';
@@ -39,7 +41,7 @@ export function PerformancePage() {
   return (
     <Section>
       <DiagnosticReport />
-      <p className="muted small">Capture backend: {s.capture || 'Not started'}. {s.error ? `Last capture error: ${s.error}` : 'No current capture error.'}</p>
+      {s.error && <ErrorNotice error={describeError(s.error)} />}
       {!active && <div className="banner info">Start Instant Replay or a recording to see live measurements. Nothing here is estimated.</div>}
       {active && s.speed > 0 && (s.speed < 0.97 || s.lag > 2000) && (
         <div className="banner warn" role="alert">The encoder is not keeping up ({s.speed.toFixed(2)}× real time, video {(s.lag / 1000).toFixed(1)} s behind). Expect stutter; capture stops if it falls 8 s behind. Lower the frame rate or resolution, or choose the Performance preset.</div>
