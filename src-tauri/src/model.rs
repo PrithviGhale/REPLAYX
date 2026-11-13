@@ -454,8 +454,8 @@ impl Settings {
     ///   write over it this session.
     /// - A damaged file (not valid JSON, or invalid values) is set aside
     ///   under a new name that is never reused, so no earlier copy is ever
-    ///   replaced. If it can't be moved, an exact copy is kept instead. If
-    ///   neither works, it is left untouched and must not be written over.
+    ///   replaced. If it can only be copied, the original remains protected
+    ///   from settings writes until restart because another writer may change it.
     ///
     /// In every case REPLAYX starts with its defaults.
     pub fn load_or_recover(path: &Path) -> (Self, Option<SettingsProblem>) {
@@ -474,7 +474,15 @@ impl Settings {
             Err(LoadError::Damaged(e, bytes)) => {
                 let technical = format!("{e:#}");
                 match set_aside(path, &bytes, stamp, names) {
-                    Ok(kept) => SettingsProblem::Damaged {
+                    Ok(SettingsBackup::Moved(kept)) => SettingsProblem::Damaged {
+                        backup: kept
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                        technical,
+                    },
+                    Ok(SettingsBackup::Copied(kept)) => SettingsProblem::DamagedCopied {
                         backup: kept
                             .file_name()
                             .unwrap_or_default()
@@ -535,6 +543,9 @@ pub enum SettingsProblem {
     /// The file was damaged. It was set aside as `backup` (next to it, in the
     /// same folder); the defaults are in use and saving is safe.
     Damaged { backup: String, technical: String },
+    /// A snapshot was copied, but the original remains in place and may
+    /// change independently. Keep this session read-only until restart.
+    DamagedCopied { backup: String, technical: String },
     /// The file was damaged and couldn't be set aside or copied. It is left
     /// as it is, and REPLAYX doesn't write over it until it restarts.
     DamagedNotKept { technical: String },
@@ -595,6 +606,11 @@ fn wide(p: &Path) -> Vec<u16> {
     p.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
+enum SettingsBackup {
+    Moved(PathBuf),
+    Copied(PathBuf),
+}
+
 /// Set a damaged settings file aside without ever replacing another file.
 ///
 /// 1. Move it to the first free `settings.unreadable-<time>[-n].json`. The
@@ -604,8 +620,8 @@ fn wide(p: &Path) -> Vec<u16> {
 ///    REPLAYX start moved it first), keep an exact copy of the bytes that
 ///    were read instead. A copy with the same bytes that is already there is
 ///    reused. A new copy is created only under a name that doesn't exist
-///    yet, and is read back to check it.
-fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Result<PathBuf> {
+///    yet, and is read back to check it. Copy outcomes require read-only recovery.
+fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Result<SettingsBackup> {
     use std::io::{Error, ErrorKind, Write};
     use windows::{
         core::PCWSTR,
@@ -626,7 +642,7 @@ fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Resu
                 MOVEFILE_WRITE_THROUGH,
             )
         } {
-            Ok(()) => return Ok(kept),
+            Ok(()) => return Ok(SettingsBackup::Moved(kept)),
             // 80 file exists, 183 already exists: try the next name.
             Err(e) if matches!(e.code().0 as u32 & 0xFFFF, 80 | 183) && kept.exists() => continue,
             Err(e) => {
@@ -647,7 +663,7 @@ fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Resu
                 && fs::read(e.path()).is_ok_and(|b| b == bytes)
         });
     if let Some(e) = existing {
-        return Ok(e.path());
+        return Ok(SettingsBackup::Copied(e.path()));
     }
     for n in 0..names {
         let kept = dir.join(kept_name(stamp, n));
@@ -663,7 +679,7 @@ fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Resu
         let written = file.write_all(bytes).and_then(|()| file.sync_all());
         drop(file);
         if written.is_ok() && fs::read(&kept).is_ok_and(|b| b == bytes) {
-            return Ok(kept);
+            return Ok(SettingsBackup::Copied(kept));
         }
         // Only ever our own, just-created, incomplete copy.
         let _ = fs::remove_file(&kept);
@@ -1028,7 +1044,11 @@ mod tests {
         let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
         drop(held);
         let problem = problem.unwrap();
-        assert!(problem.allows_saving(), "an exact copy exists");
+        assert!(matches!(problem, SettingsProblem::DamagedCopied { .. }));
+        assert!(
+            !problem.allows_saving(),
+            "the original can still change independently"
+        );
         assert_eq!(
             kept_files(dir.path()),
             vec![("settings.unreadable-1000.json".into(), TORN.to_vec())]
@@ -1040,6 +1060,24 @@ mod tests {
         Settings::recover_at(&path, 1001, KEPT_NAMES);
         drop(held);
         assert_eq!(kept_files(dir.path()).len(), 1);
+    }
+    #[test]
+    fn copied_damage_can_finish_recovery_after_the_file_is_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, TORN).unwrap();
+        let held = hold(&path, 1);
+        let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert!(!problem.unwrap().allows_saving());
+        drop(held);
+        let (settings, problem) = Settings::recover_at(&path, 1001, KEPT_NAMES);
+        assert!(matches!(problem, Some(SettingsProblem::Damaged { .. })));
+        assert!(problem.unwrap().allows_saving());
+        settings.save(&path).unwrap();
+        assert!(Settings::load_or_recover(&path).1.is_none());
+        assert!(kept_files(dir.path())
+            .iter()
+            .all(|(_, bytes)| bytes == TORN));
     }
     #[test]
     fn a_damaged_file_with_no_copy_possible_must_not_be_saved_over() {

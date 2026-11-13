@@ -2920,6 +2920,70 @@ mod tests {
         assert!(engine.settings().tour_done);
     }
     #[test]
+    fn copied_settings_never_authorize_overwriting_a_newer_original() {
+        use std::os::windows::fs::OpenOptionsExt;
+        for reuse in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let data = root.path().join("data");
+            fs::create_dir_all(&data).unwrap();
+            let path = data.join("settings.json");
+            let damaged = b"damaged settings snapshot";
+            fs::write(&path, damaged).unwrap();
+            let held = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(3)
+                .open(&path)
+                .unwrap();
+            if reuse {
+                Settings::load_or_recover(&path);
+            }
+            let (mut defaults, problem) = Settings::load_or_recover(&path);
+            let problem = problem.unwrap();
+            assert!(matches!(
+                problem,
+                crate::model::SettingsProblem::DamagedCopied { .. }
+            ));
+            assert!(!problem.allows_saving());
+            let custom = Settings {
+                fps: 30,
+                output_dir: root.path().join("custom clips"),
+                ..Default::default()
+            };
+            // The source can change independently after its old snapshot was copied.
+            let updated = serde_json::to_vec_pretty(&custom).unwrap();
+            fs::write(&path, &updated).unwrap();
+            drop(held);
+            defaults.output_dir = root.path().join("default clips");
+            let engine = isolated(data.clone(), defaults.clone()).unwrap();
+            engine.report_settings_problem(problem);
+            assert!(engine.set_settings(defaults.clone()).is_err());
+            assert!(engine.set_updates(defaults.updates.clone()).is_err());
+            assert!(engine.set_playtime(defaults.playtime.clone()).is_err());
+            assert!(engine.set_microphone(false).is_err());
+            engine.mark_tour_done();
+            engine.mark_tray_hint_shown();
+            assert_eq!(fs::read(&path).unwrap(), updated);
+            let backups: Vec<_> = fs::read_dir(&data)
+                .unwrap()
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("settings.unreadable-")
+                })
+                .collect();
+            assert_eq!(backups.len(), 1);
+            assert_eq!(fs::read(backups[0].path()).unwrap(), damaged);
+            drop(engine);
+            let (loaded, problem) = Settings::load_or_recover(&path);
+            assert!(problem.is_none());
+            assert_eq!(loaded.fps, 30);
+            let restarted = isolated(data, loaded.clone()).unwrap();
+            restarted.set_settings(loaded).unwrap();
+            assert_eq!(Settings::load(&path).unwrap().fps, 30);
+        }
+    }
+    #[test]
     fn a_settings_file_that_was_locked_at_start_is_never_saved_over_later() {
         use std::os::windows::fs::OpenOptionsExt;
         let root = tempfile::tempdir().unwrap();

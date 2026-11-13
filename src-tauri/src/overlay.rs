@@ -36,13 +36,12 @@ pub struct ProcessId {
 /// - A reused process id is a different process (its creation time differs).
 /// - Each game is tracked on its own.
 ///
-/// `FLAP` is only a safety net: the same game is never announced twice
-/// within it, in case a liveness check flickers. No real close-and-relaunch
-/// brings a game window back that fast.
+/// `FLAP` suppresses a repeated notice for the same process identity when a
+/// liveness check flickers. A distinct process starts a new session immediately.
 #[derive(Default)]
 pub struct Announcer {
     sessions: Vec<(String, ProcessId)>,
-    announced: HashMap<String, Instant>,
+    announced: HashMap<String, (ProcessId, Instant)>,
 }
 impl Announcer {
     pub const FLAP: Duration = Duration::from_secs(3);
@@ -56,17 +55,22 @@ impl Announcer {
     ) -> Option<String> {
         self.sessions.retain(|(_, process)| alive(*process));
         self.announced
-            .retain(|_, t| now.duration_since(*t) < Self::FLAP);
+            .retain(|_, (_, t)| now.duration_since(*t) < Self::FLAP);
         let (game, process) = front?;
         if self.sessions.iter().any(|(_, p)| *p == process) {
             return None;
         }
         let continuing = self.sessions.iter().any(|(g, _)| g == game);
         self.sessions.push((game.to_owned(), process));
-        if continuing || self.announced.contains_key(game) {
+        if continuing
+            || self
+                .announced
+                .get(game)
+                .is_some_and(|(previous, _)| *previous == process)
+        {
             return None;
         }
-        self.announced.insert(game.to_owned(), now);
+        self.announced.insert(game.to_owned(), (process, now));
         Some(game.to_owned())
     }
 }
@@ -996,6 +1000,24 @@ mod tests {
                 let front = (t % 3 != 0).then_some(("Fortnite", again));
                 assert_eq!(s.at(30 + gap + t, front), None);
             }
+        }
+    }
+    #[test]
+    fn a_distinct_process_is_announced_within_the_flap_window() {
+        for (delay, again) in [(1, p(401, 2)), (2, p(400, 2))] {
+            let mut s = Sim::new();
+            s.running.borrow_mut().push(p(400, 1));
+            assert!(s.at(0, Some(("Fortnite", p(400, 1)))).is_some());
+            s.running.borrow_mut().clear();
+            assert_eq!(s.at(1, None), None);
+            s.running.borrow_mut().push(again);
+            assert_eq!(
+                s.at(delay, Some(("Fortnite", again))).as_deref(),
+                Some("Fortnite")
+            );
+            assert_eq!(s.at(10, Some(("Fortnite", again))), None);
+            assert_eq!(s.at(11, None), None);
+            assert_eq!(s.at(12, Some(("Fortnite", again))), None);
         }
     }
     #[test]

@@ -122,6 +122,7 @@ export function describeError(raw: string, context: { retry?: readonly string[] 
 /** What start-up found wrong with settings.json (`Status.settings_problem`). */
 export type SettingsProblem =
   | { kind: 'damaged'; backup: string; technical: string }
+  | { kind: 'damaged_copied'; backup: string; technical: string }
   | { kind: 'damaged_not_kept'; technical: string }
   | { kind: 'unreadable'; technical: string };
 
@@ -132,6 +133,9 @@ export function describeSettingsProblem(p: SettingsProblem): FriendlyError {
     case 'damaged': return { ...base, key: `settings:damaged:${p.backup}`, title: 'Your settings were reset',
       message: `Your settings file was damaged, so REPLAYX started with its default settings. A copy of the old file was kept as ${p.backup}.`,
       actions: [{ kind: 'navigate', label: 'Review settings', to: { page: 'settings', tab: 'general' } }] };
+    case 'damaged_copied': return { ...base, key: `settings:damaged_copied:${p.backup}`, title: 'Using default settings for now',
+      message: `A copy of your damaged settings was kept as ${p.backup}. Another program may still be using the original, so REPLAYX won't change it. Close that program, then restart REPLAYX to load your settings or finish recovery.`,
+      actions: [] };
     case 'damaged_not_kept': return { ...base, key: 'settings:damaged_not_kept', title: 'Using default settings for now',
       message: "Your settings file is damaged and REPLAYX couldn't keep a copy of it, so it started with its defaults and won't change the file. Restart REPLAYX to try again.",
       actions: [] };

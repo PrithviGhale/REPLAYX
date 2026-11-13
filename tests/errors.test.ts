@@ -146,6 +146,17 @@ test('the settings notice is plain words, with the raw error only in the details
   assert.deepEqual(refused.actions, []);
 });
 
+test('copied settings explain read-only recovery and restart without exposing diagnostics', () => {
+  const technical = String.raw`C:\Private\settings.json: sharing violation (os error 32)`;
+  const error = describeSettingsProblem({ kind: 'damaged_copied', backup: 'settings.unreadable-1000.json', technical });
+  assert.match(error.message, /copy.*settings.unreadable-1000.json/);
+  assert.match(error.message, /won't change it/);
+  assert.match(error.message, /restart REPLAYX/);
+  assert.doesNotMatch(error.message, /Private|os error|sharing violation/);
+  assert.equal(error.technical, technical);
+  assert.deepEqual(error.actions, []);
+});
+
 test('unknown errors in plain words keep their first sentence; a code anywhere makes them generic', () => {
   const e = describeError('Unexpected thing happened at step 3. Wait a moment and try again.');
   assert.equal(e.category, 'unknown');
