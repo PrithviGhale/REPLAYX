@@ -831,3 +831,6 @@ button.en-title:hover { color: #fff; text-decoration: underline; text-underline-
   .error-notice { animation: none; }
   .anchor-flash { animation: none; box-shadow: 0 0 0 2px var(--accent-line); }
 }
+
+/* Hidden window (tray, minimised): pause every animation. */
+.page-hidden *, .page-hidden *::before, .page-hidden *::after { animation-play-state: paused !important; }

@@ -1117,11 +1117,34 @@ async fn set_microphone(
 /// while REPLAYX sat in the tray during a game. Marked hidden, it throttles
 /// timers and stops drawing (the status poll slows to every 2 s). Only the
 /// web content's child window is hidden; the window and taskbar entry are not.
+/// Whether REPLAYX's window is out of sight (tray, minimised). Background
+/// work that only feeds the window slows down or stops while it is.
+static PAGE_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn page_hidden() -> bool {
+    PAGE_HIDDEN.load(std::sync::atomic::Ordering::Relaxed)
+}
 fn set_page_visible(w: &tauri::WebviewWindow, visible: bool) {
-    static HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if HIDDEN.swap(!visible, std::sync::atomic::Ordering::Relaxed) == visible {
+    if PAGE_HIDDEN.swap(!visible, std::sync::atomic::Ordering::Relaxed) == visible {
         let page: &tauri::Webview = w.as_ref();
         let _ = if visible { page.show() } else { page.hide() };
+        // Hidden: let WebView2 release caches and memory it can rebuild
+        // (MemoryUsageTargetLevel Low); back to Normal when shown.
+        let _ = w.with_webview(move |webview| unsafe {
+            use webview2_com::Microsoft::Web::WebView2::Win32::{
+                ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+            };
+            use windows::core::Interface;
+            if let Ok(core) = webview.controller().CoreWebView2() {
+                if let Ok(core) = core.cast::<ICoreWebView2_19>() {
+                    let _ = core.SetMemoryUsageTargetLevel(if visible {
+                        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+                    } else {
+                        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+                    });
+                }
+            }
+        });
     }
 }
 fn state_notices(app: &tauri::AppHandle) -> crate::overlay::Overlay {
@@ -1503,11 +1526,18 @@ pub fn run() {
                                 }
                                 last = Some(key);
                             }
-                            thread::sleep(std::time::Duration::from_secs(2));
+                            // Hidden and idle: nobody sees the list, and a capture
+                            // start reads devices itself. Check less often.
+                            let idle = !handle.state::<AppState>().engine.status().replay
+                                && !handle.state::<AppState>().engine.status().recording;
+                            thread::sleep(std::time::Duration::from_secs(
+                                if page_hidden() && idle { 10 } else { 2 },
+                            ));
                         }
                     });
                 }
                 let mut tray_shown = Default::default();
+                let mut tooltip_shown = String::new();
                 let mut update_shown = String::new();
                 let mut last_game: Option<String> = None;
                 let mut overlay_frame: Option<crate::status_overlay::Frame> = None;
@@ -1529,16 +1559,21 @@ pub fn run() {
                         let _ = tray_update.set_text(&update_label);
                         update_shown = update_label;
                     }
-                    if let Some(tray) = handle.tray_by_id("main-tray") {
-                        let _ = tray.set_tooltip(Some(format!(
-                            "REPLAYX — {}{}",
-                            status.state,
-                            if update.has_update() {
-                                " · update available"
-                            } else {
-                                ""
-                            }
-                        )));
+                    // Only when the text changes (a shell call each time).
+                    let tooltip = format!(
+                        "REPLAYX — {}{}",
+                        status.state,
+                        if update.has_update() {
+                            " · update available"
+                        } else {
+                            ""
+                        }
+                    );
+                    if tooltip != tooltip_shown {
+                        if let Some(tray) = handle.tray_by_id("main-tray") {
+                            let _ = tray.set_tooltip(Some(tooltip.clone()));
+                        }
+                        tooltip_shown = tooltip;
                     }
                     // Tray menu mirrors the real state (texts only change on news).
                     {
@@ -1658,6 +1693,16 @@ pub fn run() {
                             ..Default::default()
                         });
                         let _ = handle.emit("game-detected", serde_json::json!({"game": game}));
+                    }
+                    // CPU/memory figures feed the Performance page only: skip
+                    // the process scans while the window is hidden and nothing
+                    // is captured (an idle REPLAYX in the tray does no work).
+                    let capturing = status.replay
+                        || status.recording
+                        || status.saving > 0
+                        || status.state == "Starting";
+                    if page_hidden() && !capturing {
+                        continue;
                     }
                     // Rediscover child processes (encoder, WebView) every 5s; refresh
                     // only REPLAYX's own processes every second.

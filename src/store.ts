@@ -42,15 +42,20 @@ async function poll() {
   firstPollDone();
   listeners.forEach(l => l());
   // While REPLAYX is hidden (a game in front, minimised, in the tray) nothing is
-  // drawn, so poll every 2 s: the window should cost the game nothing.
+  // drawn: poll every 2 s while capturing (tray/notices follow the state) and
+  // every 5 s when idle. Showing the window polls again at once.
   const hidden = document.visibilityState === 'hidden';
-  timer = window.setTimeout(poll, hidden ? 2000 : isActive(status) ? 250 : 1000);
+  timer = window.setTimeout(poll, hidden ? (isActive(status) ? 2000 : 5000) : isActive(status) ? 250 : 1000);
 }
 
 export function startPolling() {
   if (!native || timer !== undefined) return;
-  // Back to fast polling as soon as the window is visible again.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshNow(); });
+  // Back to fast polling as soon as the window is visible again. While hidden,
+  // CSS animations (pulsing status dots) are paused: an infinite animation can
+  // keep the renderer busy even when nothing is drawn.
+  const markHidden = () => document.documentElement.classList.toggle('page-hidden', document.visibilityState === 'hidden');
+  markHidden();
+  document.addEventListener('visibilitychange', () => { markHidden(); if (document.visibilityState === 'visible') refreshNow(); });
   void poll();
 }
 export const refreshNow = () => { if (native) { window.clearTimeout(timer); void poll(); } };
