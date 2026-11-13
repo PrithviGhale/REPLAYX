@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { ErrorNotice } from './ErrorNotice';
+import type { Destination } from './errors';
+import { NAVIGATE_EVENT, revealAnchor } from './navigation';
 import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
 import { native, VERSION } from './api';
 import { useApp } from './context';
@@ -108,9 +111,11 @@ function Toasts() {
     <div className="toasts" aria-live="polite">
       {busy && <div className="toast info"><LoaderCircle className="spin" size={15} /><span>{busy}…</span></div>}
       {toasts.map(t => (
-        <div key={t.id} className={`toast ${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
-          <span>{t.text}</span><button aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={14} /></button>
-        </div>
+        t.error
+          ? <ErrorNotice key={t.id} error={t.error} count={t.count} onDismiss={() => dismiss(t.id)} onAction={() => dismiss(t.id)} />
+          : <div key={t.id} className={`toast ${t.kind}`} role="status">
+              <span>{t.text}{t.count > 1 && ` (×${t.count})`}</span><button aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={14} /></button>
+            </div>
       ))}
     </div>
   );
@@ -135,6 +140,16 @@ export function App() {
     if (p === 'settings' && ['general', 'hotkeys', 'updates', 'about'].includes(tab)) setSettingsTab(tab as SettingsTab);
     setPage(p as Page);
   }, []);
+  // Error actions open the page that fixes the problem, then its section.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const to = (e as CustomEvent<Destination>).detail;
+      go(to.tab ? `${to.page}:${to.tab}` : to.page);
+      if (to.anchor) revealAnchor(to.anchor);
+    };
+    window.addEventListener(NAVIGATE_EVENT, open);
+    return () => window.removeEventListener(NAVIGATE_EVENT, open);
+  }, [go]);
   return (
     <div className="shell">
       <aside className="sidebar">

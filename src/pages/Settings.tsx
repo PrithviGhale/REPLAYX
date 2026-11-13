@@ -83,7 +83,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
 
       {tab === 'general' && (
         <>
-          <Card title="Saving">
+          <Card anchor="output-folder" title="Saving">
             <Field label="Clips folder" hint="Must be a full local path. Clips never leave this PC.">
               <div className="input-action">
                 <input value={draft.output_dir} disabled={active} onChange={e => patch({ output_dir: e.target.value })} spellCheck={false} />

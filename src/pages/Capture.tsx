@@ -105,7 +105,7 @@ export function CapturePage() {
 
   return (
     <Section>
-      <Card title="Source" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing displays', refreshCaps)}>Refresh</Button>}>
+      <Card anchor="display" title="Source" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing displays', refreshCaps)}>Refresh</Button>}>
         <Segmented label="Capture method" value={draft.capture} disabled={active}
           onChange={v => patch({ capture: v, source_rect: null })}
           options={[
@@ -207,7 +207,7 @@ export function CapturePage() {
         <p className="muted small">Stretched 4:3 games (for example 1440×1080 shown full-screen) change the display mode itself. REPLAYX detects the change, restarts capture on the new mode and validates the encoded size, so the desktop can't leak into the frame.</p>
       </Card>
 
-      <Card tour="video-quality" title="Encoding">
+      <Card tour="video-quality" anchor="encoder" title="Encoding">
         <div className="grid-2 tight">
           <Field label="Encoder" hint="Automatic prefers fixed-function encoders (Intel low-power Quick Sync, NVIDIA NVENC) so the GPU shader cores stay free for the game.">
             <select value={draft.encoder} disabled={active} onChange={e => patch({ encoder: e.target.value })}>

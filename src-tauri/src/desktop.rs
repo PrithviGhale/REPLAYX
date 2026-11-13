@@ -716,10 +716,25 @@ fn audio_test_stop(state: State<AppState>) {
 /// lives). REPLAYX never changes it itself.
 #[tauri::command]
 fn open_sound_settings() -> Reply<()> {
-    command("explorer.exe")
-        .arg("ms-settings:sound")
-        .spawn()
-        .map_err(err)?;
+    open_windows_settings("sound".into())
+}
+/// Windows Settings pages that error cards link to. Only these fixed pages
+/// can be opened (never an arbitrary URI from the interface).
+fn windows_settings_uri(page: &str) -> Option<&'static str> {
+    Some(match page {
+        "sound" => "ms-settings:sound",
+        "microphone-privacy" => "ms-settings:privacy-microphone",
+        "display" => "ms-settings:display",
+        "storage" => "ms-settings:storagesense",
+        "graphics" => "ms-settings:display-advancedgraphics",
+        _ => return None,
+    })
+}
+#[tauri::command]
+fn open_windows_settings(page: String) -> Reply<()> {
+    let uri =
+        windows_settings_uri(&page).ok_or_else(|| format!("Unknown settings page: {page}"))?;
+    command("explorer.exe").arg(uri).spawn().map_err(err)?;
     Ok(())
 }
 /// Audio devices right now (cheap; no encoder probes).
@@ -1735,6 +1750,7 @@ pub fn run() {
             voice_sample_render,
             voice_sample_discard,
             open_sound_settings,
+            open_windows_settings,
             audio_devices,
             mic_monitor_start,
             mic_monitor_set,
@@ -1754,6 +1770,23 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_fixed_windows_settings_pages_can_be_opened() {
+        assert_eq!(windows_settings_uri("sound"), Some("ms-settings:sound"));
+        assert_eq!(
+            windows_settings_uri("microphone-privacy"),
+            Some("ms-settings:privacy-microphone")
+        );
+        for bad in [
+            "",
+            "ms-settings:sound",
+            "https://example.com",
+            "sound;calc",
+            "file:///c:/",
+        ] {
+            assert_eq!(windows_settings_uri(bad), None, "{bad}");
+        }
+    }
     #[test]
     fn a_taken_shortcut_keeps_the_previous_one_and_says_so() {
         let k = |a: &str, b: &str, c: &str, d: &str| {

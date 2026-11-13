@@ -5,8 +5,11 @@ import { splashDone, splashStep } from './splash';
 import { listen } from '@tauri-apps/api/event';
 import { applySaveEvent, type SaveEvent } from './save-events';
 import { removeClip, upsertClip } from './library';
+import { describeError, type FriendlyError } from './errors';
 
-type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string };
+/** Errors carry their friendly form; the same problem again bumps `count`
+ * instead of stacking another toast. */
+type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string; error?: FriendlyError; count: number };
 type Ctx = {
   saved: Settings; draft: Settings; dirty: boolean; loaded: boolean;
   patch: (p: Partial<Settings>) => void; save: () => Promise<boolean>; discard: () => void;
@@ -41,8 +44,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismiss = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), []);
   const toast = useCallback((kind: Toast['kind'], text: string) => {
+    const error = kind === 'error' ? describeError(text) : undefined;
     const id = nextId.current++;
-    setToasts(t => [...t.slice(-3), { id, kind, text }]);
+    setToasts(t => {
+      const same = t.find(x => (error ? x.error?.key === error.key : x.kind === kind && x.text === text));
+      if (same) return t.map(x => (x === same ? { ...x, count: x.count + 1 } : x));
+      return [...t.slice(-3), { id, kind, text, error, count: 1 }];
+    });
     if (kind !== 'error') window.setTimeout(() => dismiss(id), 5000);
   }, [dismiss]);
 

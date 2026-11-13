@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { ErrorNotice } from '../ErrorNotice';
+import { describeError } from '../errors';
 import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { native } from '../api';
 import { microphoneLabel, microphoneOn } from '../update-logic';
@@ -100,11 +102,13 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
     : s.replay ? `The last ${duration(draft.replay_seconds)} is kept on disk. Save it the moment something happens.`
     : 'Turn on Instant Replay before you play. It works on the desktop too — no game required.';
 
-  const alerts = [s.error && { tone: 'bad', text: s.error }, s.hotkey && { tone: 'warn', text: s.hotkey },
-    caps?.media_error && { tone: 'bad', text: caps.media_error }, s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
+  // Problems become friendly cards with actions; plain notices stay banners.
+  const problems = [s.error, s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(describeError);
+  const alerts = [s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
 
   return (
     <Section>
+      {problems.map(e => <ErrorNotice key={e.key} error={e} />)}
       {alerts.map((a, i) => <div key={i} className={`banner ${a.tone}`} role={a.tone === 'bad' ? 'alert' : undefined}><AlertTriangle size={15} />{a.text}</div>)}
       {s.recovery > 0 && !active && (
         <button className="banner info link" onClick={() => navigate('replay')}>

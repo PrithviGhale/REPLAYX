@@ -71,7 +71,7 @@ export function AudioPage() {
       {conflict && <div className="banner warn">System audio already contains every app's sound. Turn it off (or the app sources) so audio isn't recorded twice. REPLAYX won't save this combination.</div>}
       {!liveMix && sources.length > 0 && <div className="banner info">Save your changes to adjust volume live during capture.</div>}
 
-      <Card title="Sound sources" subtitle="What else your clips hear. Each source gets its own track."
+      <Card anchor="sound-sources" title="Sound sources" subtitle="What else your clips hear. Each source gets its own track."
         actions={<Button variant="ghost" size="sm" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing devices', refreshCaps)}>Refresh</Button>}>
         {sources.every(s => s.kind === 'microphone') && <Empty icon={Waves} title="No other sources">Add your system sound, or individual apps such as the game and Discord.</Empty>}
         <ul className="strips">

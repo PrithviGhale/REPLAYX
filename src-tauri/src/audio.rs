@@ -743,6 +743,8 @@ pub fn apply_gain(chunk: &mut [f32], from: f32, to: f32) -> f32 {
 /// (AUDCLNT_E_DEVICE_INVALIDATED, _ENDPOINT_CREATE_FAILED,
 /// _SERVICE_NOT_RUNNING, _RESOURCES_INVALIDATED, E_NOTFOUND): worth retrying
 /// with the then-current default device, and a reason to reconnect, not to stop.
+/// How long a capture start waits for a changing audio device to settle.
+pub const DEVICE_SETTLE: Duration = Duration::from_secs(10);
 pub fn is_device_change(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     [
@@ -843,20 +845,23 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                     },
                 )
             };
-            // A device that is switching (headset connecting, Bluetooth changing
-            // profile, waking from sleep) answers "device invalidated" for a
-            // moment: wait and try again with the then-current default device.
+            // A device that is switching (headset connecting, a Bluetooth
+            // headset changing profile when its microphone opens, a virtual
+            // sound device restarting, waking from sleep) answers "device
+            // invalidated" for a while: try again with the then-current default
+            // device for up to DEVICE_SETTLE, backing off to one attempt a second.
+            let settle_until = Instant::now() + DEVICE_SETTLE;
             let mut attempt = 0u64;
             let (client, channels) = loop {
                 match open() {
                     Ok(opened) => break opened,
                     Err(e)
-                        if attempt < 5
+                        if Instant::now() < settle_until
                             && is_device_change(&format!("{e:#}"))
                             && !st.load(Ordering::Relaxed) =>
                     {
                         attempt += 1;
-                        thread::sleep(Duration::from_millis(250 * attempt));
+                        thread::sleep(Duration::from_millis((250 * attempt).min(1000)));
                     }
                     Err(e) => return Err(e),
                 }
@@ -1018,16 +1023,19 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
             let _ = ready_tx.try_send(Err(message));
         }
     });
-    match ready_rx.recv_timeout(Duration::from_secs(8)) {
+    match ready_rx.recv_timeout(DEVICE_SETTLE + Duration::from_secs(4)) {
         Ok(Ok(())) => {}
         result => {
             stop.store(true, Ordering::Relaxed);
+            // Plain explanation first; Windows' code stays at the end for
+            // diagnostics (the app shows a friendly card for these).
             match result {
                 Ok(Err(message)) if is_device_change(&message) => bail!(
-                    "{message}. The audio device was changing or not ready, and still wasn't after several retries. Check Windows Sound settings (or reconnect the headset) and start capture again."
+                    "{name} couldn't connect to the sound device: it was changing or unavailable for {} seconds. Reconnect the headset or check Windows Sound settings, then try again. (Technical: {message})",
+                    DEVICE_SETTLE.as_secs()
                 ),
-                Ok(Err(message)) => bail!("Audio could not start: {message}"),
-                _ => bail!("{name}: the audio device did not respond within 8 seconds. Check Windows Sound settings and start capture again."),
+                Ok(Err(message)) => bail!("{name} couldn't start. (Technical: {message})"),
+                _ => bail!("{name} couldn't connect to the sound device: it did not respond. Check Windows Sound settings, then try again."),
             }
         }
     }

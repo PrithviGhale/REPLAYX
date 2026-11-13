@@ -354,7 +354,10 @@ mod tests {
         let me = std::process::id();
         let started = process_started(me).expect("own creation time");
         assert!(process_running(me, started));
-        assert!(!process_running(me, started + 1), "a different creation time is another process");
+        assert!(
+            !process_running(me, started + 1),
+            "a different creation time is another process"
+        );
         let mut child = std::process::Command::new("cmd")
             .args(["/c", "ping -n 2 127.0.0.1 >nul"])
             .spawn()
@@ -363,7 +366,10 @@ mod tests {
         let t = process_started(pid).expect("child creation time");
         assert!(process_running(pid, t));
         child.wait().unwrap();
-        assert!(!process_running(pid, t), "an exited process ends its session");
+        assert!(
+            !process_running(pid, t),
+            "an exited process ends its session"
+        );
     }
 
     /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and

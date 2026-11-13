@@ -37,10 +37,12 @@ const initialSettings = (): Settings => ({
 const started = Date.now();
 const status = (): Status => {
   const t = (Date.now() - started) / 1000;
-  const on = scenario !== 'off';
+  const on = !['off', 'error'].includes(scenario);
   return {
     ...emptyStatus,
-    state: !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
+    // ?state=error: the start failure users reported (friendly card on Home).
+    error: scenario === 'error' ? "System audio couldn't connect to the sound device: it was changing or unavailable for 10 seconds. Reconnect the headset or check Windows Sound settings, then try again. (Technical: System audio: Windows returned an error: 0x88890004)" : null,
+    state: scenario === 'error' ? 'Error' : !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
     encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
     target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,
     scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,

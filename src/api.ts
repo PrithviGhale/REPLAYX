@@ -132,6 +132,8 @@ export const api = {
   voiceSampleRender: (voice: VoiceConfig, boostDb: number) => call<VoiceSample>('voice_sample_render', { voice, boostDb }),
   voiceSampleDiscard: () => call<void>('voice_sample_discard'),
   openSoundSettings: () => call<void>('open_sound_settings'),
+  /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
+  openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
