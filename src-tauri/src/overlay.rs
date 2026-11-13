@@ -80,6 +80,11 @@ pub fn capture_line(replay: bool, recording: bool, state: &str, save_hotkey: &st
 }
 
 pub struct Notice {
+    /// Small caps line above the title ("GAME DETECTED", "REPLAYX").
+    pub eyebrow: String,
+    /// Symbol on the tile for capture events (Segoe MDL2 Assets code point);
+    /// games show their icon, or their initial.
+    pub glyph: Option<char>,
     pub title: String,
     pub subtitle: String,
     /// Positive state (replay ready / recording) gets the accent colour.
@@ -95,6 +100,8 @@ pub struct Notice {
 impl Default for Notice {
     fn default() -> Self {
         Self {
+            eyebrow: "REPLAYX".into(),
+            glyph: None,
             title: String::new(),
             subtitle: String::new(),
             active: false,
@@ -157,9 +164,16 @@ pub fn capture_notice(
             REC_RED,
         ),
     };
+    // Segoe MDL2 Assets: Record, CheckMark, Warning.
+    let glyph = match event {
+        CaptureEvent::RecordingStarted => '\u{E7C8}',
+        CaptureEvent::ReplaySaved | CaptureEvent::RecordingSaved => '\u{E73E}',
+        CaptureEvent::SaveFailed => '\u{E7BA}',
+    };
     Notice {
         title,
         subtitle,
+        glyph: Some(glyph),
         active: true,
         accent: Some(accent),
         hold_ms: 2600,
@@ -194,13 +208,28 @@ thread_local! {
     static CURRENT: RefCell<Option<Paint>> = const { RefCell::new(None) };
 }
 struct Paint {
+    eyebrow: Vec<u16>,
     title: Vec<u16>,
     subtitle: Vec<u16>,
+    /// Letter shown on the tile when the game has no icon.
+    initial: Vec<u16>,
+    glyph: Option<Vec<u16>>,
     active: bool,
     accent: (u8, u8, u8),
     icon: Option<windows::Win32::UI::WindowsAndMessaging::HICON>,
     scale: f32,
 }
+
+/// `a` blended towards `b` by `t` (0..1).
+fn mix(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
+}
+/// Card colours (REPLAYX's dark surfaces).
+const CARD_TOP: (u8, u8, u8) = (27, 28, 37);
+const CARD_BOTTOM: (u8, u8, u8) = (17, 18, 24);
+const CARD_LINE: (u8, u8, u8) = (48, 50, 64);
+const READY_GREEN: (u8, u8, u8) = (58, 210, 159);
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
@@ -235,47 +264,124 @@ unsafe extern "system" fn wndproc(
     DefWindowProcW(hwnd, msg, wp, lp)
 }
 
+/// A soft two-colour gradient across `r` (GDI GradientFill: cheap, no GPU).
+unsafe fn gradient(
+    dc: windows::Win32::Graphics::Gdi::HDC,
+    r: windows::Win32::Foundation::RECT,
+    from: (u8, u8, u8),
+    to: (u8, u8, u8),
+    vertical: bool,
+) {
+    use windows::Win32::Graphics::Gdi::*;
+    let v = |x: i32, y: i32, c: (u8, u8, u8)| TRIVERTEX {
+        x,
+        y,
+        Red: (c.0 as u16) << 8,
+        Green: (c.1 as u16) << 8,
+        Blue: (c.2 as u16) << 8,
+        Alpha: 0xff00,
+    };
+    let vertices = [v(r.left, r.top, from), v(r.right, r.bottom, to)];
+    let rect = GRADIENT_RECT {
+        UpperLeft: 0,
+        LowerRight: 1,
+    };
+    let _ = GradientFill(
+        dc,
+        &vertices,
+        &rect as *const _ as *const core::ffi::c_void,
+        1,
+        if vertical {
+            GRADIENT_FILL_RECT_V
+        } else {
+            GRADIENT_FILL_RECT_H
+        },
+    );
+}
+
 unsafe fn paint(
     hwnd: windows::Win32::Foundation::HWND,
     dc: windows::Win32::Graphics::Gdi::HDC,
     p: &Paint,
 ) {
-    use windows::Win32::{Foundation::RECT, Graphics::Gdi::*, UI::WindowsAndMessaging::*};
+    use windows::Win32::{Foundation::RECT, UI::WindowsAndMessaging::GetClientRect};
     let mut r = RECT::default();
     let _ = GetClientRect(hwnd, &mut r);
+    draw_card(dc, r, p);
+}
+
+/// The notice card. Drawn into any DC so tests can render it off screen.
+unsafe fn draw_card(
+    dc: windows::Win32::Graphics::Gdi::HDC,
+    r: windows::Win32::Foundation::RECT,
+    p: &Paint,
+) {
+    use windows::Win32::{Foundation::RECT, Graphics::Gdi::*, UI::WindowsAndMessaging::*};
     let px = |v: f32| (v * p.scale).round() as i32;
-    let bg = CreateSolidBrush(rgb(24, 25, 31));
-    FillRect(dc, &r, bg);
-    let _ = DeleteObject(bg.into());
-    let border = CreateSolidBrush(rgb(46, 47, 58));
+    let brush = |c: (u8, u8, u8)| CreateSolidBrush(rgb(c.0, c.1, c.2));
+    let fill = |rect: &RECT, c: (u8, u8, u8)| {
+        let b = brush(c);
+        FillRect(dc, rect, b);
+        let _ = DeleteObject(b.into());
+    };
+    let round = |rect: RECT, radius: i32, c: (u8, u8, u8)| {
+        let b = brush(c);
+        let old = SelectObject(dc, b.into());
+        let pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let _ = RoundRect(
+            dc,
+            rect.left,
+            rect.top,
+            rect.right + 1,
+            rect.bottom + 1,
+            radius,
+            radius,
+        );
+        SelectObject(dc, pen);
+        SelectObject(dc, old);
+        let _ = DeleteObject(b.into());
+    };
+    // Surface: a quiet top-to-bottom gradient, then the accent glowing in
+    // from the left edge and fading out by a third of the width.
+    gradient(dc, r, CARD_TOP, CARD_BOTTOM, true);
+    let glow = RECT {
+        right: r.left + (r.right - r.left) * 2 / 5,
+        ..r
+    };
+    gradient(dc, glow, mix(CARD_TOP, p.accent, 0.16), CARD_TOP, false);
+    // Hairline border and a one-pixel highlight along the top edge.
+    let border = brush(CARD_LINE);
     FrameRect(dc, &r, border);
     let _ = DeleteObject(border.into());
-    let accent = CreateSolidBrush(rgb(p.accent.0, p.accent.1, p.accent.2));
-    let bar = RECT {
-        left: 0,
-        top: 0,
-        right: px(4.0),
-        bottom: r.bottom,
+    fill(
+        &RECT {
+            left: r.left + px(12.0),
+            top: r.top + 1,
+            right: r.right - px(12.0),
+            bottom: r.top + 2,
+        },
+        (58, 60, 76),
+    );
+    // Accent pill, inset from the edges.
+    round(
+        RECT {
+            left: px(7.0),
+            top: px(16.0),
+            right: px(10.0),
+            bottom: r.bottom - px(16.0),
+        },
+        px(3.0),
+        p.accent,
+    );
+    // Icon tile: the game's own icon, or its initial on an accent tile.
+    let tile = px(46.0);
+    let (tx, ty) = (px(20.0), (r.bottom - tile) / 2);
+    let tile_rect = RECT {
+        left: tx,
+        top: ty,
+        right: tx + tile,
+        bottom: ty + tile,
     };
-    FillRect(dc, &bar, accent);
-    let _ = DeleteObject(accent.into());
-    let icon_size = px(36.0);
-    let ix = px(18.0);
-    let iy = (r.bottom - icon_size) / 2;
-    match p.icon {
-        Some(icon) => {
-            let _ = DrawIconEx(dc, ix, iy, icon, icon_size, icon_size, 0, None, DI_NORMAL);
-        }
-        None => {
-            let b = CreateSolidBrush(rgb(p.accent.0, p.accent.1, p.accent.2));
-            let old = SelectObject(dc, b.into());
-            let pen = SelectObject(dc, GetStockObject(NULL_PEN));
-            let _ = Ellipse(dc, ix, iy, ix + icon_size, iy + icon_size);
-            SelectObject(dc, pen);
-            SelectObject(dc, old);
-            let _ = DeleteObject(b.into());
-        }
-    }
     let font = |height: f32, weight: i32| {
         CreateFontW(
             -px(height),
@@ -295,15 +401,104 @@ unsafe fn paint(
         )
     };
     SetBkMode(dc, TRANSPARENT);
-    let left = ix + icon_size + px(14.0);
-    let title_font = font(16.0, 600);
-    let old = SelectObject(dc, title_font.into());
-    SetTextColor(dc, rgb(244, 244, 247));
+    match p.icon {
+        Some(icon) => {
+            round(tile_rect, px(12.0), (36, 38, 50));
+            let size = px(32.0);
+            let _ = DrawIconEx(
+                dc,
+                tx + (tile - size) / 2,
+                ty + (tile - size) / 2,
+                icon,
+                size,
+                size,
+                0,
+                None,
+                DI_NORMAL,
+            );
+        }
+        None if p.glyph.is_some() => {
+            round(tile_rect, px(12.0), mix(CARD_TOP, p.accent, 0.22));
+            let symbol = CreateFontW(
+                -px(20.0),
+                0,
+                0,
+                0,
+                400,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
+                0,
+                windows::core::w!("Segoe MDL2 Assets"),
+            );
+            let old = SelectObject(dc, symbol.into());
+            SetTextColor(dc, rgb(p.accent.0, p.accent.1, p.accent.2));
+            let mut lr = tile_rect;
+            let mut glyph = p.glyph.clone().unwrap_or_default();
+            DrawTextW(
+                dc,
+                &mut glyph,
+                &mut lr,
+                DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX,
+            );
+            SelectObject(dc, old);
+            let _ = DeleteObject(symbol.into());
+        }
+        None => {
+            round(tile_rect, px(12.0), mix(CARD_TOP, p.accent, 0.55));
+            let letter = font(20.0, 700);
+            let old = SelectObject(dc, letter.into());
+            SetTextColor(dc, rgb(255, 255, 255));
+            let mut lr = tile_rect;
+            let mut initial = p.initial.clone();
+            DrawTextW(
+                dc,
+                &mut initial,
+                &mut lr,
+                DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX,
+            );
+            SelectObject(dc, old);
+            let _ = DeleteObject(letter.into());
+        }
+    }
+    let left = tx + tile + px(14.0);
+    let right = r.right - px(16.0);
+    // Eyebrow: small, spaced, in the accent colour.
+    let eyebrow_font = font(10.5, 700);
+    let old = SelectObject(dc, eyebrow_font.into());
+    SetTextCharacterExtra(dc, px(0.9));
+    let eyebrow_colour = mix(p.accent, (255, 255, 255), 0.25);
+    SetTextColor(
+        dc,
+        rgb(eyebrow_colour.0, eyebrow_colour.1, eyebrow_colour.2),
+    );
+    let mut er = RECT {
+        left,
+        top: px(14.0),
+        right,
+        bottom: px(28.0),
+    };
+    let mut eyebrow = p.eyebrow.clone();
+    DrawTextW(
+        dc,
+        &mut eyebrow,
+        &mut er,
+        DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
+    SetTextCharacterExtra(dc, 0);
+    // Title: the game (or the event).
+    let title_font = font(16.5, 600);
+    SelectObject(dc, title_font.into());
+    SetTextColor(dc, rgb(246, 246, 250));
     let mut tr = RECT {
         left,
-        top: px(15.0),
-        right: r.right - px(14.0),
-        bottom: px(38.0),
+        top: px(28.0),
+        right,
+        bottom: px(51.0),
     };
     let mut title = p.title.clone();
     DrawTextW(
@@ -312,21 +507,37 @@ unsafe fn paint(
         &mut tr,
         DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
     );
-    let sub_font = font(13.0, 400);
+    // Status: a dot (green when capture is ready) and one line.
+    let dot = px(7.0);
+    let (dx, dy) = (left, px(56.0) + (px(18.0) - dot) / 2);
+    // Capture readiness is green; capture events use their own colour.
+    let dot_colour = match (p.active, p.glyph.is_some()) {
+        (true, true) => p.accent,
+        (true, false) => READY_GREEN,
+        _ => (112, 116, 136),
+    };
+    let b = brush(dot_colour);
+    let oldb = SelectObject(dc, b.into());
+    let pen = SelectObject(dc, GetStockObject(NULL_PEN));
+    let _ = Ellipse(dc, dx, dy, dx + dot + 1, dy + dot + 1);
+    SelectObject(dc, pen);
+    SelectObject(dc, oldb);
+    let _ = DeleteObject(b.into());
+    let sub_font = font(12.5, 400);
     SelectObject(dc, sub_font.into());
     SetTextColor(
         dc,
         if p.active {
-            rgb(196, 181, 253)
+            rgb(200, 204, 220)
         } else {
-            rgb(161, 161, 170)
+            rgb(150, 154, 172)
         },
     );
     let mut sr = RECT {
-        left,
-        top: px(40.0),
-        right: r.right - px(14.0),
-        bottom: px(62.0),
+        left: left + dot + px(7.0),
+        top: px(55.0),
+        right,
+        bottom: px(74.0),
     };
     let mut subtitle = p.subtitle.clone();
     DrawTextW(
@@ -336,6 +547,7 @@ unsafe fn paint(
         DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
     );
     SelectObject(dc, old);
+    let _ = DeleteObject(eyebrow_font.into());
     let _ = DeleteObject(title_font.into());
     let _ = DeleteObject(sub_font.into());
 }
@@ -370,16 +582,36 @@ fn show(n: &Notice) -> windows::core::Result<()> {
         RegisterClassW(&wc); // Already registered on later notices: fine.
         let scale = GetDpiForSystem() as f32 / 96.0;
         let (w, h) = (
-            ((if n.compact { 320.0 } else { 360.0 }) * scale) as i32,
-            (76.0 * scale) as i32,
+            ((if n.compact { 330.0 } else { 372.0 }) * scale) as i32,
+            (86.0 * scale) as i32,
         );
+        // The work area of the monitor the game (foreground window) is on,
+        // not always the primary one.
         let mut work = RECT::default();
+        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            work = info.rcWork;
+        } else {
+            let _ = SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                Some(&mut work as *mut _ as *mut _),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            );
+        }
+        // Windows' "Animation effects" off (reduced motion): fade only.
+        let mut animate = windows::core::BOOL(1);
         let _ = SystemParametersInfoW(
-            SPI_GETWORKAREA,
+            SPI_GETCLIENTAREAANIMATION,
             0,
-            Some(&mut work as *mut _ as *mut _),
+            Some(&mut animate as *mut _ as *mut _),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
+        let slide = if animate.as_bool() { 24.0 * scale } else { 0.0 };
         let margin = (20.0 * scale) as i32;
         let x = work.right - w - margin;
         let y = work.top + margin;
@@ -395,8 +627,17 @@ fn show(n: &Notice) -> windows::core::Result<()> {
         }
         CURRENT.with(|c| {
             *c.borrow_mut() = Some(Paint {
+                eyebrow: wide(&n.eyebrow.to_uppercase()),
                 title: wide(&n.title),
                 subtitle: wide(&n.subtitle),
+                glyph: n.glyph.map(|g| wide(&g.to_string())),
+                initial: wide(
+                    &n.title
+                        .chars()
+                        .find(|c| c.is_alphanumeric())
+                        .map(|c| c.to_uppercase().to_string())
+                        .unwrap_or_else(|| "R".into()),
+                ),
                 active: n.active,
                 accent: n.accent.unwrap_or((139, 92, 246)),
                 icon,
@@ -408,7 +649,7 @@ fn show(n: &Notice) -> windows::core::Result<()> {
             class,
             w!("REPLAYX"),
             WS_POPUP,
-            x + (24.0 * scale) as i32,
+            x + slide as i32,
             y,
             w,
             h,
@@ -431,23 +672,24 @@ fn show(n: &Notice) -> windows::core::Result<()> {
                 DispatchMessageW(&msg);
             }
         };
-        // Slide in and fade in (220 ms, ease-out), hold, fade out (300 ms).
-        // About 30 short frames in total: no lasting work while a game runs.
+        // Slide in and fade in (240 ms, ease-out), hold, then fade out while
+        // drifting 8 px right (260 ms). About 30 short frames in total: no
+        // lasting work while a game runs. Reduced motion: fades only.
         let ease = |t: f32| 1.0 - (1.0 - t).powi(3);
         let start = Instant::now();
         loop {
-            let t = (start.elapsed().as_secs_f32() / 0.22).min(1.0);
+            let t = (start.elapsed().as_secs_f32() / 0.24).min(1.0);
             let e = ease(t);
             let _ = SetWindowPos(
                 hwnd,
                 Some(HWND_TOPMOST),
-                x + ((1.0 - e) * 24.0 * scale) as i32,
+                x + ((1.0 - e) * slide) as i32,
                 y,
                 0,
                 0,
                 SWP_NOSIZE | SWP_NOACTIVATE,
             );
-            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), (e * 246.0) as u8, LWA_ALPHA);
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), (e * 248.0) as u8, LWA_ALPHA);
             pump();
             if t >= 1.0 {
                 break;
@@ -461,9 +703,18 @@ fn show(n: &Notice) -> windows::core::Result<()> {
         }
         let fade = Instant::now();
         loop {
-            let t = (fade.elapsed().as_secs_f32() / 0.3).min(1.0);
+            let t = (fade.elapsed().as_secs_f32() / 0.26).min(1.0);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                x + (t * t * slide / 3.0) as i32,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOACTIVATE,
+            );
             let _ =
-                SetLayeredWindowAttributes(hwnd, COLORREF(0), ((1.0 - t) * 246.0) as u8, LWA_ALPHA);
+                SetLayeredWindowAttributes(hwnd, COLORREF(0), ((1.0 - t) * 248.0) as u8, LWA_ALPHA);
             pump();
             if t >= 1.0 {
                 break;
@@ -519,6 +770,147 @@ mod tests {
                 .observe(front, self.t0 + Duration::from_secs(s), |x| {
                     running.contains(&x)
                 })
+        }
+    }
+    /// Renders a card off screen (no window) and returns its BGRA pixels.
+    fn render(p: &Paint, w: i32, h: i32) -> Vec<u8> {
+        use windows::Win32::{Foundation::RECT, Graphics::Gdi::*};
+        unsafe {
+            let screen = GetDC(None);
+            let dc = CreateCompatibleDC(Some(screen));
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bitmap =
+                CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+            let old = SelectObject(dc, bitmap.into());
+            draw_card(
+                dc,
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: w,
+                    bottom: h,
+                },
+                p,
+            );
+            let _ = GdiFlush();
+            let pixels =
+                std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize).to_vec();
+            if let Some(path) = std::env::var_os("REPLAYX_CARD_PREVIEW") {
+                // Uncompressed BMP for a visual check (see docs: UI review).
+                let mut bmp = Vec::new();
+                let size = 54 + pixels.len() as u32;
+                bmp.extend_from_slice(b"BM");
+                bmp.extend_from_slice(&size.to_le_bytes());
+                bmp.extend_from_slice(&[0; 4]);
+                bmp.extend_from_slice(&54u32.to_le_bytes());
+                bmp.extend_from_slice(&40u32.to_le_bytes());
+                bmp.extend_from_slice(&w.to_le_bytes());
+                bmp.extend_from_slice(&(-h).to_le_bytes());
+                bmp.extend_from_slice(&1u16.to_le_bytes());
+                bmp.extend_from_slice(&32u16.to_le_bytes());
+                bmp.extend_from_slice(&[0; 24]);
+                bmp.extend_from_slice(&pixels);
+                let name = String::from_utf16_lossy(&p.title).replace(' ', "_");
+                std::fs::write(std::path::Path::new(&path).join(format!("{name}.bmp")), bmp)
+                    .unwrap();
+            }
+            SelectObject(dc, old);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(dc);
+            ReleaseDC(None, screen);
+            pixels
+        }
+    }
+    fn card(
+        title: &str,
+        eyebrow: &str,
+        subtitle: &str,
+        active: bool,
+        accent: (u8, u8, u8),
+    ) -> Paint {
+        Paint {
+            eyebrow: wide(eyebrow),
+            title: wide(title),
+            subtitle: wide(subtitle),
+            initial: wide(&title[..1]),
+            glyph: (eyebrow == "REPLAYX").then(|| {
+                wide(if title.starts_with("Recording") {
+                    "\u{E7C8}"
+                } else {
+                    "\u{E73E}"
+                })
+            }),
+            active,
+            accent,
+            icon: None,
+            scale: 1.0,
+        }
+    }
+    #[test]
+    fn the_notice_card_renders_its_surface_accent_and_text() {
+        let (w, h) = (372, 86);
+        let pick = |px: &[u8], x: i32, y: i32| {
+            let i = ((y * w + x) * 4) as usize;
+            (px[i + 2], px[i + 1], px[i])
+        };
+        let px = render(
+            &card(
+                "Fortnite",
+                "GAME DETECTED",
+                "Instant Replay ready · Ctrl+Shift+F10 saves",
+                true,
+                REPLAY_VIOLET,
+            ),
+            w,
+            h,
+        );
+        // Dark surface away from the glow; accent pill near the left edge.
+        let (r, g, b) = pick(&px, w - 30, h - 10);
+        assert!(r < 40 && g < 40 && b < 50, "surface {r},{g},{b}");
+        let (r, _, b) = pick(&px, 8, h / 2);
+        assert!(r > 100 && b > 180, "accent pill {r},{b}");
+        // Title text is drawn (light pixels in the title row).
+        let light = (80..300).any(|x| {
+            let (r, g, b) = pick(&px, x, 40);
+            r > 200 && g > 200 && b > 200
+        });
+        assert!(light, "title text");
+        for (title, eyebrow, sub, active, accent) in [
+            (
+                "Valorant",
+                "GAME DETECTED",
+                "Instant Replay off",
+                false,
+                REPLAY_VIOLET,
+            ),
+            (
+                "Instant Replay saved",
+                "REPLAYX",
+                "Fortnite · 1:00 · in Clips",
+                true,
+                SAVED_GREEN,
+            ),
+            (
+                "Recording started",
+                "REPLAYX",
+                "Ctrl+Shift+F9 stops and saves it",
+                true,
+                REC_RED,
+            ),
+        ] {
+            render(&card(title, eyebrow, sub, active, accent), w, h);
         }
     }
     #[test]

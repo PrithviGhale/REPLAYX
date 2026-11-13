@@ -1644,7 +1644,8 @@ pub fn run() {
                     if let Some(game) = news {
                         let icon_exe = front.as_ref().map(|(_, _, path)| PathBuf::from(path));
                         notices.show(crate::overlay::Notice {
-                            title: format!("{game} detected"),
+                            eyebrow: "Game detected".into(),
+                            title: game.clone(),
                             subtitle: crate::overlay::capture_line(
                                 status.replay,
                                 status.recording,
