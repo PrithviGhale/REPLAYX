@@ -423,6 +423,31 @@ impl Settings {
         self.pause_hotkey = defaults.pause_hotkey;
         true
     }
+    /// Start-up loading that never leaves REPLAYX unable to open: unreadable
+    /// or invalid settings are set aside (renamed next to the original, never
+    /// deleted) and the defaults are used, with a message for the user.
+    pub fn load_or_recover(path: &Path) -> (Self, Option<String>) {
+        match Self::load(path) {
+            Ok(s) => (s, None),
+            Err(e) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or_default();
+                let kept = path.with_file_name(format!("settings.unreadable-{stamp}.json"));
+                let moved = fs::rename(path, &kept).is_ok();
+                let note = if moved {
+                    format!(
+                        "Your settings couldn't be read, so REPLAYX started with its defaults. The old file was kept as {}. (Technical: {e:#})",
+                        kept.file_name().unwrap_or_default().to_string_lossy()
+                    )
+                } else {
+                    format!("Your settings couldn't be read, so REPLAYX started with its defaults. (Technical: {e:#})")
+                };
+                (Self::default(), Some(note))
+            }
+        }
+    }
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
         fs::create_dir_all(path.parent().context("Invalid settings path")?)?;
@@ -683,6 +708,31 @@ mod tests {
         s.save(&p).unwrap();
         s.save(&p).unwrap();
         assert_eq!(Settings::load(&p).unwrap().fps, 60);
+    }
+    #[test]
+    fn unreadable_settings_never_stop_replayx_from_opening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, b"{ \"fps\": 60, \"capt").unwrap(); // cut off mid-write
+        let (s, note) = Settings::load_or_recover(&path);
+        assert_eq!(s.fps, Settings::default().fps);
+        let note = note.expect("the user is told");
+        assert!(note.starts_with("Your settings couldn't be read"));
+        // The old file is kept (renamed), never deleted.
+        let kept: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("settings.unreadable-"))
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            std::fs::read(dir.path().join(&kept[0])).unwrap(),
+            b"{ \"fps\": 60, \"capt"
+        );
+        // A healthy file loads as before, with nothing to report.
+        Settings::default().save(&path).unwrap();
+        assert!(Settings::load_or_recover(&path).1.is_none());
     }
     #[test]
     fn reject_bad_settings() {

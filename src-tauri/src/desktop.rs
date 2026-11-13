@@ -1347,9 +1347,12 @@ pub fn run() {
             } else {
                 app.path().app_local_data_dir()?
             };
-            let settings = Settings::load(&data.join("settings.json"))?;
+            let (settings, settings_note) = Settings::load_or_recover(&data.join("settings.json"));
             discard_audio_tests(&data);
             let engine = Engine::new(data.clone(), settings.clone())?;
+            if let Some(note) = settings_note {
+                engine.update(|i| i.status.notice = Some(note));
+            }
             let updating = Arc::new(RwLock::new(false));
             let updates = crate::update_flow::UpdateRuntime::new(
                 data.clone(),
