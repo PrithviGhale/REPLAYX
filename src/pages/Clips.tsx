@@ -8,6 +8,9 @@ import { Badge, Button, Card, Empty, IconButton, Modal, Segmented } from '../ui'
 import { Section, Thumb } from './shared';
 import { GameIcon } from '../gameArt';
 import { forgetThumbs } from '../thumbs';
+import { useCapture } from '../capture';
+import { useStatus } from '../store';
+import { native } from '../api';
 
 const stem = (n: string) => n.replace(/\.(mkv|mp4)$/i, '');
 const ext = (n: string) => n.match(/\.(mkv|mp4)$/i)?.[0] ?? '';
@@ -29,6 +32,8 @@ export function showGameClips(game: string) {
 
 export function ClipsPage() {
   const { clips, refreshClips, dropClip, pendingSaves, run, busy, draft, toast } = useApp();
+  const { go } = useCapture();
+  const replayOn = useStatus(x => x.replay);
   const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
   const setPrefs = (p: Partial<Prefs>) => setPrefsState(old => {
     const next = { ...old, ...p };
@@ -134,7 +139,10 @@ export function ClipsPage() {
       )}
 
       {clips.length === 0 ? (
-        <Card><Empty icon={FileVideo} title="Your library is empty">Enable Instant Replay and press save, or start a recording. Clips are stored in {draft.output_dir}.</Empty></Card>
+        <Card><Empty icon={FileVideo} title="Your library is empty">
+          {replayOn ? 'Instant Replay is on: press Save replay (or your shortcut) after a great moment.' : 'Turn on Instant Replay and press save after a great moment, or start a recording.'} Clips are stored in {draft.output_dir}.
+          {!replayOn && native && <div className="empty-actions"><Button variant="primary" disabled={!!busy} onClick={() => go('start_replay')}>Turn on Instant Replay</Button></div>}
+        </Empty></Card>
       ) : prefs.view === 'games' ? (
         <div className="game-tiles" role="list" aria-label="Games with clips">
           {tiles.map(t => (

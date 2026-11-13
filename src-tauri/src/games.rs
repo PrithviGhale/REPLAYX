@@ -296,6 +296,70 @@ pub fn window_process(hwnd: windows::Win32::Foundation::HWND) -> Option<(u32, St
     }
 }
 
+/// Creation time of a process (100 ns units since 1601), with its id the
+/// identity of one game session.
+pub fn process_started(pid: u32) -> Option<u64> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let ok = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
+    }
+}
+/// Whether that exact process (id and creation time) is still running.
+///
+/// A process that can no longer be looked at (a protected or anti-cheat
+/// process refusing the query) counts as still running: treating it as ended
+/// would announce the game again on every check while it is in front. Only
+/// "no such process", a different creation time (the id was reused) or an
+/// exit code ends it.
+pub fn process_running(pid: u32, started: u64) -> bool {
+    use windows::Win32::{
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, STILL_ACTIVE},
+        System::Threading::{
+            GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
+    };
+    unsafe {
+        let process = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(p) => p,
+            // No process has this id any more.
+            Err(e) if e.code() == ERROR_INVALID_PARAMETER.to_hresult() => return false,
+            Err(_) => return true,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let times = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
+        let mut code = 0u32;
+        let exit = GetExitCodeProcess(process, &mut code);
+        let _ = CloseHandle(process);
+        // 0: the creation time couldn't be read when the game was first
+        // seen; then the id alone identifies it.
+        let same = started == 0
+            || ((created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64) == started;
+        match (times, exit) {
+            (Ok(()), Ok(())) => same && code == STILL_ACTIVE.0 as u32,
+            // Opened, but the details were refused: can't tell, keep it.
+            _ => true,
+        }
+    }
+}
+
 /// Classify whatever is in the foreground right now.
 pub fn sample(overrides: &[GameMapping]) -> Foreground {
     match foreground_process() {
@@ -307,6 +371,37 @@ pub fn sample(overrides: &[GameMapping]) -> Foreground {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_identity_follows_the_real_process_lifetime() {
+        let me = std::process::id();
+        let started = process_started(me).expect("own creation time");
+        assert!(process_running(me, started));
+        assert!(
+            !process_running(me, started + 1),
+            "a different creation time is another process"
+        );
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 2 127.0.0.1 >nul"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let t = process_started(pid).expect("child creation time");
+        assert!(process_running(pid, t));
+        child.wait().unwrap();
+        assert!(
+            !process_running(pid, t),
+            "an exited process ends its session"
+        );
+        drop(child);
+        // Once its last handle is closed the id belongs to nobody (or to a
+        // new process with another creation time): ended either way.
+        assert!(!process_running(pid, t));
+        assert!(!process_running(0xFFFF_FFFC, 1), "no such process");
+        assert!(!process_running(0xFFFF_FFFC, 0));
+        // Creation time unknown (0): the id alone, while it runs.
+        assert!(process_running(me, 0));
+    }
 
     /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and
     /// proves the sampler no longer takes part in it. A window is owned by a

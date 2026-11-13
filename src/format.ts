@@ -5,7 +5,7 @@ export const duration = (n: number) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
 };
-export const durationLabel = (n: number) => (n < 60 ? `${n} sec` : n % 60 === 0 ? `${n / 60} min` : `${(n / 60).toFixed(1)} min`);
+export const durationLabel = (n: number) => (n < 60 ? `${n} sec` : n % 60 === 0 ? `${n / 60} min` : `${Math.floor(n / 60)} min ${n % 60} sec`);
 export const bytes = (n: number) => {
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
@@ -23,7 +23,7 @@ export const canvasWidth = (h: number) => ({ 480: 854, 720: 1280, 1080: 1920, 14
 /** Mirror of media::target_bitrate_mbps: H.264 preset bitrate at an output size and fps. */
 export function targetBitrate(preset: string, custom: number, fps: number, width: number, height: number) {
   if (preset === 'custom') return custom;
-  const base = preset === 'performance' ? 10 : preset === 'quality' ? 25 : 16;
+  const base = preset === 'performance' ? 10 : preset === 'quality' ? 25 : 15;
   const pixels = (width * height) / (1920 * 1080);
   return Math.min(150, Math.max(4, Math.round(base * pixels ** 0.9 * (fps / 60) ** 0.75)));
 }

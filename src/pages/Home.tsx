@@ -1,9 +1,14 @@
-import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
-import { native } from '../api';
+import { useState } from 'react';
+import { ErrorNotice } from '../ErrorNotice';
+import { describeError, describeSettingsProblem, type SettingsProblem } from '../errors';
+import { visibleNotice } from '../notices';
+import { ChevronRight, Circle, Cpu, HardDrive, Info, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
+import { api, native } from '../api';
+import { microphoneLabel, microphoneOn } from '../update-logic';
 import { useApp } from '../context';
 import { useCapture, useRecordButton } from '../capture';
 import { ReplaySwitch } from '../ReplaySwitch';
-import { activeOf, useStatus } from '../store';
+import { activeOf, refreshNow, useStatus } from '../store';
 import { bytes, duration, encoderName, outputWidth, plan, sourceRect } from '../format';
 import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
 import { SourceIcon, Section, Thumb, feedIndex } from './shared';
@@ -22,6 +27,34 @@ function ReplayRing({ value, total, live }: { value: number; total: number; live
         <span>of {duration(total)}</span>
       </div>
     </div>
+  );
+}
+
+/** The microphone row of the home Audio card: level and one On/Off switch.
+ * The switch shows what the engine confirmed, also when it was changed from
+ * the tray or with the shortcut. Off mutes the microphone in recordings (its
+ * device, volume and Voice Enhancer settings stay as they are). */
+function MicRow({ name, peak, capturing }: { name: string; peak: number; capturing: boolean }) {
+  const { saved, setMicrophone } = useApp();
+  const [pending, setPending] = useState(false);
+  const mic = saved.audio.find(a => a.kind === 'microphone');
+  const on = microphoneOn(saved.audio) ?? false;
+  const state = useStatus(x => x.state);
+  const label = microphoneLabel(mic, state);
+  const toggle = async () => {
+    if (pending) return;
+    setPending(true);
+    try { await setMicrophone(!on); } finally { setPending(false); }
+  };
+  return (
+    <li className={`mic-row ${on ? 'on' : 'off'}`}>
+      <span className="source-icon kind-microphone">{on ? <Mic size={18} /> : <MicOff size={18} />}</span>
+      <span className="name" title={name}><span>{name}</span><em className="off-tag">{label}</em></span>
+      <Meter peak={on ? peak : 0} active={capturing && on} />
+      <button role="switch" aria-checked={on} aria-label={on ? 'Microphone on. Turn microphone off' : 'Microphone off. Turn microphone on'}
+        title={on ? 'Microphone is recorded. Click to turn it off.' : 'Microphone is not recorded. Click to turn it on.'}
+        className={`switch mic-switch ${on ? 'on' : ''} ${pending ? 'pending' : ''}`} aria-busy={pending} disabled={!native} onClick={toggle}><span /></button>
+    </li>
   );
 }
 
@@ -53,14 +86,17 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
     elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
-    free: x.free_bytes, error: x.error, notice: x.notice, hotkey: x.hotkey_error, recovery: x.recovery_sessions,
+    free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice, noticeId: x.notice_id ?? 0,
+    // Compared as text: the status object is new on every poll.
+    settingsProblem: x.settings_problem ? JSON.stringify(x.settings_problem) : '', hotkey: x.hotkey_error, recovery: x.recovery_sessions,
   }));
   const peaks = useStatus(x => x.audio_peaks);
   const active = useStatus(activeOf);
   const display = caps?.displays.find(d => d.index === draft.display);
   const p = plan(sourceRect(display, draft.source_rect), outputWidth(draft.width, draft.height), draft.height, draft.canvas_mode);
   const out = active && s.ow ? `${s.ow} × ${s.oh}${s.pw ? ` (plays as ${s.pw} × ${s.ph})` : ''}` : `${p.width} × ${p.height}`;
-  const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled);
+  // The microphone is always listed (with its switch), also when it is off.
+  const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled || x.a.kind === 'microphone');
   const rec = useRecordButton('Stop & save');
   const starting = s.pending || s.state === 'Starting';
   const headline = starting ? (s.pending || s.recording ? 'Starting recording…' : 'Starting capture…') : s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
@@ -69,12 +105,32 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
     : s.replay ? `The last ${duration(draft.replay_seconds)} is kept on disk. Save it the moment something happens.`
     : 'Turn on Instant Replay before you play. It works on the desktop too — no game required.';
 
-  const alerts = [s.error && { tone: 'bad', text: s.error }, s.hotkey && { tone: 'warn', text: s.hotkey },
-    caps?.media_error && { tone: 'bad', text: caps.media_error }, s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
+  // Problems become friendly cards with actions; plain notices stay banners.
+  // The engine error offers Retry for exactly what it interrupted.
+  const problems = [
+    ...(s.settingsProblem ? [describeSettingsProblem(JSON.parse(s.settingsProblem) as SettingsProblem)] : []),
+    ...(s.error ? [describeError(s.error, { retry: s.retry ? s.retry.split(',') : [] })] : []),
+    ...[s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(x => describeError(x)),
+  ];
+  // A message stays until it is closed with ×. Closing hides that
+  // occurrence at once and clears it in the engine; the same message later is
+  // a new occurrence and shows again (see notices.ts).
+  const [closedId, setClosedId] = useState<number | null>(null);
+  const notice = visibleNotice(s.notice, s.noticeId, closedId);
+  const closeNotice = (id: number) => {
+    setClosedId(id);
+    if (native) void api.dismissNotice(id).catch(() => undefined).finally(refreshNow);
+  };
 
   return (
     <Section>
-      {alerts.map((a, i) => <div key={i} className={`banner ${a.tone}`} role={a.tone === 'bad' ? 'alert' : undefined}><AlertTriangle size={15} />{a.text}</div>)}
+      {problems.map(e => <ErrorNotice key={e.key} error={e} />)}
+      {notice && (
+        <div className="banner info closable" role="status">
+          <Info size={15} /><span>{notice.text}</span>
+          <button type="button" className="banner-close" aria-label="Close message" title="Close" onClick={() => closeNotice(notice.id)}><X size={14} /></button>
+        </div>
+      )}
       {s.recovery > 0 && !active && (
         <button className="banner info link" onClick={() => navigate('replay')}>
           {s.recovery} interrupted capture session{s.recovery > 1 ? 's' : ''} can be recovered <ChevronRight size={14} />
@@ -121,7 +177,9 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
         <Card title="Audio" actions={<button className="link-btn" onClick={() => navigate('audio')}>Mixer <ChevronRight size={13} /></button>}>
           {enabled.length === 0 ? <p className="muted small">No audio sources enabled — clips will be silent.</p> : (
             <ul className="mini-mixer">
-              {enabled.map(({ a, i }) => (
+              {enabled.map(({ a, i }) => a.kind === 'microphone' ? (
+                <MicRow key={i} name={a.name} peak={a.enabled ? peaks[feedIndex(draft.audio, i)] ?? 0 : 0} capturing={active} />
+              ) : (
                 <li key={i}>
                   <SourceIcon source={a} />
                   <span className="name">{a.name}</span>

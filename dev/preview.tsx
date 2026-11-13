@@ -34,13 +34,27 @@ const initialSettings = (): Settings => ({
     { kind: 'microphone', device: 'b', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false, boost_db: 6, voice: { ...CLEAR_VOICE } },
   ],
 });
+const settingsScenario = new URLSearchParams(window.location.search).get('settings');
+const settingsProblem: Status['settings_problem'] = settingsScenario === 'damaged'
+  ? { kind: 'damaged', backup: 'settings.unreadable-1794191412.json', technical: 'Settings are corrupt; restore or remove settings.json: EOF while parsing an object at line 1 column 18' }
+  : settingsScenario === 'unreadable' || settingsScenario === 'damaged_not_kept'
+    ? { kind: settingsScenario, technical: "Couldn't open settings.json: The process cannot access the file because it is being used by another process. (os error 32)" }
+    : null;
 const started = Date.now();
 const status = (): Status => {
   const t = (Date.now() - started) / 1000;
-  const on = scenario !== 'off';
+  const on = !['off', 'error'].includes(scenario);
   return {
     ...emptyStatus,
-    state: !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
+    // ?state=error: the start failure users reported (friendly card on Home).
+    error: scenario === 'error' ? "System audio couldn't connect to the sound device: it was changing or unavailable for 10 seconds. Reconnect the headset or check Windows Sound settings, then try again. (Technical: System audio: Windows returned an error: 0x88890004)" : null,
+    error_retry: scenario === 'error' ? ['start_replay'] : [],
+    // ?settings=damaged|unreadable|damaged_not_kept: the start-up settings notice.
+    settings_problem: settingsProblem,
+    // ?notice=TEXT: a Home message (closable).
+    notice: new URLSearchParams(window.location.search).get('notice'),
+    notice_id: 1,
+    state: scenario === 'error' ? 'Error' : !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
     encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
     target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,
     scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,
@@ -68,6 +82,21 @@ const clips: Clip[] = scenario === 'empty' ? [] : [
   clip('Valorant', 'Valorant_2026-11-06_22-15-01.mkv', 'Replay', 1794107701, 30, mix),
   clip('Desktop', 'Desktop_2026-11-06_22-02-12.mkv', 'Replay', 1794106932, 30, ['Playback mix', 'System audio']),
 ];
+const updateScenario = new URLSearchParams(window.location.search).get('update') ?? 'uptodate';
+let updateRevision = 0;
+function updateStatus(dismissed: boolean) {
+  const stage = ({ uptodate: 'up_to_date' } as Record<string, string>)[updateScenario] ?? updateScenario;
+  const offered = ['available', 'downloading', 'verifying', 'ready', 'failed'].includes(stage);
+  return {
+    revision: ++updateRevision, stage, current: '0.3.1-alpha.6', latest: offered ? '0.3.1-alpha.7' : null,
+    notes: offered ? ["## What's New", '', '- Updates install from inside REPLAYX', '- Microphone switch on the home page', '- Smoother clip saving', '- Fixes for audio devices'].join('\n') : null,
+    date: offered ? '2026-11-12' : null, downloaded: stage === 'downloading' ? 26_400_000 : stage === 'ready' || stage === 'verifying' ? 61_138_175 : 0,
+    total: ['downloading', 'verifying', 'ready'].includes(stage) ? 61_138_175 : null,
+    error: stage === 'failed' ? "Couldn't reach GitHub. Check your internet connection and try again." : null, detail: null,
+    last_checked: Date.now() - 12 * 60_000, simulated: false, configured: true, installable: true, waiting: false,
+    prompt: !dismissed && (stage === 'available' || stage === 'ready') && new URLSearchParams(window.location.search).has('prompt'), release_url: null,
+  };
+}
 mockIPC((cmd, args) => {
   const a = args as Record<string, unknown>;
   switch (cmd) {
@@ -89,6 +118,10 @@ mockIPC((cmd, args) => {
       { pid: 19036, name: 'Spotify.exe', path: '', started: 1, active: false }, { pid: 24240, name: 'Browser.exe', path: '', started: 1, active: false },
     ];
     case 'app_icon': return null;
+    // Update screens with sample data: ?update=available|downloading|verifying|ready|uptodate|failed
+    case 'update_status': case 'check_update': case 'update_dismiss': case 'update_simulate': return updateStatus(cmd === 'update_dismiss');
+    case 'update_configure': settings = { ...settings, updates: a.settings as Settings['updates'] }; return settings;
+    case 'set_microphone': settings = { ...settings, audio: settings.audio.map(s => (s.kind === 'microphone' ? { ...s, enabled: true, muted: !a.on } : s)) }; return settings;
     case 'playtime_data': {
       const day = 864e5, now = Date.now();
       const games = ['Roblox', 'Fortnite', 'Valorant', 'Counter-Strike 2'];

@@ -1,0 +1,80 @@
+<!doctype html>
+<!-- README showcase stage: one or two app screenshots tilted in 3D, with a
+     glowing edge and a reflection below. Rendered by dev/showcase-shots.mjs.
+     ?front=../docs/images/home.png&back=../docs/images/clips.png&tilt=right -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>REPLAYX showcase</title>
+<style>
+  :root { --accent: 139, 92, 246; --edge: 167, 139, 250; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #05050a; }
+  .stage {
+    position: relative; width: 1600px; height: 900px; overflow: hidden;
+    perspective: 2300px; perspective-origin: 50% 40%;
+    background:
+      radial-gradient(ellipse 55% 45% at 50% 38%, rgba(var(--accent), 0.26), transparent 70%),
+      radial-gradient(ellipse 80% 35% at 50% 100%, rgba(var(--accent), 0.10), transparent 70%),
+      linear-gradient(#07060d, #040408);
+  }
+  /* Faint floor line where the panels stand. */
+  .stage::after {
+    content: ""; position: absolute; left: 8%; right: 8%; top: 79.5%; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(var(--edge), 0.35), transparent);
+    filter: blur(0.4px);
+  }
+  .scene { position: absolute; inset: 0; transform-style: preserve-3d; }
+  .panel {
+    position: absolute; width: 1040px; aspect-ratio: 1280 / 800;
+    border-radius: 16px; border: 2px solid rgba(var(--edge), 0.9);
+    background: #0b0b12 center / cover no-repeat;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+      0 0 22px rgba(var(--accent), 0.55),
+      0 0 80px rgba(var(--accent), 0.30),
+      0 50px 90px rgba(0, 0, 0, 0.65);
+    /* The reflection on the glossy floor, fading out. */
+    -webkit-box-reflect: below 14px linear-gradient(to bottom, transparent 62%, rgba(255, 255, 255, 0.20));
+  }
+  /* Glass highlight along the top edge. */
+  .panel::before {
+    content: ""; position: absolute; inset: 0; border-radius: 14px; pointer-events: none;
+    background: linear-gradient(170deg, rgba(255, 255, 255, 0.10), transparent 22%);
+  }
+  .front { left: 150px; top: 150px; width: 960px; transform: rotateY(var(--ry)) rotateX(3deg) translateZ(40px); }
+  .back {
+    left: 760px; top: 60px; width: 900px; opacity: 0.7;
+    transform: rotateY(var(--ry)) rotateX(3deg) translateZ(-380px);
+    filter: saturate(0.9) brightness(0.75);
+  }
+  .solo .front { left: 300px; top: 120px; width: 1000px; }
+  .left:not(.solo) .front { left: 490px; }
+  .left .back { left: -60px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="scene" id="scene"></div>
+</div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const scene = document.getElementById('scene');
+  const tilt = q.get('tilt') === 'left' ? '-15deg' : '15deg';
+  scene.style.setProperty('--ry', tilt);
+  const add = (cls, src) => {
+    const d = document.createElement('div');
+    d.className = `panel ${cls}`;
+    d.style.backgroundImage = `url("${src}")`;
+    scene.append(d);
+  };
+  if (q.get('back')) add('back', q.get('back')); else scene.classList.add('solo');
+  add('front', q.get('front'));
+  // A left tilt turns the other way, with the back panel on the left.
+  if (tilt.startsWith('-')) scene.classList.add('left');
+  Promise.all([...document.querySelectorAll('.panel')].map(p => new Promise(r => {
+    const i = new Image(); i.onload = i.onerror = r; i.src = p.style.backgroundImage.slice(5, -2);
+  }))).then(() => { document.body.dataset.ready = '1'; });
+</script>
+</body>
+</html>

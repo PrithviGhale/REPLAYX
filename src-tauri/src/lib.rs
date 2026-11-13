@@ -15,5 +15,8 @@ pub mod overlay;
 pub mod playtime;
 pub mod process_job;
 pub mod status_overlay;
+#[cfg(feature = "desktop")]
+pub mod update_flow;
+pub mod updates;
 pub mod voice;
 pub mod winutil;

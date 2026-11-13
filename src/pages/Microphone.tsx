@@ -64,7 +64,7 @@ export function MicrophoneCard() {
 
   if (!mic) {
     return (
-      <Card title="Microphone">
+      <Card anchor="microphone" title="Microphone">
         <div className="banner warn small">Five other audio sources are set up, so there is no room for the microphone. Remove one in Sound sources below.</div>
       </Card>
     );
@@ -89,7 +89,7 @@ export function MicrophoneCard() {
     ...(v.preset === 'custom' ? [{ value: 'custom' as VoicePreset, label: 'Custom', hint: 'Your own settings' }] : []),
   ];
   return (
-    <Card title="Microphone" className="mic-card"
+    <Card anchor="microphone" title="Microphone" className="mic-card"
       actions={<>
         <Badge tone={state.tone} dot>{state.label}</Badge>
         {track && <Badge tone="accent">Track {track}</Badge>}

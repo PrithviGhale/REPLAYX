@@ -109,6 +109,14 @@ pub struct Settings {
     /// marked to play at the chosen shape; "exact" resizes through a CPU copy,
     /// which can repeat frames while a demanding game runs.
     pub scale_policy: String,
+    /// Display capture API: "dda" (Desktop Duplication, the default) or
+    /// "wgc" (Windows Graphics Capture, experimental). If WGC cannot start,
+    /// the start falls back to Desktop Duplication and says why.
+    pub capture_api: String,
+    /// Runtime only (never saved): this session's WGC capture missed output
+    /// slots at 1x, so capture runs at 2x the output rate.
+    #[serde(skip)]
+    pub wgc_boost: bool,
     /// In-game status overlay (replay, recording, microphone).
     pub overlay: crate::status_overlay::OverlaySettings,
     /// Close-to-tray explanation already shown once.
@@ -121,6 +129,8 @@ pub struct Settings {
     pub playtime: crate::playtime::PlaytimeSettings,
     /// Short bar when a recording starts or a clip is saved.
     pub capture_notices: bool,
+    /// Update checks, downloads and installs (see `updates`).
+    pub updates: crate::updates::UpdateSettings,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -166,11 +176,14 @@ impl Default for Settings {
             game_mappings: Vec::new(),
             game_notifications: true,
             scale_policy: "smooth".into(),
+            capture_api: "dda".into(),
+            wgc_boost: false,
             overlay: Default::default(),
             tray_hint_shown: false,
             tour_done: false,
             voice_presets: Vec::new(),
             playtime: Default::default(),
+            updates: Default::default(),
             capture_notices: true,
             settings_version: SETTINGS_VERSION,
         }
@@ -258,8 +271,10 @@ impl Settings {
         {
             bail!("Unsupported resolution or frame rate")
         }
-        if ![30, 60, 180, 300, 600, 900, 1800].contains(&self.replay_seconds) {
-            bail!("Invalid replay duration")
+        // Any length from 30 s: the Replay page slider offers up to 10 min in
+        // 15 s steps; 15 and 30 min saved by earlier versions stay valid.
+        if !(30..=1800).contains(&self.replay_seconds) {
+            bail!("Replay length must be between 30 seconds and 30 minutes")
         }
         if !(128..=102400).contains(&self.buffer_mb) || !(1..=150).contains(&self.bitrate_mbps) {
             bail!("Invalid disk budget or bitrate")
@@ -379,18 +394,41 @@ impl Settings {
         changed
     }
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
+        Self::load_checked(path).map_err(|e| match e {
+            LoadError::Unreadable(e) | LoadError::Damaged(e, _) => e,
+        })
+    }
+    /// Load, telling a file that couldn't be opened apart from one whose
+    /// contents are damaged. A migration that can't be written back is not
+    /// an error: the migrated settings are used and saved with the next
+    /// change.
+    fn load_checked(path: &Path) -> std::result::Result<Self, LoadError> {
+        let bytes = match read_settings_bytes(path) {
+            Ok(Some(b)) => b,
+            Ok(None) => return Ok(Self::default()),
+            Err(e) => {
+                return Err(LoadError::Unreadable(
+                    anyhow::Error::new(e).context("Couldn't open settings.json"),
+                ))
+            }
+        };
+        let checked = serde_json::from_slice::<Self>(&bytes)
+            .context("Settings are corrupt; restore or remove settings.json")
+            .and_then(|mut s| {
+                // Migrate only the complete legacy default set, preserving
+                // custom keys.
+                let keys = s.migrate_legacy_hotkeys();
+                let layout = s.migrate();
+                let paths = s.normalize_paths();
+                s.validate()?;
+                Ok((s, keys || layout || paths))
+            });
+        let (s, migrated) = checked.map_err(|e| LoadError::Damaged(e, bytes))?;
+        if migrated {
+            if let Err(e) = s.save(path) {
+                eprintln!("REPLAYX: updated settings will be saved with the next change: {e:#}");
+            }
         }
-        let mut s: Self = serde_json::from_slice(&fs::read(path)?)
-            .context("Settings are corrupt; restore or remove settings.json")?;
-        // Migrate only the complete legacy default set, preserving custom keys.
-        let layout = s.migrate();
-        let paths = s.normalize_paths();
-        if s.migrate_legacy_hotkeys() || layout || paths {
-            s.save(path)?;
-        }
-        s.validate()?;
         Ok(s)
     }
     fn migrate_legacy_hotkeys(&mut self) -> bool {
@@ -409,6 +447,58 @@ impl Settings {
         self.mute_hotkey = defaults.mute_hotkey;
         self.pause_hotkey = defaults.pause_hotkey;
         true
+    }
+    /// Start-up loading that never leaves REPLAYX unable to open and never
+    /// loses the user's settings file:
+    ///
+    /// - A file that can't be opened (in use by another program, access
+    ///   denied) is left untouched, and the problem says REPLAYX must not
+    ///   write over it this session.
+    /// - A damaged file (not valid JSON, or invalid values) is set aside
+    ///   under a new name that is never reused, so no earlier copy is ever
+    ///   replaced. If it can only be copied, the original remains protected
+    ///   from settings writes until restart because another writer may change it.
+    ///
+    /// In every case REPLAYX starts with its defaults.
+    pub fn load_or_recover(path: &Path) -> (Self, Option<SettingsProblem>) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        Self::recover_at(path, stamp, KEPT_NAMES)
+    }
+    fn recover_at(path: &Path, stamp: u64, names: u32) -> (Self, Option<SettingsProblem>) {
+        let problem = match Self::load_checked(path) {
+            Ok(s) => return (s, None),
+            Err(LoadError::Unreadable(e)) => SettingsProblem::Unreadable {
+                technical: format!("{e:#}"),
+            },
+            Err(LoadError::Damaged(e, bytes)) => {
+                let technical = format!("{e:#}");
+                match set_aside(path, &bytes, stamp, names) {
+                    Ok(SettingsBackup::Moved(kept)) => SettingsProblem::Damaged {
+                        backup: kept
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                        technical,
+                    },
+                    Ok(SettingsBackup::Copied(kept)) => SettingsProblem::DamagedCopied {
+                        backup: kept
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                        technical,
+                    },
+                    Err(why) => SettingsProblem::DamagedNotKept {
+                        technical: format!("{technical}. Keeping a copy failed: {why}"),
+                    },
+                }
+            }
+        };
+        (Self::default(), Some(problem))
     }
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
@@ -445,6 +535,164 @@ impl Settings {
         }
         Ok(())
     }
+}
+
+/// What start-up found wrong with the settings file. The UI shows it in plain
+/// words; `technical` is kept apart, for the details section only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SettingsProblem {
+    /// The file was damaged. It was set aside as `backup` (next to it, in the
+    /// same folder); the defaults are in use and saving is safe.
+    Damaged { backup: String, technical: String },
+    /// A snapshot was copied, but the original remains in place and may
+    /// change independently. Keep this session read-only until restart.
+    DamagedCopied { backup: String, technical: String },
+    /// The file was damaged and couldn't be set aside or copied. It is left
+    /// as it is, and REPLAYX doesn't write over it until it restarts.
+    DamagedNotKept { technical: String },
+    /// The file exists but couldn't be opened (another program is using it,
+    /// or access was denied). It is left as it is, and REPLAYX doesn't write
+    /// over it until it restarts.
+    Unreadable { technical: String },
+}
+impl SettingsProblem {
+    /// Whether REPLAYX may write settings.json in this session. Only when the
+    /// original was kept somewhere safe first.
+    pub fn allows_saving(&self) -> bool {
+        matches!(self, Self::Damaged { .. })
+    }
+}
+
+enum LoadError {
+    /// The file exists but couldn't be read.
+    Unreadable(anyhow::Error),
+    /// The file was read, but isn't valid settings. Carries its bytes.
+    Damaged(anyhow::Error, Vec<u8>),
+}
+
+/// How many names `settings.unreadable-<time>[-n].json` are tried in one
+/// second before giving up.
+const KEPT_NAMES: u32 = 1000;
+
+/// Read the settings file; `None` when there is none yet (first start).
+/// Antivirus, backup and sync tools can hold a file for a moment, so a
+/// sharing or lock violation, or access denied, is retried for about half a
+/// second before it counts.
+fn read_settings_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    let mut tries = 0;
+    loop {
+        match fs::read(path) {
+            Ok(b) => return Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            // 5 access denied, 32 sharing violation, 33 lock violation.
+            Err(e) if tries < 5 && matches!(e.raw_os_error(), Some(5 | 32 | 33)) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn kept_name(stamp: u64, n: u32) -> String {
+    if n == 0 {
+        format!("settings.unreadable-{stamp}.json")
+    } else {
+        format!("settings.unreadable-{stamp}-{n}.json")
+    }
+}
+
+fn wide(p: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    p.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+enum SettingsBackup {
+    Moved(PathBuf),
+    Copied(PathBuf),
+}
+
+/// Set a damaged settings file aside without ever replacing another file.
+///
+/// 1. Move it to the first free `settings.unreadable-<time>[-n].json`. The
+///    move refuses to replace an existing file, so an earlier copy is never
+///    lost, even when two recoveries happen in the same second.
+/// 2. If it can't be moved (another program holds it open, or another
+///    REPLAYX start moved it first), keep an exact copy of the bytes that
+///    were read instead. A copy with the same bytes that is already there is
+///    reused. A new copy is created only under a name that doesn't exist
+///    yet, and is read back to check it. Copy outcomes require read-only recovery.
+fn set_aside(path: &Path, bytes: &[u8], stamp: u64, names: u32) -> std::io::Result<SettingsBackup> {
+    use std::io::{Error, ErrorKind, Write};
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH},
+    };
+    let dir = path
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "settings path has no folder"))?;
+    let from = wide(path);
+    let mut move_failed = None;
+    for n in 0..names {
+        let kept = dir.join(kept_name(stamp, n));
+        // No MOVEFILE_REPLACE_EXISTING: fails if `kept` exists.
+        match unsafe {
+            MoveFileExW(
+                PCWSTR(from.as_ptr()),
+                PCWSTR(wide(&kept).as_ptr()),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        } {
+            Ok(()) => return Ok(SettingsBackup::Moved(kept)),
+            // 80 file exists, 183 already exists: try the next name.
+            Err(e) if matches!(e.code().0 as u32 & 0xFFFF, 80 | 183) && kept.exists() => continue,
+            Err(e) => {
+                move_failed = Some(e);
+                break;
+            }
+        }
+    }
+    let existing = fs::read_dir(dir)?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with("settings.unreadable-") && name.ends_with(".json")
+        })
+        .find(|e| {
+            e.metadata()
+                .is_ok_and(|m| m.is_file() && m.len() == bytes.len() as u64)
+                && fs::read(e.path()).is_ok_and(|b| b == bytes)
+        });
+    if let Some(e) = existing {
+        return Ok(SettingsBackup::Copied(e.path()));
+    }
+    for n in 0..names {
+        let kept = dir.join(kept_name(stamp, n));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&kept)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        let written = file.write_all(bytes).and_then(|()| file.sync_all());
+        drop(file);
+        if written.is_ok() && fs::read(&kept).is_ok_and(|b| b == bytes) {
+            return Ok(SettingsBackup::Copied(kept));
+        }
+        // Only ever our own, just-created, incomplete copy.
+        let _ = fs::remove_file(&kept);
+        return Err(written
+            .err()
+            .unwrap_or_else(|| Error::other("the copy didn't match the original")));
+    }
+    Err(Error::other(match move_failed {
+        Some(e) => format!("couldn't move it ({e}) and no free name for a copy"),
+        None => "no free name to keep it under".to_owned(),
+    }))
 }
 
 pub fn safe_clip(root: &Path, name: &str) -> Result<PathBuf> {
@@ -671,6 +919,220 @@ mod tests {
         s.save(&p).unwrap();
         assert_eq!(Settings::load(&p).unwrap().fps, 60);
     }
+    fn kept_files(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut v: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("settings.unreadable-"))
+            .map(|n| {
+                let b = fs::read(dir.join(&n)).unwrap_or_default();
+                (n, b)
+            })
+            .collect();
+        v.sort();
+        v
+    }
+    /// Open the file the way another program holding it would: with the
+    /// given sharing (0 = nothing, 1 = read only).
+    fn hold(path: &Path, share: u32) -> fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(share)
+            .open(path)
+            .unwrap()
+    }
+    const TORN: &[u8] = b"{ \"fps\": 60, \"capt"; // cut off mid-write
+    #[test]
+    fn damaged_settings_are_set_aside_byte_for_byte_and_defaults_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, TORN).unwrap();
+        let (s, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert_eq!(s.fps, Settings::default().fps);
+        let problem = problem.expect("the user is told");
+        assert!(matches!(
+            &problem,
+            SettingsProblem::Damaged { backup, technical }
+                if backup == "settings.unreadable-1000.json" && technical.contains("corrupt")
+        ));
+        assert!(problem.allows_saving());
+        assert_eq!(
+            kept_files(dir.path()),
+            vec![("settings.unreadable-1000.json".into(), TORN.to_vec())]
+        );
+        // Saving now can't lose anything, and a healthy file loads as before.
+        Settings::default().save(&path).unwrap();
+        assert!(Settings::load_or_recover(&path).1.is_none());
+        assert_eq!(kept_files(dir.path()).len(), 1);
+    }
+    #[test]
+    fn invalid_values_count_as_damaged_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, br#"{ "fps": 0 }"#).unwrap();
+        let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert!(matches!(problem, Some(SettingsProblem::Damaged { .. })));
+        assert_eq!(kept_files(dir.path())[0].1, br#"{ "fps": 0 }"#);
+    }
+    #[test]
+    fn two_recoveries_in_the_same_second_keep_both_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, b"first damaged").unwrap();
+        Settings::recover_at(&path, 1000, KEPT_NAMES);
+        fs::write(&path, b"second damaged").unwrap();
+        Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert_eq!(
+            kept_files(dir.path()),
+            vec![
+                (
+                    "settings.unreadable-1000-1.json".into(),
+                    b"second damaged".to_vec()
+                ),
+                (
+                    "settings.unreadable-1000.json".into(),
+                    b"first damaged".to_vec()
+                ),
+            ]
+        );
+    }
+    #[test]
+    fn an_existing_backup_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(dir.path().join("settings.unreadable-1000.json"), b"older").unwrap();
+        fs::write(&path, TORN).unwrap();
+        let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert!(matches!(
+            problem,
+            Some(SettingsProblem::Damaged { ref backup, .. }) if backup == "settings.unreadable-1000-1.json"
+        ));
+        assert_eq!(
+            kept_files(dir.path()),
+            vec![
+                ("settings.unreadable-1000-1.json".into(), TORN.to_vec()),
+                ("settings.unreadable-1000.json".into(), b"older".to_vec()),
+            ]
+        );
+    }
+    #[test]
+    fn a_settings_file_in_use_is_left_alone_and_must_not_be_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let custom = Settings {
+            fps: 30,
+            ..Default::default()
+        };
+        custom.save(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        let held = hold(&path, 0); // sharing violation for everyone else
+        let (s, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        drop(held);
+        assert_eq!(s.fps, Settings::default().fps);
+        let problem = problem.unwrap();
+        assert!(matches!(problem, SettingsProblem::Unreadable { .. }));
+        assert!(!problem.allows_saving(), "a later save would lose fps 30");
+        assert!(kept_files(dir.path()).is_empty());
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+    #[test]
+    fn a_damaged_file_that_cannot_be_moved_is_copied_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, TORN).unwrap();
+        let held = hold(&path, 1); // readable, but can't be moved or deleted
+        let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        drop(held);
+        let problem = problem.unwrap();
+        assert!(matches!(problem, SettingsProblem::DamagedCopied { .. }));
+        assert!(
+            !problem.allows_saving(),
+            "the original can still change independently"
+        );
+        assert_eq!(
+            kept_files(dir.path()),
+            vec![("settings.unreadable-1000.json".into(), TORN.to_vec())]
+        );
+        assert_eq!(fs::read(&path).unwrap(), TORN, "the original is untouched");
+        // The next start finds the same damage: the copy is reused, not
+        // duplicated.
+        let held = hold(&path, 1);
+        Settings::recover_at(&path, 1001, KEPT_NAMES);
+        drop(held);
+        assert_eq!(kept_files(dir.path()).len(), 1);
+    }
+    #[test]
+    fn copied_damage_can_finish_recovery_after_the_file_is_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, TORN).unwrap();
+        let held = hold(&path, 1);
+        let (_, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert!(!problem.unwrap().allows_saving());
+        drop(held);
+        let (settings, problem) = Settings::recover_at(&path, 1001, KEPT_NAMES);
+        assert!(matches!(problem, Some(SettingsProblem::Damaged { .. })));
+        assert!(problem.unwrap().allows_saving());
+        settings.save(&path).unwrap();
+        assert!(Settings::load_or_recover(&path).1.is_none());
+        assert!(kept_files(dir.path())
+            .iter()
+            .all(|(_, bytes)| bytes == TORN));
+    }
+    #[test]
+    fn a_damaged_file_with_no_copy_possible_must_not_be_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, TORN).unwrap();
+        // Every name is taken (by folders), and the file can't be moved.
+        for n in 0..3 {
+            fs::create_dir(dir.path().join(kept_name(1000, n))).unwrap();
+        }
+        let held = hold(&path, 1);
+        let (_, problem) = Settings::recover_at(&path, 1000, 3);
+        drop(held);
+        let problem = problem.unwrap();
+        assert!(matches!(problem, SettingsProblem::DamagedNotKept { .. }));
+        assert!(!problem.allows_saving());
+        assert_eq!(fs::read(&path).unwrap(), TORN);
+    }
+    #[test]
+    fn a_migration_that_cannot_be_written_back_keeps_the_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let legacy = Settings {
+            fps: 30,
+            replay_hotkey: "Alt+F10".into(),
+            recording_hotkey: "Alt+F9".into(),
+            mute_hotkey: "Alt+M".into(),
+            pause_hotkey: "Alt+F8".into(),
+            ..Default::default()
+        };
+        fs::write(&path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+        let original = fs::read(&path).unwrap();
+        // The save's temporary file can't be created.
+        fs::create_dir(path.with_extension("tmp")).unwrap();
+        let (s, problem) = Settings::recover_at(&path, 1000, KEPT_NAMES);
+        assert!(problem.is_none(), "the settings themselves are fine");
+        assert_eq!(s.fps, 30, "not replaced by the defaults");
+        assert_eq!(
+            s.replay_hotkey,
+            Settings::default().replay_hotkey,
+            "migrated"
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(kept_files(dir.path()).is_empty());
+    }
+    #[test]
+    fn a_first_start_has_nothing_to_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s, problem) = Settings::load_or_recover(&dir.path().join("settings.json"));
+        assert!(problem.is_none());
+        assert_eq!(s.fps, Settings::default().fps);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
     #[test]
     fn reject_bad_settings() {
         let mut s = Settings {
@@ -681,6 +1143,41 @@ mod tests {
         s.fps = 30;
         s.audio[0].volume = f32::NAN;
         assert!(s.validate().is_err());
+    }
+    #[test]
+    fn fifteen_and_thirty_minute_replays_load_and_save_unchanged() {
+        // Saved by earlier versions; the slider shows them exactly and the
+        // engine must neither reject nor change them.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for seconds in [900, 1800] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            s.save(&path).unwrap();
+            let (loaded, problem) = Settings::load_or_recover(&path);
+            assert!(problem.is_none());
+            assert_eq!(loaded.replay_seconds, seconds);
+        }
+    }
+    #[test]
+    fn any_replay_length_from_30_seconds_is_valid() {
+        // 2 min (the Balanced preset) was refused: "Invalid replay duration".
+        for seconds in [30, 45, 120, 135, 600, 900, 1800] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            assert!(s.validate().is_ok(), "{seconds}");
+        }
+        for seconds in [0, 29, 1801] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            assert!(s.validate().is_err(), "{seconds}");
+        }
     }
     #[test]
     fn traversal_blocked() {

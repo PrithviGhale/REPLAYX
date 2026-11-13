@@ -1,6 +1,6 @@
 [package]
 name = "replayx"
-version = "0.3.1-alpha.6"
+version = "0.3.1-alpha.9"
 edition = "2021"
 license = "MIT"
 default-run = "replayx"
@@ -22,9 +22,18 @@ path = "src/bin/cli.rs"
 name = "replayx-gameproxy"
 path = "src/bin/gameproxy.rs"
 
+# Read-only, bounded Desktop Duplication timing probe; no encoding or UI input.
+[[bin]]
+name = "replayx-dda-profile"
+path = "src/bin/dda_profile.rs"
+
+[[bin]]
+name = "replayx-wgc-profile"
+path = "src/bin/wgc_profile.rs"
+
 [features]
 default = []
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:tauri-plugin-single-instance", "dep:reqwest", "dep:rustls", "dep:webview2-com"]
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
@@ -33,6 +42,9 @@ tauri-build = { version = "2", optional = true , features = [] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
+reqwest = { version = "0.13", optional = true, default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"
@@ -42,7 +54,9 @@ tauri = { version = "2", optional = true, features = ["tray-icon"] }
 tauri-plugin-global-shortcut = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_HiDpi", "Win32_Security", "Win32_System_JobObjects", "Win32_Graphics_Gdi", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem", "Win32_System_Performance", "Win32_Media_Audio", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D_Fxc", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
+# WebView2 memory target while the window is hidden (same version Tauri uses).
+webview2-com = { version = "0.39", optional = true }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_HiDpi", "Win32_Security", "Win32_System_JobObjects", "Win32_Graphics_Gdi", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem", "Win32_System_Performance", "Win32_Media_Audio", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D_Fxc", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Foundation", "Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture"] }
 nnnoiseless = { version = "0.5.2", default-features = false }
 
 [dev-dependencies]

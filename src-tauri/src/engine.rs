@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::{Child, Stdio},
     sync::{
@@ -21,6 +21,49 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// FFmpeg's CSV list is append-only for this segment configuration. Poll only
+/// newly appended bytes, keeping replay maintenance independent of session age.
+/// The caller commits complete rows after validation; unfinished rows are retried.
+fn manifest_tail(path: &Path, offset: u64) -> Result<String> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && offset == 0 => {
+            return Ok(String::new())
+        }
+        Err(e) => return Err(e).context("Cannot read replay segment manifest"),
+    };
+    let size = file.metadata()?.len();
+    if size < offset {
+        bail!("Replay segment manifest was truncated unexpectedly")
+    }
+    if size == offset {
+        return Ok(String::new());
+    }
+    const MAX_PENDING_BYTES: u64 = 1024 * 1024;
+    if size - offset > MAX_PENDING_BYTES {
+        bail!("Replay segment manifest backlog exceeded its bound")
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut tail = String::new();
+    file.take(MAX_PENDING_BYTES + 1).read_to_string(&mut tail)?;
+    if tail.len() as u64 > MAX_PENDING_BYTES {
+        bail!("Replay segment manifest backlog exceeded its bound")
+    }
+    Ok(tail)
+}
+
+impl Status {
+    /// Show a message on Home. A new message, or the same text coming back
+    /// after it was closed or cleared, is a new occurrence (a new id) and is
+    /// shown again. The same message reported again while it is still the
+    /// current one keeps its id, so repeats never re-open a closed message.
+    pub fn set_notice(&mut self, text: String) {
+        if self.notice.as_deref() != Some(text.as_str()) {
+            self.notice_id += 1;
+            self.notice = Some(text);
+        }
+    }
+}
 #[derive(Default, Clone, Serialize)]
 pub struct Status {
     pub state: String,
@@ -52,11 +95,30 @@ pub struct Status {
     /// Drift correction currently applied per source, in ppm.
     pub audio_drift_ppm: Vec<f32>,
     pub error: Option<String>,
+    /// The actions that redo what `error` interrupted, in order
+    /// ("start_replay", "start_recording"); empty when a plain retry wouldn't
+    /// help (REPLAYX is already recovering on its own, or a save failed).
+    pub error_retry: Vec<String>,
+    /// A message for Home, in plain words (see `Status::set_notice`).
     pub notice: Option<String>,
+    /// Identifies one occurrence of `notice`: the window closes messages by
+    /// this id, so the same text showing up again later is shown again.
+    pub notice_id: u64,
+    /// What start-up found wrong with settings.json, if anything.
+    pub settings_problem: Option<crate::model::SettingsProblem>,
     pub last_clip: Option<String>,
     pub recovery_sessions: usize,
     pub geometry: Option<DisplayGeometry>,
     pub scaling: String,
+    /// Display capture API in use: "dda" (Desktop Duplication) or "wgc"
+    /// (Windows Graphics Capture); empty for other sources.
+    pub capture_api: String,
+    /// FFmpeg capture filter actually started: "gfxcapture" (WGC),
+    /// "ddagrab" (Desktop Duplication), "gdigrab" or "synthetic".
+    pub capture_filter: String,
+    /// Set when WGC was selected but could not start, so Desktop
+    /// Duplication is recording instead: the reason.
+    pub capture_fallback: Option<String>,
     /// Why faster scaling paths were not used (probe errors), if any.
     pub scaling_detail: Option<String>,
     pub output_width: u32,
@@ -64,6 +126,7 @@ pub struct Status {
     pub segment_age_ms: u64,
     pub frame_age_ms: u64,
     pub audio_written_bytes: Vec<u64>,
+    pub audio_queue_ms: Vec<u64>,
     pub hotkey_error: Option<String>,
     /// A recording was requested and capture is still starting.
     pub pending_recording: bool,
@@ -108,6 +171,7 @@ struct Starting {
     began: Instant,
 }
 /// What a start needs, copied out of the engine under the lock.
+#[derive(Clone)]
 struct PipelineRequest {
     settings: Settings,
     media: Media,
@@ -123,6 +187,9 @@ struct Prepared {
     pipeline: Pipeline,
     encoder: String,
     scaling_detail: Option<String>,
+    capture_api: &'static str,
+    capture_filter: &'static str,
+    capture_fallback: Option<String>,
     plan: Option<geometry::VideoPlan>,
     expected_audio: usize,
     cache: Option<(String, Scaler, String)>,
@@ -142,6 +209,24 @@ resolution or the Performance preset in Video settings. Footage recorded so far 
 }
 /// Longest a start may take before it is abandoned with an error.
 const START_WATCHDOG: Duration = Duration::from_secs(60);
+/// Engine check interval, and while capture is starting.
+const TICK: Duration = Duration::from_millis(200);
+const TICK_STARTING: Duration = Duration::from_millis(40);
+/// The engine actions that redo an interrupted capture: replay first, so a
+/// recording attaches to it instead of starting a second encoder.
+fn retry_actions(replay: bool, recording: bool) -> Vec<String> {
+    let mut v = Vec::new();
+    if replay {
+        v.push("start_replay".to_owned());
+    }
+    if recording {
+        v.push("start_recording".to_owned());
+    }
+    v
+}
+/// Refusal while settings.json couldn't be kept safe at start-up. The UI
+/// matches "isn't changing your settings file".
+pub const SETTINGS_READ_ONLY: &str = "REPLAYX couldn't open your settings file when it started, so it isn't changing your settings file. Close any program that may be using it, then restart REPLAYX.";
 #[derive(Default)]
 struct Progress {
     /// Encoder output time in microseconds (FFmpeg progress out_time_us).
@@ -163,7 +248,7 @@ struct Pipeline {
     discard_tail: bool,
     feeds: Vec<AudioFeed>,
     dir: PathBuf,
-    seen: usize,
+    manifest_offset: u64,
     progress: Arc<Progress>,
     started: Instant,
     expected_audio: usize,
@@ -178,6 +263,11 @@ struct Pipeline {
     /// When the start was requested (for first-frame/first-segment timings).
     began: Instant,
     reported_first_frame: bool,
+    /// WGC at 1x: watch output-grid duplicates for missed capture slots.
+    wgc_adaptive: bool,
+    /// (window start, frames, duplicates) of the current 10 s window.
+    dup_window: Option<(Instant, u64, u64)>,
+    starving_windows: u32,
 }
 struct Recovery {
     replay: bool,
@@ -220,6 +310,12 @@ pub struct Inner {
     starting: Option<Starting>,
     /// Saves of recordings cut short by an error, started by the tick loop.
     orphaned: Vec<SaveJob>,
+    /// settings.json couldn't be read or kept safe at start-up: it must not
+    /// be written over this session.
+    settings_read_only: bool,
+    /// What a start that failed was meant to begin (replay, recording); read
+    /// by `fail_final` for `Status::error_retry`.
+    failed_intent: Option<(bool, bool)>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -278,7 +374,18 @@ fn cleanup_saved_snapshot(dir: &Path, segments: &[Segment]) -> Result<()> {
 }
 impl Engine {
     pub fn new(data_dir: PathBuf, settings: Settings) -> Result<Self> {
-        Self::with_media(data_dir, settings, Media::discover()?)
+        let media = Media::discover()?;
+        let engine = Self::with_media(data_dir, settings, media.clone())?;
+        // Do the one-time start work now, in the background and below normal
+        // priority, so the first Instant Replay or Record after launching
+        // REPLAYX doesn't wait for it: the media runtime check (which also
+        // brings FFmpeg's files into the disk cache) and loading Windows audio.
+        // Opens no device stream and never the microphone.
+        thread::spawn(move || {
+            let _ = preflight_once(&media, true);
+            audio::warm_up();
+        });
+        Ok(engine)
     }
     fn with_media(data_dir: PathBuf, settings: Settings, media: Media) -> Result<Self> {
         let segment_starts: Arc<Mutex<std::collections::HashMap<PathBuf, f64>>> =
@@ -342,13 +449,16 @@ impl Engine {
                 segment_probe_tx,
                 starting: None,
                 orphaned: Vec::new(),
+                settings_read_only: false,
+                failed_intent: None,
                 _instance_lock: instance_lock,
             })),
             published.clone(),
         );
         let weak = Arc::downgrade(&e.0);
+        let mut pause = TICK;
         thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(pause);
             let Some(arc) = weak.upgrade() else { break };
             // Sample the foreground window without holding the engine lock: the
             // query may involve another thread, which must never wait on us.
@@ -376,6 +486,9 @@ impl Engine {
                     engine.complete_save(&result);
                 });
             }
+            // While capture is starting, check often so the state turns to
+            // Buffering/Recording as soon as the first frame is encoded.
+            pause = if i.warming_up() { TICK_STARTING } else { TICK };
             *published.status.lock().unwrap() = i.status.clone();
         });
         Ok(e)
@@ -402,6 +515,25 @@ impl Engine {
         *self.1.status.lock().unwrap() = i.status.clone();
         *self.1.settings.lock().unwrap() = i.settings.clone();
     }
+    /// Report what start-up found wrong with settings.json. When the file
+    /// couldn't be kept safe, settings changes are refused until restart, so
+    /// the defaults never replace it.
+    pub fn report_settings_problem(&self, problem: crate::model::SettingsProblem) {
+        let mut i = self.0.lock().unwrap();
+        i.settings_read_only = !problem.allows_saving();
+        i.status.settings_problem = Some(problem);
+        self.publish(&i);
+    }
+    /// The user closed the message shown on Home: only that occurrence
+    /// (`Status::notice_id`) is cleared, never a newer one that arrived
+    /// meanwhile.
+    pub fn dismiss_notice(&self, id: u64) {
+        let mut i = self.0.lock().unwrap();
+        if i.status.notice.is_some() && i.status.notice_id == id {
+            i.status.notice = None;
+            self.publish(&i);
+        }
+    }
     pub fn set_settings(&self, s: Settings) -> Result<()> {
         let mut i = self.0.lock().unwrap();
         if i.pipeline.is_some()
@@ -412,7 +544,7 @@ impl Engine {
             bail!("Stop capture and wait for saves before changing settings")
         };
         fs::create_dir_all(&s.output_dir)?;
-        s.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&s)?;
         i.settings = s;
         self.publish(&i);
         Ok(())
@@ -425,7 +557,7 @@ impl Engine {
             return;
         }
         i.settings.tray_hint_shown = true;
-        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        let _ = i.persist(&i.settings);
         self.publish(&i);
     }
     /// Remember that the first-run tour was finished or skipped (saved at
@@ -436,7 +568,7 @@ impl Engine {
             return;
         }
         i.settings.tour_done = true;
-        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        let _ = i.persist(&i.settings);
         self.publish(&i);
     }
     /// Change playtime settings at once (also during capture: they don't
@@ -446,10 +578,74 @@ impl Engine {
         let mut next = i.settings.clone();
         next.playtime = p;
         next.validate()?;
-        next.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&next)?;
         i.settings = next;
         self.publish(&i);
         Ok(())
+    }
+    /// Update preferences apply at once, also during capture.
+    pub fn set_updates(&self, u: crate::updates::UpdateSettings) -> Result<()> {
+        let mut i = self.0.lock().unwrap();
+        let mut next = i.settings.clone();
+        next.updates = u.normalized();
+        i.persist(&next)?;
+        i.settings = next;
+        self.publish(&i);
+        Ok(())
+    }
+    /// One switch for "is my microphone heard in recordings". Off mutes it
+    /// (silence on its track, the timeline and other sources untouched), also
+    /// in the middle of a recording; On unmutes it. A microphone that was
+    /// taken out of the capture entirely (Audio page) is added back when
+    /// capture is stopped; a running capture can't gain a track.
+    /// Device, volume and Voice Enhancer settings are never changed.
+    pub fn set_microphone(&self, on: bool) -> Result<Settings> {
+        let mut i = self.0.lock().unwrap();
+        if i.starting.is_some() || i.recovery.is_some() {
+            bail!("Capture is starting or reconnecting. Retry the microphone switch when it is ready.")
+        }
+        let capturing = i.pipeline.is_some() || i.starting.is_some() || i.recovery.is_some();
+        let mut next = i.settings.clone();
+        let mics: Vec<usize> = next
+            .audio
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.kind == "microphone")
+            .map(|(n, _)| n)
+            .collect();
+        if mics.is_empty() {
+            bail!("No microphone is set up. Add one on the Audio page.")
+        }
+        for &n in &mics {
+            let a = &mut next.audio[n];
+            if on && !a.enabled {
+                if capturing {
+                    bail!("The microphone isn't part of the capture that is running. Stop Instant Replay and recording, then turn it on.")
+                }
+                a.enabled = true;
+            }
+            a.muted = !on;
+        }
+        next.validate()?;
+        i.persist(&next)?;
+        i.settings = next.clone();
+        // Apply to the running capture: the feed multiplies by zero when muted.
+        if let Some(p) = &i.pipeline {
+            let mut feed = 0;
+            for a in &i.settings.audio {
+                if !a.enabled {
+                    continue;
+                }
+                if a.kind == "microphone" {
+                    if let Some(f) = p.feeds.get(feed) {
+                        f.meter.muted.store(a.muted, Ordering::Relaxed);
+                    }
+                }
+                feed += 1;
+            }
+        }
+        self.publish(&i);
+        Ok(next)
     }
     /// Mutate engine state with the lock held, then publish the result.
     pub fn update(&self, f: impl FnOnce(&mut Inner)) {
@@ -486,6 +682,7 @@ impl Engine {
                 bail!("Recover the interrupted recording before starting a new session")
             }
             i.status.error = None;
+            i.status.error_retry.clear();
             if i.starting.is_some() {
                 // Capture is already starting (e.g. Record pressed while replay
                 // starts): join that start instead of launching a second encoder.
@@ -512,7 +709,7 @@ impl Engine {
                     r
                 }
                 Err(e) => {
-                    i.starting = None;
+                    i.failed_intent = i.starting.take().map(|s| (s.replay, s.recording));
                     i.status.pending_recording = false;
                     i.fail(format!("{e:#}"));
                     self.publish(&i);
@@ -531,7 +728,8 @@ impl Engine {
                 Err(anyhow::anyhow!("Capture start was abandoned"))
             }
             (None, Err(e)) => Err(e),
-            (Some(_), Err(e)) => {
+            (Some(intent), Err(e)) => {
+                i.failed_intent = Some((intent.replay, intent.recording));
                 i.fail(format!("{e:#}"));
                 Err(e)
             }
@@ -725,12 +923,13 @@ impl Engine {
         match result {
             Ok((p, probe)) => {
                 i.status.last_clip = p.file_name().map(|p| p.to_string_lossy().into());
-                i.status.notice =
-                    Some("Clip ready — streams and playback boundaries checked".into());
+                i.status
+                    .set_notice("Your clip is saved. Find it in Clips.".into());
                 i.status.last_save_timings = probe.save_timings.clone();
             }
             Err(e) => {
                 i.status.error = Some(format!("Save failed; source segments preserved: {e:#}"));
+                i.status.error_retry.clear();
             }
         }
         i.refresh_session_count();
@@ -782,7 +981,7 @@ impl Engine {
                 }
             }
         }
-        i.settings.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&i.settings)?;
         Ok(())
     }
     pub fn recover(&self) -> Result<Vec<String>> {
@@ -917,14 +1116,21 @@ fn mark(timings: &mut Vec<media::StageTiming>, began: Instant, stage: impl Into<
     });
 }
 /// Check the media runtime once per process instead of on every start (it
-/// costs two process launches).
-fn preflight_once(media: &Media) -> Result<()> {
+/// costs two process launches, 1.7 s measured on a first start). The lock is
+/// held during the check, so a start that arrives while the warm-up after
+/// launch is running it waits for that result instead of checking again.
+fn preflight_once(media: &Media, low_priority: bool) -> Result<()> {
     static PASSED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-    if PASSED.lock().unwrap().contains(&media.ffmpeg) {
+    let mut passed = PASSED.lock().unwrap_or_else(|p| p.into_inner());
+    if passed.contains(&media.ffmpeg) {
         return Ok(());
     }
-    media.preflight()?;
-    PASSED.lock().unwrap().push(media.ffmpeg.clone());
+    if low_priority {
+        media.preflight_low_priority()?;
+    } else {
+        media.preflight()?;
+    }
+    passed.push(media.ffmpeg.clone());
     Ok(())
 }
 /// The GPU capture/encoder chain that last passed its probe for this display
@@ -947,7 +1153,7 @@ fn remembered_key(
     // The adapter LUID changes on every boot, so it is not part of this key.
     let s = &req.settings;
     format!(
-        "v4|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+        "v6|{:04x}|{}|{}x{}@{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
         g.adapter_vendor,
         g.device,
         g.desktop_width,
@@ -960,6 +1166,7 @@ fn remembered_key(
         s.fps,
         s.preset,
         s.gpu_scaling,
+        media::capture_api(s),
         req.media.ffmpeg.display()
     )
 }
@@ -1040,8 +1247,16 @@ fn select_video_path(
         });
     };
     let key = format!(
-        "{}|{}|{:?}|{}|{}|{}|{}|{}",
-        g.adapter_luid, s.display, plan, s.encoder, s.codec, s.fps, s.preset, s.gpu_scaling
+        "{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+        g.adapter_luid,
+        s.display,
+        plan,
+        s.encoder,
+        s.codec,
+        s.fps,
+        s.preset,
+        s.gpu_scaling,
+        media::capture_api(s)
     );
     if let Some((cached, scaler, encoder)) = &req.cache {
         if *cached == key {
@@ -1094,7 +1309,11 @@ fn select_video_path(
     };
     for (scaler, encoder) in candidates {
         let encoder = encoder.as_str();
-        if !scaler.supports(plan) {
+        // WgcGpu is a Windows Graphics Capture path only.
+        if !scaler.supports(plan)
+            || (scaler == Scaler::WgcGpu
+                && (media::capture_api(s) != "wgc" || !media::tuning().wgc_gpu))
+        {
             continue;
         }
         if let Some(reason) = denied(scaler, encoder) {
@@ -1144,15 +1363,56 @@ fn select_video_path(
         how: "probed",
     })
 }
+/// One 10 s window of WGC output-grid duplicates at 1x. Starvation shows as
+/// 3-35% duplicates (18% measured for a ~95 FPS game); a static screen or a
+/// game under 60 FPS shows more and is not helped by a faster capture, a
+/// healthy capture shows almost none. Two starving windows in a row: true.
+fn wgc_missing_slots(
+    window: &mut Option<(Instant, u64, u64)>,
+    starving: &mut u32,
+    running: Duration,
+    now: Instant,
+    frames: u64,
+    duplicates: u64,
+) -> bool {
+    if running < Duration::from_secs(6) {
+        return false; // start-up duplicates
+    }
+    match *window {
+        None => *window = Some((now, frames, duplicates)),
+        Some((start, f0, d0)) if now.duration_since(start) >= Duration::from_secs(10) => {
+            let ratio =
+                duplicates.saturating_sub(d0) as f64 / frames.saturating_sub(f0).max(1) as f64;
+            *starving = if (0.03..0.35).contains(&ratio) {
+                *starving + 1
+            } else {
+                0
+            };
+            *window = Some((now, frames, duplicates));
+        }
+        _ => {}
+    }
+    *starving >= 2
+}
 /// Everything slow about starting capture: runtime check, display query,
 /// capture-path probes, audio devices and the encoder process. Runs without
 /// the engine lock. Each stage is timed from the start request.
 fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
+    // Experimental Windows Graphics Capture: when none of its capture paths
+    // starts, record with Desktop Duplication instead and say why.
+    let fallback = (!req.synthetic
+        && req.settings.capture == "desktop-duplication"
+        && media::capture_api(&req.settings) == "wgc")
+        .then(|| {
+            let mut r = req.clone();
+            r.settings.capture_api = "dda".into();
+            r
+        });
     let began = req.began;
     let s = &req.settings;
     let synthetic = req.synthetic;
     let mut timings = Vec::new();
-    preflight_once(&req.media)?;
+    preflight_once(&req.media, false)?;
     mark(&mut timings, began, "Media runtime checked");
     let geometry = if !synthetic && s.capture == "desktop-duplication" {
         let g = geometry::display(s.display)?;
@@ -1190,7 +1450,26 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     };
     let plan = anamorphic.map(|p| p.anamorphic()).or(plan);
     mark(&mut timings, began, "Display measured");
-    let path = select_video_path(&req, geometry.as_ref(), plan.as_ref())?;
+    let (path, req, capture_fallback) = match (
+        select_video_path(&req, geometry.as_ref(), plan.as_ref()),
+        &fallback,
+    ) {
+        (Ok(path), _) => (path, &req, None),
+        (Err(e), Some(dda)) => {
+            let mut path = select_video_path(dda, geometry.as_ref(), plan.as_ref())?;
+            let note = format!(
+                "Windows Graphics Capture could not start ({e}); using Desktop Duplication"
+            );
+            path.detail = Some(match path.detail {
+                Some(d) => format!("{note}; {d}"),
+                None => note.clone(),
+            });
+            (path, dda, Some(note))
+        }
+        (Err(e), None) => return Err(e),
+    };
+    let s = &req.settings;
+    let capture_api = media::capture_api(s);
     let (scaler, encoder) = (path.scaler, path.encoder.clone());
     mark(
         &mut timings,
@@ -1204,12 +1483,27 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     fs::create_dir_all(&dir)?;
     let started = (|| -> Result<_> {
         fs::write(dir.join("session.json"), serde_json::to_vec_pretty(s)?)?;
-        let mut feeds = Vec::new();
-        if !synthetic {
-            for source in s.audio.iter().filter(|s| s.enabled) {
-                feeds.push(audio::spawn(source.clone())?);
-            }
-        }
+        // Open every audio source at the same time (each takes about 0.25 s,
+        // more while a device settles), keeping the configured order.
+        let feeds: Vec<audio::AudioFeed> = if synthetic {
+            Vec::new()
+        } else {
+            thread::scope(|scope| {
+                let opening: Vec<_> = s
+                    .audio
+                    .iter()
+                    .filter(|a| a.enabled)
+                    .map(|a| scope.spawn(move || audio::spawn(a.clone())))
+                    .collect();
+                opening
+                    .into_iter()
+                    .map(|t| {
+                        t.join()
+                            .unwrap_or_else(|_| Err(anyhow::anyhow!("Audio source failed to open")))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?
+        };
         mark(&mut timings, began, "Audio sources opened");
         let mut c = media::command(&req.media.ffmpeg);
         c.current_dir(&dir).args([
@@ -1443,7 +1737,7 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             discard_tail: false,
             feeds,
             dir,
-            seen: 0,
+            manifest_offset: 0,
             progress,
             started,
             expected_audio,
@@ -1457,9 +1751,30 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             synthetic,
             began,
             reported_first_frame: false,
+            wgc_adaptive: !synthetic
+                && s.capture == "desktop-duplication"
+                && capture_api == "wgc"
+                && media::wgc_rate_multiple(s, &media::tuning()) == 1,
+            dup_window: None,
+            starving_windows: 0,
         },
         encoder,
         scaling_detail: path.detail,
+        capture_api: if synthetic || s.capture != "desktop-duplication" {
+            ""
+        } else {
+            capture_api
+        },
+        capture_filter: if synthetic {
+            "synthetic"
+        } else if s.capture != "desktop-duplication" {
+            "gdigrab"
+        } else if capture_api == "wgc" {
+            "gfxcapture"
+        } else {
+            "ddagrab"
+        },
+        capture_fallback,
         plan,
         expected_audio,
         cache: path.cache,
@@ -1599,6 +1914,22 @@ fn try_discard(dir: &Path, ring: &[Segment]) -> bool {
     !dir.exists()
 }
 impl Inner {
+    /// Capture is starting: no first encoded frame yet.
+    fn warming_up(&self) -> bool {
+        self.starting.is_some()
+            || self
+                .pipeline
+                .as_ref()
+                .is_some_and(|p| !p.reported_first_frame)
+    }
+    /// Write settings.json, unless start-up couldn't keep the user's file
+    /// safe: then it is never written over (see `Settings::load_or_recover`).
+    fn persist(&self, s: &Settings) -> Result<()> {
+        if self.settings_read_only {
+            bail!("{SETTINGS_READ_ONLY}")
+        }
+        s.save(&self.data_dir.join("settings.json"))
+    }
     fn expected_audio(&self) -> usize {
         if let Some(p) = &self.pipeline {
             return p.expected_audio;
@@ -1798,19 +2129,17 @@ impl Inner {
         let synthetic = p.pipeline.synthetic;
         let scaler = p.pipeline.scaler;
         if scaler == Scaler::Cpu && p.plan.is_some() {
-            self.status.notice = Some(
-                "GPU scaling is unavailable on this display adapter; using the CPU fallback (see Performance for details).".into(),
+            self.status.set_notice(
+                "Your graphics card can't resize the video for this screen, so the processor does it instead. This uses a little more CPU.".into(),
             );
         }
         (self.status.play_width, self.status.play_height) = match p.plan {
             Some(plan) if plan.sar != (1, 1) => {
                 let (w, h) = plan.display_size();
-                self.status.notice = Some(format!(
-                    "Recording your display's {}×{} pixels instead of resizing to {}×{}, marked to play at {w}×{h}. Keeping every frame on the GPU is what makes the recording smooth: this GPU can only resize through a CPU copy, which stutters in games. Players and editors show it at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
+                self.status.set_notice(format!(
+                    "To keep the video smooth, REPLAYX records your screen at its full size ({}×{}). Videos still play at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
                     plan.width,
                     plan.height,
-                    self.settings.output_width(),
-                    self.settings.height,
                     self.settings.output_width(),
                     self.settings.height
                 ));
@@ -1833,6 +2162,9 @@ impl Inner {
             scaler.label().into()
         };
         self.status.scaling_detail = p.scaling_detail;
+        self.status.capture_api = p.capture_api.into();
+        self.status.capture_filter = p.capture_filter.into();
+        self.status.capture_fallback = p.capture_fallback;
         (self.status.output_width, self.status.output_height) =
             p.plan.map(|p| (p.width, p.height)).unwrap_or_default();
         let rate = media::rate_plan(
@@ -1860,6 +2192,19 @@ impl Inner {
         self.ring_audio_tracks = p.expected_audio;
         self.last_activity_sample = None;
         self.pipeline = Some(p.pipeline);
+        // Controls may change while a worker is initializing a capture path.
+        if let Some(p) = &self.pipeline {
+            for (feed, source) in p
+                .feeds
+                .iter()
+                .zip(self.settings.audio.iter().filter(|a| a.enabled))
+            {
+                feed.meter.muted.store(source.muted, Ordering::Relaxed);
+                feed.meter
+                    .volume
+                    .store(source.volume.to_bits(), Ordering::Relaxed);
+            }
+        }
     }
     fn collect_segments(&mut self) -> Result<()> {
         let Some(p) = &mut self.pipeline else {
@@ -1868,14 +2213,14 @@ impl Inner {
         if p.discard_tail {
             return Ok(());
         }
-        let csv = fs::read_to_string(p.dir.join("segments.csv")).unwrap_or_default();
+        let csv = manifest_tail(&p.dir.join("segments.csv"), p.manifest_offset)?;
         // Ignore a concurrently written partial CSV line until its newline is visible.
         let lines: Vec<_> = csv
             .split_inclusive('\n')
             .filter(|s| s.ends_with('\n'))
-            .map(str::trim)
             .collect();
-        for line in lines.iter().skip(p.seen) {
+        for raw in lines {
+            let line = raw.trim();
             let pieces: Vec<_> = line.rsplitn(3, ',').collect();
             if pieces.len() != 3 {
                 break;
@@ -1940,7 +2285,9 @@ impl Inner {
                 }
             }
             self.ring.add(segment);
-            p.seen += 1;
+            // Commit only after the segment was validated and retained. A
+            // partial row or failed segment never advances the cursor.
+            p.manifest_offset += raw.len() as u64;
             p.last_segment_ms = p.started.elapsed().as_millis() as u64;
         }
         self.ring.prune(
@@ -1961,7 +2308,7 @@ impl Inner {
                 if Instant::now() > deadline {
                     p.child.kill()?;
                     p.child.wait()?;
-                    self.status.notice=Some("Capture required forced shutdown; recover remaining segments before restarting".into());
+                    self.status.set_notice("Capture didn't stop normally and had to be closed. Open Instant Replay and choose Recover to save what was recorded.".into());
                     break;
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -2000,11 +2347,12 @@ impl Inner {
                     Ok(()) => {
                         self.status.replay = replay;
                         self.status.recording = recording;
-                        self.status.notice = Some(format!(
-                            "{} + {encoder} failed during startup ({error}). Switched to {}.",
-                            scaler.label(),
-                            self.status.scaling
-                        ));
+                        // The technical reason stays in Performance
+                        // (scaling details) and diagnostics.
+                        self.status.set_notice(
+                            "The first video setup didn't work on this PC, so REPLAYX switched to another one. Recording works normally."
+                                .into(),
+                        );
                         return;
                     }
                     Err(e) => {
@@ -2018,6 +2366,10 @@ impl Inner {
         self.fail_final(error)
     }
     fn fail_final(&mut self, error: String) {
+        let (replay, recording) = self.failed_intent.take().unwrap_or((
+            self.status.replay,
+            self.recording.is_some() || self.status.pending_recording,
+        ));
         self.recovery = None;
         let _ = self.stop_pipeline();
         // 0.2.1-alpha.2 left the recording attached after a failure: the UI
@@ -2046,6 +2398,7 @@ impl Inner {
         self.status.recording = false;
         self.status.state = "Error".into();
         self.status.error = Some(error);
+        self.status.error_retry = retry_actions(replay, recording);
     }
     fn tick(&mut self) -> Result<Option<SaveJob>> {
         self.status.free_bytes = fs2::available_space(&self.settings.output_dir).unwrap_or(0);
@@ -2053,6 +2406,7 @@ impl Inner {
             if s.began.elapsed() > START_WATCHDOG {
                 // Bounded failure: the start thread discards its encoder if it
                 // ever returns; the UI gets control and a reason now.
+                self.status.error_retry = retry_actions(s.replay, s.recording);
                 self.starting = None;
                 self.status.pending_recording = false;
                 self.status.replay = false;
@@ -2099,7 +2453,7 @@ impl Inner {
             p.last_geometry_check = Instant::now();
             let current = geometry::display(self.settings.display);
             if current.as_ref().ok() != p.geometry.as_ref() {
-                return self.begin_recovery("Display geometry changed or the display disconnected; previous footage is preserved.");
+                return self.begin_recovery("Your screen changed or was disconnected.");
             }
         }
         self.collect_segments()?;
@@ -2121,10 +2475,18 @@ impl Inner {
             if ms > 0 {
                 p.reported_first_frame = true;
                 if media::tuning().gpu_priority {
-                    let status = crate::process_job::raise_gpu_priority(&p.child);
+                    let class = media::tuning().gpu_priority_class;
+                    let status = crate::process_job::set_gpu_priority(&p.child, class);
                     self.status.start_timings.push(media::StageTiming {
                         stage: if status == 0 {
-                            "Encoder GPU priority raised (high)".into()
+                            format!(
+                                "Encoder GPU priority raised ({})",
+                                match class {
+                                    3 => "above normal",
+                                    2 => "normal",
+                                    _ => "high",
+                                }
+                            )
                         } else {
                             format!("Encoder GPU priority unchanged (status {status:#x})")
                         },
@@ -2150,10 +2512,10 @@ impl Inner {
                 .clone()
                 .filter(|e| audio::is_device_change(e))
         });
-        if let Some(e) = device_changed.filter(|_| !p.synthetic) {
-            return self.begin_recovery(&format!(
-                "An audio device changed ({e}); reconnecting audio."
-            ));
+        // The device's error stays in diagnostics; the notice stays plain.
+        if device_changed.is_some() && !p.synthetic {
+            return self
+                .begin_recovery("Your sound device changed, so REPLAYX is reconnecting it.");
         }
         if let Some(exit) = p.child.try_wait()? {
             let reason = p
@@ -2180,7 +2542,7 @@ impl Inner {
                 .any(|s| reason.contains(s))
             {
                 return self.begin_recovery(
-                    "Desktop Duplication lost its device; attempting bounded recovery.",
+                    "Screen capture was interrupted (for example by a display or driver change), so REPLAYX is restarting it.",
                 );
             }
             bail!("Capture exited ({exit}). {reason}")
@@ -2201,6 +2563,24 @@ impl Inner {
         self.status.duplicated_frames = p.progress.duplicated.load(Ordering::Relaxed);
         self.status.fps = f64::from_bits(p.progress.fps.load(Ordering::Relaxed));
         self.status.elapsed = p.started.elapsed().as_secs_f64();
+        if p.wgc_adaptive
+            && wgc_missing_slots(
+                &mut p.dup_window,
+                &mut p.starving_windows,
+                p.started.elapsed(),
+                Instant::now(),
+                self.status.frames,
+                self.status.duplicated_frames,
+            )
+        {
+            // WGC at 1x missed output slots (a game between 60 and 120 FPS):
+            // capture at 2x for the rest of this session. The bounded restart
+            // keeps the replay buffer.
+            self.settings.wgc_boost = true;
+            return self.begin_recovery(
+                "REPLAYX now captures your screen more often to keep the video smooth.",
+            );
+        }
         self.status.audio_peaks = p
             .feeds
             .iter()
@@ -2233,6 +2613,11 @@ impl Inner {
             .feeds
             .iter()
             .map(|f| f.meter.written_bytes.load(Ordering::Relaxed))
+            .collect();
+        self.status.audio_queue_ms = p
+            .feeds
+            .iter()
+            .map(|f| f.meter.queued_chunks.load(Ordering::Relaxed) * 10)
             .collect();
         self.status.write_mbps = if self.status.buffer_seconds > 0. {
             self.status.buffer_bytes as f64 / self.status.buffer_seconds / 1_000_000.
@@ -2356,7 +2741,9 @@ impl Inner {
         self.status.recording = false;
         self.status.replay = false;
         self.status.state = "Recovering".into();
-        self.status.notice=Some(format!("{reason} A recording continues as a new verified part; replay restarts with a fresh buffer. Footage saved so far is kept."));
+        self.status.set_notice(format!(
+            "{reason} Nothing you recorded is lost: a recording continues as a new clip, and Instant Replay starts over."
+        ));
         self.recovery = Some(Recovery {
             replay,
             recording,
@@ -2393,6 +2780,7 @@ impl Inner {
                 match self.start_pipeline(false) {
                     Ok(()) => {
                         self.status.error = None;
+                        self.status.error_retry.clear();
                         self.status.replay = r.replay;
                         if r.recording {
                             let dir = self
@@ -2413,11 +2801,14 @@ impl Inner {
                     }
                     Err(e) => {
                         self.status.error = Some(format!("Capture restart failed: {e:#}"));
+                        // Recovery keeps retrying by itself.
+                        self.status.error_retry.clear();
                     }
                 }
             }
             Err(e) => {
                 self.status.error = Some(format!("Waiting for selected display: {e:#}"));
+                self.status.error_retry.clear();
             }
         }
         self.status.state = "Recovering".into();
@@ -2434,7 +2825,119 @@ impl Drop for Inner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wgc_rate_is_raised_only_for_sustained_missed_slots() {
+        let t0 = Instant::now();
+        let sec = |n| t0 + Duration::from_secs(n);
+        let run = Duration::from_secs(30);
+        // Healthy 60 FPS capture: no duplicates.
+        let (mut w, mut n) = (None, 0);
+        for k in 0..4u64 {
+            assert!(!wgc_missing_slots(
+                &mut w,
+                &mut n,
+                run,
+                sec(10 * k),
+                600 * k,
+                0
+            ));
+        }
+        // ~18% duplicates (a ~95 FPS game at 1x) in two windows in a row.
+        let (mut w, mut n) = (None, 0);
+        assert!(!wgc_missing_slots(&mut w, &mut n, run, sec(0), 0, 0));
+        assert!(!wgc_missing_slots(&mut w, &mut n, run, sec(10), 600, 108));
+        assert!(wgc_missing_slots(&mut w, &mut n, run, sec(20), 1200, 216));
+        // A static screen (almost every frame repeated) is not starvation.
+        let (mut w, mut n) = (None, 0);
+        for k in 0..4u64 {
+            assert!(!wgc_missing_slots(
+                &mut w,
+                &mut n,
+                run,
+                sec(10 * k),
+                600 * k,
+                590 * k
+            ));
+        }
+        // Start-up duplicates are ignored.
+        let (mut w, mut n) = (None, 0);
+        assert!(!wgc_missing_slots(
+            &mut w,
+            &mut n,
+            Duration::from_secs(2),
+            sec(0),
+            10,
+            10
+        ));
+        assert!(w.is_none());
+    }
+
     use super::*;
+    #[test]
+    #[ignore = "Explicit manifest polling microbenchmark, not a timing assertion"]
+    fn manifest_poll_cost() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("segments.csv");
+        let history = "segment-00000001.mkv,0,2\n".repeat(20_000);
+        fs::write(&path, &history).unwrap();
+        let started = Instant::now();
+        for _ in 0..1000 {
+            let text = fs::read_to_string(&path).unwrap();
+            std::hint::black_box(
+                text.split_inclusive('\n')
+                    .filter(|s| s.ends_with('\n'))
+                    .map(str::trim)
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let old = started.elapsed();
+        let started = Instant::now();
+        for _ in 0..1000 {
+            std::hint::black_box(manifest_tail(&path, history.len() as u64).unwrap());
+        }
+        println!(
+            "MANIFEST_BENCH bytes={} polls=1000 full_scan_ms={:.3} incremental_ms={:.3}",
+            history.len(),
+            old.as_secs_f64() * 1000.,
+            started.elapsed().as_secs_f64() * 1000.
+        );
+    }
+    #[test]
+    fn manifest_cursor_retains_partial_rows_and_reads_only_new_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("segments.csv");
+        assert_eq!(manifest_tail(&path, 0).unwrap(), "");
+        let history = "segment-00000001.mkv,0,2\n".repeat(20_000);
+        fs::write(&path, &history).unwrap();
+        let offset = history.len() as u64;
+        assert_eq!(
+            manifest_tail(&path, offset).unwrap(),
+            "",
+            "old history is not read or reparsed"
+        );
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b"segment-00020001.mkv,2,").unwrap();
+        let partial = manifest_tail(&path, offset).unwrap();
+        assert_eq!(partial.lines().count(), 1);
+        assert!(!partial.ends_with('\n'));
+        file.write_all(b"4\nsegment-00020002.mkv,4,6\n").unwrap();
+        let tail = manifest_tail(&path, offset).unwrap();
+        assert_eq!(tail, "segment-00020001.mkv,2,4\nsegment-00020002.mkv,4,6\n");
+        assert!(manifest_tail(&path, offset + tail.len() as u64)
+            .unwrap()
+            .is_empty());
+        fs::write(&path, b"").unwrap();
+        assert!(manifest_tail(&path, offset)
+            .unwrap_err()
+            .to_string()
+            .contains("truncated"));
+        assert!(manifest_tail(&dir.path().join("missing.csv"), 1).is_err());
+        fs::write(&path, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+        assert!(manifest_tail(&path, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("backlog"));
+    }
     #[test]
     fn successful_part_cleanup_preserves_quarantined_media() {
         let root = tempfile::tempdir().unwrap();
@@ -2486,6 +2989,149 @@ mod tests {
         );
         engine.mark_tour_done();
         assert!(engine.settings().tour_done);
+    }
+    #[test]
+    fn copied_settings_never_authorize_overwriting_a_newer_original() {
+        use std::os::windows::fs::OpenOptionsExt;
+        for reuse in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let data = root.path().join("data");
+            fs::create_dir_all(&data).unwrap();
+            let path = data.join("settings.json");
+            let damaged = b"damaged settings snapshot";
+            fs::write(&path, damaged).unwrap();
+            let held = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(3)
+                .open(&path)
+                .unwrap();
+            if reuse {
+                Settings::load_or_recover(&path);
+            }
+            let (mut defaults, problem) = Settings::load_or_recover(&path);
+            let problem = problem.unwrap();
+            assert!(matches!(
+                problem,
+                crate::model::SettingsProblem::DamagedCopied { .. }
+            ));
+            assert!(!problem.allows_saving());
+            let custom = Settings {
+                fps: 30,
+                output_dir: root.path().join("custom clips"),
+                ..Default::default()
+            };
+            // The source can change independently after its old snapshot was copied.
+            let updated = serde_json::to_vec_pretty(&custom).unwrap();
+            fs::write(&path, &updated).unwrap();
+            drop(held);
+            defaults.output_dir = root.path().join("default clips");
+            let engine = isolated(data.clone(), defaults.clone()).unwrap();
+            engine.report_settings_problem(problem);
+            assert!(engine.set_settings(defaults.clone()).is_err());
+            assert!(engine.set_updates(defaults.updates.clone()).is_err());
+            assert!(engine.set_playtime(defaults.playtime.clone()).is_err());
+            assert!(engine.set_microphone(false).is_err());
+            engine.mark_tour_done();
+            engine.mark_tray_hint_shown();
+            assert_eq!(fs::read(&path).unwrap(), updated);
+            let backups: Vec<_> = fs::read_dir(&data)
+                .unwrap()
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("settings.unreadable-")
+                })
+                .collect();
+            assert_eq!(backups.len(), 1);
+            assert_eq!(fs::read(backups[0].path()).unwrap(), damaged);
+            drop(engine);
+            let (loaded, problem) = Settings::load_or_recover(&path);
+            assert!(problem.is_none());
+            assert_eq!(loaded.fps, 30);
+            let restarted = isolated(data, loaded.clone()).unwrap();
+            restarted.set_settings(loaded).unwrap();
+            assert_eq!(Settings::load(&path).unwrap().fps, 30);
+        }
+    }
+    #[test]
+    fn a_settings_file_that_was_locked_at_start_is_never_saved_over_later() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let path = data.join("settings.json");
+        let custom = Settings {
+            output_dir: root.path().join("my clips"),
+            audio: Vec::new(),
+            fps: 30,
+            ..Default::default()
+        };
+        custom.save(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        // Another program holds the file with no sharing while REPLAYX starts.
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let (mut settings, problem) = Settings::load_or_recover(&path);
+        let problem = problem.expect("reported");
+        assert!(!problem.allows_saving());
+        settings.output_dir = root.path().join("clips");
+        settings.audio.clear();
+        let engine = isolated(data.clone(), settings.clone()).unwrap();
+        engine.report_settings_problem(problem.clone());
+        assert_eq!(engine.status().settings_problem, Some(problem));
+        drop(held); // the other program lets go
+                    // Every kind of settings write is refused, and the file is unchanged.
+        let err = engine.set_settings(settings.clone()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("isn't changing your settings file"));
+        assert!(engine.set_updates(settings.updates.clone()).is_err());
+        assert!(engine.set_playtime(settings.playtime.clone()).is_err());
+        engine.mark_tour_done();
+        engine.mark_tray_hint_shown();
+        assert_eq!(fs::read(&path).unwrap(), original);
+        // The next start reads it normally.
+        assert_eq!(Settings::load_or_recover(&path).0.fps, 30);
+    }
+    #[test]
+    fn closing_a_message_clears_only_that_occurrence() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = isolated(
+            root.path().join("data"),
+            Settings {
+                output_dir: root.path().join("clips"),
+                audio: Vec::new(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let saved = || "Your clip is saved. Find it in Clips.".to_owned();
+        engine.update(|i| i.status.set_notice(saved()));
+        let first = engine.status().notice_id;
+        // Reported again while it is showing: the same occurrence.
+        engine.update(|i| i.status.set_notice(saved()));
+        assert_eq!(engine.status().notice_id, first, "repeats never re-open it");
+        // A different message arrived after the first was shown: closing
+        // the first never clears the newer one.
+        engine.update(|i| {
+            i.status
+                .set_notice("Your screen changed or was disconnected.".into())
+        });
+        let second = engine.status().notice_id;
+        assert_ne!(second, first);
+        engine.dismiss_notice(first);
+        assert_eq!(engine.status().notice_id, second);
+        assert!(engine.status().notice.is_some());
+        engine.dismiss_notice(second);
+        assert_eq!(engine.status().notice, None);
+        // The same text later is a new occurrence and is shown again.
+        engine.update(|i| i.status.set_notice(saved()));
+        let again = engine.status();
+        assert_eq!(again.notice.as_deref(), Some(saved().as_str()));
+        assert!(again.notice_id > second);
     }
     #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {
@@ -2616,8 +3262,12 @@ mod tests {
             let s = engine.status();
             assert_eq!(s.state, "Error");
             assert!(!s.recording && !s.pending_recording && !s.replay);
+            // Retry redoes what failed: the recording, not Instant Replay.
+            assert_eq!(s.error_retry, vec!["start_recording".to_owned()]);
             assert!(engine.0.lock().unwrap().starting.is_none());
         }
+        engine.start_replay().unwrap_err();
+        assert_eq!(engine.status().error_retry, vec!["start_replay".to_owned()]);
         assert_eq!(session_dirs(&root.path().join("data"), "buffer"), 0);
     }
     #[test]
@@ -2643,6 +3293,7 @@ mod tests {
         assert_eq!(i.status.state, "Error");
         assert!(!i.status.pending_recording);
         assert!(i.status.error.as_ref().unwrap().contains("did not start"));
+        assert_eq!(i.status.error_retry, vec!["start_recording".to_owned()]);
     }
     #[test]
     fn stop_during_start_cancels_only_a_pending_recording() {
@@ -2800,6 +3451,85 @@ mod tests {
         assert!(!s.recording && !s.pending_recording);
         assert_eq!(session_dirs(&data, "buffer"), 0);
         assert_eq!(session_dirs(&data, "recordings"), 0);
+    }
+    #[test]
+    fn one_microphone_switch_mutes_live_and_touches_nothing_else() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        let source = |s: &Settings, kind: &str| {
+            let mut v =
+                serde_json::to_value(s.audio.iter().find(|a| a.kind == kind).unwrap()).unwrap();
+            let state = (v["enabled"].take(), v["muted"].take());
+            (v, state.0 == true, state.1 == true)
+        };
+        let before = engine.settings();
+        // Off = muted: still in the capture layout, device/volume/voice untouched.
+        let off = engine.set_microphone(false).unwrap();
+        let (mic, enabled, muted) = source(&off, "microphone");
+        assert!(enabled && muted);
+        assert_eq!(
+            mic,
+            source(&before, "microphone").0,
+            "device, volume and Voice Enhancer kept"
+        );
+        assert_eq!(
+            source(&off, "system"),
+            source(&before, "system"),
+            "system audio unaffected"
+        );
+        let saved = Settings::load(&root.path().join("data").join("settings.json")).unwrap();
+        assert!(source(&saved, "microphone").2, "survives a restart");
+        // During capture: switching is live, repeated fast switching is safe,
+        // and capture is never restarted (same encoder process).
+        let pid = |e: &Engine| e.0.lock().unwrap().pipeline.as_ref().map(|p| p.child.id());
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(15), || engine
+            .status()
+            .state
+            == "Buffering"));
+        let encoder = pid(&engine).unwrap();
+        for _ in 0..25 {
+            assert!(!source(&engine.set_microphone(true).unwrap(), "microphone").2);
+            assert!(source(&engine.set_microphone(false).unwrap(), "microphone").2);
+        }
+        engine.set_microphone(true).unwrap();
+        assert_eq!(pid(&engine), Some(encoder));
+        assert_eq!(engine.status().state, "Buffering");
+        assert!(engine.status().error.is_none());
+        engine.stop_replay().unwrap();
+        // A microphone taken out of the capture (Audio page) comes back with
+        // the switch while idle, but can't join a capture that is running.
+        let mut without = engine.settings();
+        for a in without.audio.iter_mut().filter(|a| a.kind == "microphone") {
+            a.enabled = false;
+        }
+        engine.set_settings(without.clone()).unwrap();
+        let on = engine.set_microphone(true).unwrap();
+        assert!(source(&on, "microphone").1 && !source(&on, "microphone").2);
+        engine.set_settings(without).unwrap();
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(15), || engine
+            .status()
+            .state
+            == "Buffering"));
+        let refused = engine.set_microphone(true).unwrap_err().to_string();
+        assert!(refused.contains("isn't part of the capture"), "{refused}");
+        assert!(
+            !source(&engine.settings(), "microphone").1,
+            "nothing changed on refusal"
+        );
+        engine.stop_replay().unwrap();
+        // No microphone at all: a clear message.
+        let mut none = engine.settings();
+        none.audio.retain(|a| a.kind != "microphone");
+        engine.set_settings(none).unwrap();
+        assert!(engine
+            .set_microphone(true)
+            .unwrap_err()
+            .to_string()
+            .contains("No microphone"));
     }
     #[test]
     fn recording_joins_running_replay_and_stops_cleanly() {

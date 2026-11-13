@@ -220,7 +220,7 @@ function GameDetail({ game, sessions, back, go, excluded, onExclude }: {
         <Button size="sm" icon={ImagePlus} disabled={!native} onClick={() => file.current?.click()}>Choose image</Button>
         <Button size="sm" variant="ghost" icon={RotateCcw} disabled={!native} onClick={() => run('Resetting image', async () => { await api.gameArtClear(game); refreshArt(game); })}>Default image</Button>
       </div>
-      <div className="stat-grid">
+      <div className="game-stats">
         {stats.map(([k, v]) => <div key={k} className="stat"><small>{k}</small><strong>{v}</strong></div>)}
       </div>
       <div className="grid-2">

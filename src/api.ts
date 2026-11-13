@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { SettingsProblem } from './errors';
 
 /** True inside the Tauri window; false in a plain browser (UI preview only). */
 export const native = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -24,6 +25,7 @@ export type VoiceSample = {
 };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Display = {
+  adapter_vendor?: number;
   index: number; device: string; adapter_luid: string; active_width: number; active_height: number;
   desktop_width: number; desktop_height: number; refresh_hz: number; rotation: number; left: number; top: number;
 };
@@ -33,11 +35,11 @@ export type Settings = {
   source_rect: Rect | null; fps: number; encoder: string; codec: 'auto' | 'h264' | 'hevc' | 'av1'; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
   replay_hotkey: string; recording_hotkey: string; mute_hotkey: string; pause_hotkey: string; window_hotkey: string;
-  close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean;
+  close_to_tray: boolean; diagnostics: boolean; check_updates: boolean; gpu_scaling: boolean; capture_api: string;
   audio_bitrate_kbps: number; launch_at_startup: boolean; organize_by_game: boolean; game_mappings: GameMapping[];
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
-  playtime: PlaytimeSettings; capture_notices: boolean;
+  playtime: PlaytimeSettings; capture_notices: boolean; updates: UpdateSettings;
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
@@ -55,9 +57,15 @@ export type Status = {
   buffer_seconds: number; buffer_bytes: number; free_bytes: number; frames: number; dropped_frames: number;
   fps: number; elapsed: number; write_mbps: number; memory_mb: number; cpu_percent: number;
   audio_peaks: number[]; audio_packets: number[]; audio_gaps: number[]; audio_discontinuities: number[];
-  audio_drift_ppm: number[]; audio_written_bytes: number[]; error: string | null; notice: string | null;
+  audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null;
+  /** Engine actions that redo what `error` interrupted (empty: no Retry). */
+  error_retry: string[]; notice: string | null;
+  /** One occurrence of `notice`; Home closes messages by this id. */
+  notice_id: number;
+  /** What start-up found wrong with settings.json. */
+  settings_problem: SettingsProblem | null;
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
-  scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
+  capture_api: string; capture_filter: string; capture_fallback: string | null; scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
   duplicated_frames: number; detected_game: string | null; last_save_timings: { stage: string; elapsed_ms: number }[];
   pending_recording: boolean; recording_elapsed: number; start_timings: { stage: string; elapsed_ms: number }[];
@@ -82,7 +90,18 @@ export type TestCapture = {
   timestamp_errors: number; drift_correction_ppm: number; measured_device_clock_ppm: number;
   endpoint_mix_format: string | null;
 };
-export type UpdateInfo = { available: boolean; version?: string; notes?: string };
+export type UpdateSettings = {
+  auto_check: boolean; interval_hours: number; auto_download: boolean; auto_install: boolean; notify: boolean; idle_minutes: number;
+};
+export type UpdateStage = 'idle' | 'checking' | 'up_to_date' | 'available' | 'downloading' | 'verifying' | 'ready' | 'installing' | 'failed';
+/** Sent by the engine (`update-status` event). `simulated` marks test data. */
+export type UpdateStatus = {
+  /** Increases with every change; an older status is never applied over a newer one. */
+  revision: number;
+  stage: UpdateStage; current: string; latest: string | null; notes: string | null; date: string | null;
+  downloaded: number; total: number | null; error: string | null; detail: string | null; last_checked: number | null;
+  simulated: boolean; configured: boolean; installable: boolean; waiting: boolean; prompt: boolean; release_url: string | null;
+};
 export type ActionName = 'start_replay' | 'stop_replay' | 'start_recording' | 'stop_recording' | 'save_replay' | 'stop_all' | 'recover' | 'discard_sessions';
 
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -120,7 +139,10 @@ export const api = {
   voiceSampleRender: (voice: VoiceConfig, boostDb: number) => call<VoiceSample>('voice_sample_render', { voice, boostDb }),
   voiceSampleDiscard: () => call<void>('voice_sample_discard'),
   openSoundSettings: () => call<void>('open_sound_settings'),
+  /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
+  openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
+  dismissNotice: (id: number) => call<void>('dismiss_notice', { id }),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
   micMonitorStart: (source: AudioSource, output: string) => call<void>('mic_monitor_start', { source, output }),
@@ -128,8 +150,15 @@ export const api = {
   micMonitorSet: (volume: number, voice: VoiceConfig, boostDb: number, original: boolean) =>
     call<void>('mic_monitor_set', { volume, voice, boostDb, original }),
   openFolder: () => call<void>('open_folder'),
-  checkUpdate: () => call<UpdateInfo>('check_update'),
-  installUpdate: () => call<void>('install_update'),
+  updateStatus: () => call<UpdateStatus>('update_status'),
+  checkUpdate: () => call<UpdateStatus>('check_update'),
+  updateDownload: (install: boolean) => call<void>('update_download', { install }),
+  installUpdate: (pauseReplay: boolean) => call<void>('install_update', { pauseReplay }),
+  updateDismiss: () => call<UpdateStatus>('update_dismiss'),
+  updateConfigure: (settings: UpdateSettings) => call<Settings>('update_configure', { settings }),
+  updateOpenNotes: () => call<void>('update_open_notes'),
+  updateSimulate: (scenario: string) => call<UpdateStatus>('update_simulate', { scenario }),
+  setMicrophone: (on: boolean) => call<Settings>('set_microphone', { on }),
 };
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -138,8 +167,8 @@ export const emptyStatus: Status = {
   state: 'Stopped', replay: false, recording: false, saving: 0, encoder: '', capture: '', buffer_seconds: 0,
   buffer_bytes: 0, free_bytes: 0, frames: 0, dropped_frames: 0, fps: 0, elapsed: 0, write_mbps: 0, memory_mb: 0,
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
-  audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
-  scaling: '', scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
+  audio_written_bytes: [], error: null, error_retry: [], notice: null, notice_id: 0, settings_problem: null, last_clip: null, recovery_sessions: 0, geometry: null,
+  scaling: '', capture_api: '', capture_filter: '', capture_fallback: null, scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],
   encoder_speed: 0, video_lag_ms: 0, target_bitrate_mbps: 0, encoder_label: '', foreground_game: null, play_width: 0, play_height: 0,
@@ -152,11 +181,12 @@ export const previewSettings: Settings = {
   fps: 60, encoder: 'auto', codec: 'auto', preset: 'balanced', bitrate_mbps: 12, replay_seconds: 60, buffer_mb: 2048,
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX', audio: [], separate_tracks: true, replay_hotkey: 'Control+Shift+F10',
   recording_hotkey: 'Control+Shift+F9', mute_hotkey: 'Control+Shift+M', pause_hotkey: 'Control+Shift+F8', window_hotkey: 'Control+Shift+F11',
-  close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, audio_bitrate_kbps: 192,
+  close_to_tray: true, diagnostics: false, check_updates: false, gpu_scaling: true, capture_api: 'dda', audio_bitrate_kbps: 192,
   launch_at_startup: false, organize_by_game: true, game_mappings: [], game_notifications: true, settings_version: 6, scale_policy: 'smooth',
   overlay: { enabled: true, position: 'bottom-right', opacity: 90, show_replay: true, show_mic: true, show_recording: true, show_timer: false },
   playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
+  updates: { auto_check: true, interval_hours: 6, auto_download: false, auto_install: false, notify: true, idle_minutes: 5 },
   tray_hint_shown: false, tour_done: false, voice_presets: [],
 };
 
-export const VERSION = '0.3.1-alpha.6';
+export const VERSION = '0.3.1-alpha.9';

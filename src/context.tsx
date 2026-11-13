@@ -5,20 +5,31 @@ import { splashDone, splashStep } from './splash';
 import { listen } from '@tauri-apps/api/event';
 import { applySaveEvent, type SaveEvent } from './save-events';
 import { removeClip, upsertClip } from './library';
+import { describeError, type FriendlyError } from './errors';
 
-type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string };
+/** Errors carry their friendly form; the same problem again bumps `count`
+ * instead of stacking another toast. */
+type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string; error?: FriendlyError; count: number };
+type Failure = { retry?: readonly string[]; failed?: () => void };
 type Ctx = {
   saved: Settings; draft: Settings; dirty: boolean; loaded: boolean;
   patch: (p: Partial<Settings>) => void; save: () => Promise<boolean>; discard: () => void;
   /** Volume/mute apply immediately (even while capturing) and persist in the engine. */
   setMix: (index: number, volume: number, muted: boolean) => Promise<void>;
+  /** The one microphone switch (home page, tray, shortcut). Resolves to the
+   * state the engine confirmed; the interface never shows On before that. */
+  setMicrophone: (on: boolean) => Promise<boolean>;
+  /** Take over fields the engine changed and confirmed (never marks them unsaved). */
+  syncFromEngine: (fields: Partial<Settings>) => void;
   caps: Caps | null; refreshCaps: () => Promise<void>;
   clips: Clip[]; refreshClips: () => Promise<void>;
   /** Apply a finished delete/move locally; no rescan needed. */
   dropClip: (id: string) => void; putClip: (clip: Clip) => void;
   pendingSaves: SaveEvent[];
-  busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string) => Promise<T | undefined>;
-  toast: (kind: Toast['kind'], text: string) => void; toasts: Toast[]; dismiss: (id: number) => void;
+  /** `failure.retry`: what a Retry on the error repeats; `failure.failed` is
+   * called when the work failed. */
+  busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string, failure?: Failure) => Promise<T | undefined>;
+  toast: (kind: Toast['kind'], text: string, retry?: readonly string[]) => void; toasts: Toast[]; dismiss: (id: number) => void;
 };
 const AppContext = createContext<Ctx | null>(null);
 
@@ -35,9 +46,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const nextId = useRef(1);
 
   const dismiss = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), []);
-  const toast = useCallback((kind: Toast['kind'], text: string) => {
+  const toast = useCallback((kind: Toast['kind'], text: string, retry?: readonly string[]) => {
+    const error = kind === 'error' ? describeError(text, { retry }) : undefined;
     const id = nextId.current++;
-    setToasts(t => [...t.slice(-3), { id, kind, text }]);
+    setToasts(t => {
+      const same = t.find(x => (error ? x.error?.key === error.key : x.kind === kind && x.text === text));
+      if (same) return t.map(x => (x === same ? { ...x, error, count: x.count + 1 } : x));
+      return [...t.slice(-3), { id, kind, text, error, count: 1 }];
+    });
     if (kind !== 'error') window.setTimeout(() => dismiss(id), 5000);
   }, [dismiss]);
 
@@ -76,8 +92,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       libraryRevision.current++;
       setClips(payload);
     });
+    // Microphone switched from the tray or with the shortcut.
+    const mix = listen<Settings['audio']>('audio-settings', ({ payload }) => {
+      if (closed) return;
+      const apply = (s: Settings) => ({ ...s, audio: s.audio.map((a, i) => (payload[i] && payload[i].kind === a.kind ? { ...a, muted: payload[i].muted, enabled: payload[i].enabled } : a)) });
+      setSaved(apply); setDraft(apply);
+    });
     return () => {
       closed = true;
+      void mix.then(unlisten => unlisten());
       void subscription.then(unlisten => unlisten());
       void indexed.then(unlisten => unlisten());
       void devices.then(unlisten => unlisten());
@@ -98,14 +121,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshClips().catch(e => toast('error', errorText(e)));
   }, [refreshCaps, refreshClips, toast]);
 
-  const run = useCallback(async <T,>(label: string, work: () => Promise<T>, success?: string) => {
+  const run = useCallback(async <T,>(label: string, work: () => Promise<T>, success?: string, failure?: Failure) => {
     setBusy(label);
     try {
       const result = await work();
       if (success) toast('success', success);
       return result;
     } catch (e) {
-      toast('error', errorText(e));
+      toast('error', errorText(e), failure?.retry);
+      failure?.failed?.();
       return undefined;
     } finally {
       setBusy(null);
@@ -140,7 +164,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (native) await api.setMix(index, volume, muted).catch(e => toast('error', errorText(e)));
   }, [toast]);
 
-  const value = { setMix, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, dropClip, putClip, pendingSaves, busy, run, toast, toasts, dismiss };
+  const syncFromEngine = useCallback((fields: Partial<Settings>) => {
+    setSaved(s => ({ ...s, ...fields })); setDraft(s => ({ ...s, ...fields }));
+  }, []);
+  const setMicrophone = useCallback(async (on: boolean) => {
+    const before = saved.audio.find(a => a.kind === 'microphone');
+    const was = !!before && before.enabled && !before.muted;
+    if (!native) return was;
+    try {
+      const confirmed = await api.setMicrophone(on);
+      const apply = (s: Settings) => ({ ...s, audio: s.audio.map((a, i) => (confirmed.audio[i] && confirmed.audio[i].kind === a.kind ? { ...a, muted: confirmed.audio[i].muted, enabled: confirmed.audio[i].enabled } : a)) });
+      setSaved(apply); setDraft(apply);
+      const mic = confirmed.audio.find(a => a.kind === 'microphone');
+      return !!mic && mic.enabled && !mic.muted;
+    } catch (e) {
+      toast('error', errorText(e));
+      return was;
+    }
+  }, [saved.audio, toast]);
+
+  const value = { setMix, setMicrophone, syncFromEngine, saved, draft, dirty, loaded, patch, save, discard, caps, refreshCaps, clips, refreshClips, dropClip, putClip, pendingSaves, busy, run, toast, toasts, dismiss };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

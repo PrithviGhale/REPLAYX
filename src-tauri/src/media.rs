@@ -73,6 +73,13 @@ pub struct Encoder {
 }
 impl Media {
     pub fn preflight(&self) -> Result<()> {
+        self.preflight_with(|exe| command(exe))
+    }
+    /// The same check below normal priority, for the warm-up after launch.
+    pub fn preflight_low_priority(&self) -> Result<()> {
+        self.preflight_with(|exe| helper(exe))
+    }
+    fn preflight_with(&self, command: impl Fn(&Path) -> Command) -> Result<()> {
         for exe in [&self.ffmpeg, &self.ffprobe] {
             let output=command(exe).args(["-version"]).output().with_context(||format!("Cannot run {}. Windows may have blocked the media runtime; review the security notification without disabling protection.",exe.file_name().unwrap_or_default().to_string_lossy()))?;
             if !output.status.success() {
@@ -326,7 +333,12 @@ impl Media {
         c.args(["-hide_banner", "-v", "error", "-nostdin"]);
         let filter = video_input(&mut c, s, scaler, false, plan).map_err(|e| e.to_string())?;
         let (ffmpeg_encoder, low_power) = ffmpeg_encoder(encoder);
-        c.args(["-vf", &filter, "-c:v", ffmpeg_encoder]);
+        if source_in_graph(&filter) {
+            c.args(["-filter_complex", &format!("{filter}[v]"), "-map", "[v]"]);
+        } else {
+            c.args(["-vf", &filter]);
+        }
+        c.args(["-c:v", ffmpeg_encoder]);
         if low_power {
             c.args(["-low_power", "1"]);
         }
@@ -680,6 +692,10 @@ pub enum Scaler {
     QsvHybrid,
     /// Full-resolution download and software scaling.
     Cpu,
+    /// Windows Graphics Capture delivers frames to a Direct3D 11 device on
+    /// the encoder's GPU (Windows copies across adapters on hybrid laptops),
+    /// FFmpeg's gfxcapture scales them there, NVENC encodes them: no CPU copy.
+    WgcGpu,
 }
 impl Scaler {
     pub fn label(self) -> &'static str {
@@ -689,6 +705,7 @@ impl Scaler {
             Scaler::QsvZeroCopy => "GPU zero-copy (Intel Quick Sync)",
             Scaler::QsvHybrid => "GPU scaling (Intel VPP) + scaled-frame transfer",
             Scaler::Cpu => "CPU fallback",
+            Scaler::WgcGpu => "GPU zero-copy (Windows Graphics Capture → NVENC)",
         }
     }
     /// Whether the scaler can produce this plan's frame (padding needs system
@@ -699,7 +716,7 @@ impl Scaler {
                 !plan.padded()
                     && (plan.source.width, plan.source.height) == (plan.width, plan.height)
             }
-            Scaler::QsvZeroCopy | Scaler::Cuda => !plan.padded(),
+            Scaler::QsvZeroCopy | Scaler::Cuda | Scaler::WgcGpu => !plan.padded(),
             Scaler::QsvHybrid | Scaler::Cpu => true,
         }
     }
@@ -791,10 +808,12 @@ pub const VENDOR_AMD: u32 = 0x1002;
 pub fn scaling_candidates(requested: &str, vendor: u32) -> Vec<(Scaler, &'static str)> {
     let all = [
         (VENDOR_NVIDIA, Scaler::D3d11, "h264_nvenc"),
+        (VENDOR_NVIDIA, Scaler::WgcGpu, "h264_nvenc"),
         (VENDOR_NVIDIA, Scaler::Cuda, "h264_nvenc"),
         (VENDOR_AMD, Scaler::D3d11, "h264_amf"),
         (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv_lp"),
         (VENDOR_INTEL, Scaler::QsvZeroCopy, "h264_qsv"),
+        (VENDOR_INTEL, Scaler::WgcGpu, "h264_nvenc"),
         (VENDOR_INTEL, Scaler::QsvHybrid, "h264_nvenc"),
         (VENDOR_INTEL, Scaler::QsvHybrid, "h264_amf"),
     ];
@@ -825,14 +844,26 @@ fn summarize_error(text: &str) -> String {
 /// one shared graph FFmpeg runs both on one thread, and waiting for real-time
 /// audio stalled the video chain, which blocked the desktop grabber. With
 /// audio, 57% of frames repeated (0.2.1-alpha.3); separate graphs plus NVENC
-/// lookahead brought it to 0.0-0.28%. See docs/PERFORMANCE.md.
+/// lookahead brought it to 0.0-0.28%. See docs/development/PERFORMANCE.md.
+/// Whether a video filter string starts with its own capture source (no
+/// `-i` input for video).
+pub fn source_in_graph(video_filter: &str) -> bool {
+    video_filter.starts_with("gfxcapture=")
+}
 pub fn filter_graphs(
     video_filter: &str,
     chains: &[String],
     separate: bool,
     split: bool,
 ) -> Vec<String> {
-    let video = format!("[0:v]{video_filter}[v]");
+    // A capture source inside the graph (WgcGpu) is not input 0.
+    let in_graph = source_in_graph(video_filter);
+    let first_audio = if in_graph { 0 } else { 1 };
+    let video = if in_graph {
+        format!("{video_filter}[v]")
+    } else {
+        format!("[0:v]{video_filter}[v]")
+    };
     if chains.is_empty() {
         return vec![video];
     }
@@ -841,7 +872,7 @@ pub fn filter_graphs(
         if n > 0 {
             audio += ";";
         }
-        audio += &format!("[{}:a]aresample=async=1000:first_pts=0", n + 1);
+        audio += &format!("[{}:a]aresample=async=1000:first_pts=0", n + first_audio);
         if !chain.is_empty() {
             audio += &format!(",{chain}");
         }
@@ -879,7 +910,7 @@ pub fn source_chain(source: &crate::model::AudioSource) -> String {
     }
 }
 /// Encoder/capture tuning. `REPLAYX_VIDEO_TUNING` ("key=value,...") overrides
-/// the defaults for benchmarking only (see scripts/overhead-bench.py).
+/// the defaults for benchmarking only (see scripts/bench/overhead-bench.py).
 #[derive(Debug, Clone)]
 pub struct Tuning {
     /// h264_qsv `low_power`: None = FFmpeg default (auto).
@@ -892,6 +923,8 @@ pub struct Tuning {
     pub cpu_priority: bool,
     /// Raise the encoder process's GPU scheduling class.
     pub gpu_priority: bool,
+    /// Profiling-only scheduling experiment; never permits realtime priority.
+    pub gpu_priority_class: i32,
     /// Capture at this multiple of the output rate and keep the frame nearest
     /// each output slot (1 = capture at the output rate).
     pub oversample: u32,
@@ -905,6 +938,43 @@ pub struct Tuning {
     pub video_queue: Option<u32>,
     /// NVENC rate-control lookahead in frames.
     pub nvenc_lookahead: Option<u32>,
+    /// Profiling control only; production keeps spatial AQ enabled.
+    pub nvenc_aq: bool,
+    /// Experimental capture API for the display path: false = Desktop
+    /// Duplication (ddagrab, production), true = Windows Graphics Capture
+    /// (FFmpeg gfxcapture). Development/benchmark only.
+    pub wgc: bool,
+    /// WGC window capture instead of the display: executable-name pattern.
+    pub wgc_window: Option<String>,
+    /// Windows' yellow capture border around the screen while WGC records.
+    /// Off by default (IsBorderRequired = false, honoured by Windows for
+    /// REPLAYX); `wgc_border=1` shows it.
+    pub wgc_border: bool,
+    /// WGC capture rate as a multiple of the output rate (the engine raises a
+    /// session to 2x when 1x misses slots; see `wgc_rate_multiple`).
+    pub wgc_oversample: u32,
+    /// Development switch for the WgcGpu path (WGC frames delivered to the
+    /// NVIDIA GPU, scaled there, NVENC zero-copy). Off: on the Intel-driven
+    /// laptop panel it cost 29.9% game FPS against 5.6% for Intel scaling +
+    /// a scaled-frame transfer (Windows copies every full-size frame across
+    /// adapters onto the game's GPU). Unmeasured on NVIDIA-driven displays.
+    pub wgc_gpu: bool,
+    /// WGC minimum update interval in microseconds at 1x. Updates land on
+    /// display refreshes, and only when the content changed: with a 16 ms
+    /// floor a ~228 FPS game on a 240 Hz panel slipped to 20.8 ms gaps and
+    /// 10% of recorded frames were repeats. 12.5 ms (three 240 Hz
+    /// refreshes) gave 0% repeats; the encoder keeps the frame nearest each
+    /// 60 FPS slot (measured, memory-bound synthetic game).
+    pub wgc_floor_us: Option<u32>,
+    /// gfxcapture scales to the encoded image size in the shader pass it
+    /// runs on every frame anyway, so the next stage reads a 1080p frame
+    /// instead of the full display (2560x1600: about 16 MB per frame). On a
+    /// laptop whose display runs on the integrated GPU, that GPU shares the
+    /// CPU's cache and memory controller: less frame traffic is less slowdown
+    /// for a CPU-bound game (14.9% -> 11.5% game FPS cost, memory-bound
+    /// synthetic game; Fortnite's CPU time per frame rose 23-49% while
+    /// recording, tracking the integrated GPU's load).
+    pub wgc_scale: bool,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -915,18 +985,30 @@ impl Default for Tuning {
             qsv_async_depth: None,
             cpu_priority: false,
             gpu_priority: true,
+            gpu_priority_class: 4,
             oversample: 1,
             audio_wallclock: false,
             interleave_delta: None,
             split_graphs: true,
             video_queue: None,
             nvenc_lookahead: Some(20),
+            nvenc_aq: true,
+            wgc: false,
+            wgc_window: None,
+            wgc_border: false,
+            wgc_oversample: 1,
+            wgc_gpu: false,
+            wgc_floor_us: Some(12_500),
+            wgc_scale: true,
         }
     }
 }
 pub fn tuning() -> Tuning {
+    parse_tuning(&std::env::var("REPLAYX_VIDEO_TUNING").unwrap_or_default())
+}
+fn parse_tuning(spec: &str) -> Tuning {
     let mut t = Tuning::default();
-    if let Ok(spec) = std::env::var("REPLAYX_VIDEO_TUNING") {
+    {
         for (k, v) in spec.split(',').filter_map(|kv| kv.split_once('=')) {
             match k.trim() {
                 "qsv_low_power" => t.qsv_low_power = v.parse::<u8>().ok().map(|v| v == 1),
@@ -935,12 +1017,35 @@ pub fn tuning() -> Tuning {
                 "qsv_async_depth" => t.qsv_async_depth = v.parse().ok(),
                 "cpu_priority" => t.cpu_priority = v != "0",
                 "gpu_priority" => t.gpu_priority = v != "0",
+                "gpu_priority_class" => {
+                    t.gpu_priority_class = v.parse::<i32>().unwrap_or(4).clamp(2, 4)
+                }
                 "oversample" => t.oversample = v.parse::<u32>().unwrap_or(1).clamp(1, 8),
                 "audio_wallclock" => t.audio_wallclock = v != "0",
                 "interleave_delta" => t.interleave_delta = v.parse().ok(),
                 "split_graphs" => t.split_graphs = v != "0",
                 "video_queue" => t.video_queue = v.parse().ok(),
                 "nvenc_lookahead" => t.nvenc_lookahead = v.parse().ok(),
+                "nvenc_aq" => t.nvenc_aq = v != "0",
+                "capture_api" => t.wgc = v.trim() == "wgc",
+                // Executable names only: no characters that end the filter option.
+                "wgc_window"
+                    if !v.is_empty()
+                        && v.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) =>
+                {
+                    t.wgc_window = Some(v.trim().to_string())
+                }
+                "wgc_border" => t.wgc_border = v != "0",
+                "wgc_gpu" => t.wgc_gpu = v != "0",
+                "wgc_scale" => t.wgc_scale = v != "0",
+                "wgc_floor_us" => {
+                    t.wgc_floor_us = v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|&us| (4000..=33334).contains(&us))
+                }
+                "wgc_oversample" => t.wgc_oversample = v.parse::<u32>().unwrap_or(2).clamp(1, 4),
                 _ => {}
             }
         }
@@ -961,7 +1066,7 @@ const BGRA_TAGS: &str =
     "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=smpte170m";
 /// Whether this scaler's RGB→YUV conversion is BT.709 limited range.
 pub fn converts_bt709(scaler: Scaler) -> bool {
-    !matches!(scaler, Scaler::D3d11 | Scaler::Cuda)
+    !matches!(scaler, Scaler::D3d11 | Scaler::Cuda | Scaler::WgcGpu)
 }
 pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     let t = tuning();
@@ -978,7 +1083,9 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
         // BGRA frames go to the encoder, which converts them to limited-range
         // YUV (see BGRA_TAGS): say so on the frames so the stream and
         // container are tagged correctly.
-        Scaler::D3d11 => format!("setsar={}/{},{BGRA_TAGS}", plan.sar.0, plan.sar.1),
+        Scaler::D3d11 | Scaler::WgcGpu => {
+            format!("setsar={}/{},{BGRA_TAGS}", plan.sar.0, plan.sar.1)
+        }
         Scaler::Cuda => format!(
             "hwdownload,format=bgra,hwupload_cuda,scale_cuda=w={iw}:h={ih}:interp_algo=bilinear,setsar=1,{BGRA_TAGS}"
         ),
@@ -1047,21 +1154,50 @@ pub fn video_input(
         if let Some(q) = tuning().video_queue {
             c.args(["-thread_queue_size", &q.to_string()]);
         }
-        c.args([
-            "-f",
-            "lavfi",
-            "-i",
-            &format!(
-                "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
-                s.display, s.fps * tuning().oversample, u8::from(tuning().draw_mouse), rect.width, rect.height, rect.x, rect.y
-            ),
-        ]);
-        let timing = if tuning().oversample > 1 {
+        let t = tuning();
+        let wgc = capture_api(s) == "wgc";
+        let oversample = if wgc {
+            wgc_rate_multiple(s, &t)
+        } else {
+            t.oversample
+        };
+        let timing = if oversample > 1 {
             // Several captures per output slot: keep the one nearest each slot.
             format!("fps={}:round=near", s.fps)
         } else {
             regrid_filter(s.fps)
         };
+        if wgc && scaler == Scaler::WgcGpu {
+            // The source lives in the filter graph so it can use a device on
+            // the encoder's GPU (a lavfi input cannot be given one).
+            let index = crate::geometry::adapter_index(VENDOR_NVIDIA)
+                .context("No NVIDIA adapter for Windows Graphics Capture → NVENC")?;
+            c.args([
+                "-init_hw_device",
+                &format!("d3d11va=wgc:{index}"),
+                "-filter_hw_device",
+                "wgc",
+            ]);
+            let source = wgc_source(s, &t, rect, Some((plan.width, plan.height)))?;
+            return Ok(format!("{source},{timing},{}", video_filter(plan, scaler)));
+        }
+        let source = if wgc {
+            // Scale in gfxcapture for the paths that otherwise read the full
+            // display frame on the Intel GPU (VPP) or the CPU.
+            let scale = (t.wgc_scale
+                && matches!(
+                    scaler,
+                    Scaler::QsvZeroCopy | Scaler::QsvHybrid | Scaler::Cpu
+                ))
+            .then_some((plan.image_width, plan.image_height));
+            wgc_source(s, &t, rect, scale)?
+        } else {
+            format!(
+                "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
+                s.display, s.fps * t.oversample, u8::from(t.draw_mouse), rect.width, rect.height, rect.x, rect.y
+            )
+        };
+        c.args(["-f", "lavfi", "-i", &source]);
         return Ok(format!("{},{}", timing, video_filter(plan, scaler)));
     }
     c.args(["-f", "gdigrab", "-framerate", &s.fps.to_string(), "-i"]);
@@ -1076,6 +1212,71 @@ pub fn video_input(
         &s.canvas_mode,
     ))
 }
+/// The display capture API a start uses: the setting, or the benchmark
+/// override `REPLAYX_VIDEO_TUNING=capture_api=wgc`.
+pub fn capture_api(s: &Settings) -> &'static str {
+    if s.capture_api == "wgc" || tuning().wgc {
+        "wgc"
+    } else {
+        "dda"
+    }
+}
+/// WGC capture rate as a multiple of the output rate. Each delivered frame
+/// costs a full-screen copy in Windows and in gfxcapture: at about 550 game
+/// FPS, 2x cost 7.0-8.0% game FPS and 1x 3.6-3.9% (synthetic, 0% repeated
+/// frames either way). But Windows' update floor makes a game between 60 and
+/// 120 FPS arrive below 60/s at 1x (18% repeated frames at ~95 FPS), so the
+/// engine switches a session to 2x when it sees that (`Settings::wgc_boost`).
+pub fn wgc_rate_multiple(s: &Settings, t: &Tuning) -> u32 {
+    if s.wgc_boost {
+        t.oversample.max(2)
+    } else {
+        t.oversample.max(t.wgc_oversample)
+    }
+}
+/// Windows Graphics Capture source (experimental). Frames are
+/// Direct3D 11 BGRA textures like ddagrab's, so the same filters and encoders
+/// apply. WGC delivers a frame only when the content changes, at most
+/// `max_framerate` per second; the output's CFR mode repeats frames to fill
+/// slots, as it does for Desktop Duplication stalls.
+fn wgc_source(
+    s: &Settings,
+    t: &Tuning,
+    rect: crate::geometry::CaptureRect,
+    scale_to: Option<(u32, u32)>,
+) -> Result<String> {
+    // At 1x, an update floor slightly under one output slot (wgc_floor_us)
+    // keeps Windows from slipping a whole display refresh past the slot.
+    let rate = match (t.wgc_floor_us, wgc_rate_multiple(s, t)) {
+        (Some(us), 1) => format!("1000000/{us}"),
+        (_, n) => (s.fps * n).to_string(),
+    };
+    let mut common = format!(
+        "max_framerate={}:capture_cursor={}:display_border={}",
+        rate,
+        u8::from(t.draw_mouse),
+        u8::from(t.wgc_border)
+    );
+    if let Some((w, h)) = scale_to {
+        // gfxcapture scales on the GPU to the encoded size (stretch).
+        common += &format!(":width={w}:height={h}:resize_mode=scale");
+    }
+    if let Some(exe) = &t.wgc_window {
+        return Ok(format!(
+            "gfxcapture=window_exe=(?i){exe}:capture_border=0:{common}"
+        ));
+    }
+    let display = crate::geometry::display(s.display)?;
+    let (w, h) = (display.desktop_width, display.desktop_height);
+    Ok(format!(
+        "gfxcapture=hmonitor={}:crop_left={}:crop_top={}:crop_right={}:crop_bottom={}:{common}",
+        crate::geometry::monitor_handle(s.display)?,
+        rect.x,
+        rect.y,
+        w.saturating_sub(rect.x + rect.width),
+        h.saturating_sub(rect.y + rect.height)
+    ))
+}
 /// Video bitrate for a preset at an output size and frame rate. Anchored at
 /// 1080p60: Performance 16, Balanced 28, High Quality 45 Mb/s (NVIDIA's own
 /// recorder defaults to 50 Mb/s for 1080p60 "High"), scaled by pixel count
@@ -1085,13 +1286,14 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
     if s.preset == "custom" {
         return s.bitrate_mbps;
     }
-    // Matched to what NVIDIA's own recorder produced on the same laptop
-    // (about 16.5 Mb/s for 1440x1080 at 60 fps); NVENC lookahead and adaptive
-    // quantization spend those bits better than the previous 28 Mb/s did.
+    // Balanced matches NVIDIA's own recorder: a 2-minute 1080p60 clip of
+    // about 225-230 MB (as Windows shows sizes). On real Fortnite footage a
+    // 15 Mb/s target averaged 15.8 Mb/s on Quick Sync and 15.2 on NVENC, both
+    // VMAF 92.7; with two AAC tracks a 2-minute clip is 223-233 MB.
     let base = match s.preset.as_str() {
         "performance" => 10.0,
         "quality" => 25.0,
-        _ => 16.0,
+        _ => 15.0,
     };
     let pixels = (width as f64 * height as f64) / (1920.0 * 1080.0);
     let rate = (s.fps as f64 / 60.0).powf(0.75);
@@ -1100,10 +1302,10 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
 /// How a preset spends bits on one encoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct RatePlan {
-    /// NVENC constant-quality level (lower is better); None for plain VBR.
+    /// Constant-quality level, if a preset used one. None: every encoder
+    /// now uses VBR so clip sizes are predictable (kept for diagnostics).
     pub cq: Option<u32>,
-    /// Average for VBR; for constant quality the expected average in typical
-    /// gameplay (measured), used for size estimates.
+    /// Average rate; used for size estimates.
     pub target_mbps: u32,
     /// Hard peak: bounds file size and the replay buffer in complex scenes.
     pub cap_mbps: u32,
@@ -1111,7 +1313,7 @@ pub struct RatePlan {
 /// Bits a codec needs relative to H.264 for the same picture quality,
 /// measured with VMAF on NVENC (RTX 4070 Laptop) on real Roblox gameplay
 /// and a synthetic game-like scene: AV1 about 25% fewer; HEVC within +-3%
-/// of H.264 with these settings, so it gets no discount (docs/PERFORMANCE.md).
+/// of H.264 with these settings, so it gets no discount (docs/development/PERFORMANCE.md).
 fn codec_factor(codec: &str) -> f64 {
     if codec == "av1" {
         0.75
@@ -1119,23 +1321,12 @@ fn codec_factor(codec: &str) -> f64 {
         1.0
     }
 }
-/// NVENC constant-quality levels per preset. H.264 CQ 28 on real gameplay
-/// averaged 14.7 Mb/s at VMAF 97.6, matching the old 16 Mb/s VBR (97.9) at
-/// 12% less; AV1 CQ 34 gave VMAF 97.7 at 12.5 Mb/s (docs/PERFORMANCE.md).
-fn nvenc_cq(codec: &str, preset: &str) -> u32 {
-    match (codec, preset) {
-        ("av1", "performance") => 38,
-        ("av1", "quality") => 31,
-        ("av1", _) => 34,
-        (_, "performance") => 31,
-        (_, "quality") => 25,
-        _ => 28,
-    }
-}
-/// Rate control for a preset on an encoder at an output size. NVENC uses
-/// constant quality capped at 1.5x the preset rate: simple scenes cost
-/// less, complex ones get bits up to the cap. Other encoders use VBR around
-/// the preset rate. Custom is the user's rate, whatever the codec.
+/// Rate control for a preset on an encoder at an output size: VBR around the
+/// preset rate with a 1.5x peak, on every encoder, so a clip's size follows
+/// its length (2 minutes of Balanced 1080p60 is about 230 MB). NVENC used
+/// constant quality capped at 1.5x before; in busy scenes that ran at the
+/// cap (a 2-minute clip of a hard scene: 345 MB against 212 MB with VBR).
+/// Custom is the user's rate, whatever the codec.
 pub fn rate_plan(s: &Settings, encoder: &str, width: u32, height: u32) -> RatePlan {
     let h264 = target_bitrate_mbps(s, width, height);
     if s.preset == "custom" {
@@ -1145,13 +1336,9 @@ pub fn rate_plan(s: &Settings, encoder: &str, width: u32, height: u32) -> RatePl
             cap_mbps: h264 * 3 / 2,
         };
     }
-    let codec = codec_of(encoder);
-    let k = codec_factor(codec);
+    let k = codec_factor(codec_of(encoder));
     RatePlan {
-        cq: ffmpeg_encoder(encoder)
-            .0
-            .ends_with("_nvenc")
-            .then(|| nvenc_cq(codec, &s.preset)),
+        cq: None,
         target_mbps: ((h264 as f64) * k).round().max(2.0) as u32,
         cap_mbps: ((h264 as f64) * 1.5 * k).round().max(3.0) as u32,
     }
@@ -1188,14 +1375,16 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         ]),
         // VBR around the target with a 1.5x peak: action scenes get more bits
         // than menus without unbounded replay-buffer growth.
-        None => c.args([
-            "-b:v",
-            &format!("{}M", rate.target_mbps),
-            "-maxrate",
-            &format!("{}k", rate.cap_mbps * 1000),
-            "-bufsize",
-            &format!("{}k", rate.target_mbps * 2000),
-        ]),
+        None => c
+            .args(if nvenc { &["-rc", "vbr"][..] } else { &[][..] })
+            .args([
+                "-b:v",
+                &format!("{}M", rate.target_mbps),
+                "-maxrate",
+                &format!("{}k", rate.cap_mbps * 1000),
+                "-bufsize",
+                &format!("{}k", rate.target_mbps * 2000),
+            ]),
     };
     c.args(["-g", &(s.fps * 2).to_string(), "-bf", "0"]);
     // Segments must start with IDR frames so each 2s file decodes on its own and
@@ -1210,7 +1399,8 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         _ => {}
     }
     if nvenc {
-        // NVENC runs on its own engine; presets trade encoder time, not game GPU time.
+        // NVENC is dedicated hardware, but RGB conversion, AQ and lookahead
+        // can also consume GPU resources shared with rendering.
         c.args([
             "-preset",
             match s.preset.as_str() {
@@ -1221,7 +1411,7 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
             "-tune",
             "hq",
             "-spatial-aq",
-            "1",
+            if tuning().nvenc_aq { "1" } else { "0" },
         ]);
         // Rate-control lookahead: better bit allocation, and the encoder holds
         // ~1/3 s of video, so video never runs ahead of the (deliberately
@@ -1433,17 +1623,23 @@ mod tests {
             .all(|c| c.0 != Scaler::D3d11 && c.0 != Scaler::Cuda));
         // NVIDIA-driven display (desktop PC, or Advanced Optimus during a
         // full-screen game): NVENC only, zero copy first; no Quick Sync probes.
+        // WgcGpu (GPU scaling inside Windows Graphics Capture) is offered
+        // only when WGC is the capture method (select_video_path skips it).
         let nvidia = scaling_candidates("auto", VENDOR_NVIDIA);
         assert_eq!(
             nvidia,
-            vec![(Scaler::D3d11, "h264_nvenc"), (Scaler::Cuda, "h264_nvenc")]
+            vec![
+                (Scaler::D3d11, "h264_nvenc"),
+                (Scaler::WgcGpu, "h264_nvenc"),
+                (Scaler::Cuda, "h264_nvenc")
+            ]
         );
         assert_eq!(
             scaling_candidates("auto", VENDOR_AMD),
             vec![(Scaler::D3d11, "h264_amf")]
         );
         // Unknown vendor: everything; an explicit encoder filters the list.
-        assert_eq!(scaling_candidates("auto", 0).len(), 7);
+        assert_eq!(scaling_candidates("auto", 0).len(), 9);
         assert!(scaling_candidates("h264_nvenc", 0)
             .iter()
             .all(|c| c.1 == "h264_nvenc"));
@@ -1565,8 +1761,8 @@ mod tests {
         let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
         assert!(pair("-c:v", "h264_qsv") && pair("-low_power", "1"));
         assert!(pair("-colorspace", "bt709") && pair("-color_range", "tv"));
-        assert!(pair("-b:v", "16M") && pair("-maxrate", "24000k"));
-        assert!(!pair("-cq", "28"), "Quick Sync keeps VBR");
+        assert!(pair("-b:v", "15M") && pair("-maxrate", "23000k"));
+        assert!(!args.iter().any(|a| a == "-cq"), "VBR, no constant quality");
         let mut c = command(Path::new("ffmpeg"));
         encoding_args(
             &mut c,
@@ -1592,9 +1788,9 @@ mod tests {
             )
         };
         assert_eq!(at("performance", 60, 1920, 1080), 10);
-        assert_eq!(at("balanced", 60, 1920, 1080), 16);
+        assert_eq!(at("balanced", 60, 1920, 1080), 15);
         assert_eq!(at("quality", 60, 1920, 1080), 25);
-        assert!(at("balanced", 120, 1920, 1080) > 16 && at("balanced", 120, 1920, 1080) < 32);
+        assert!(at("balanced", 120, 1920, 1080) > 15 && at("balanced", 120, 1920, 1080) < 30);
         assert!(at("balanced", 60, 1280, 720) < 10);
         assert!(at("quality", 60, 3840, 2160) > 60);
         let custom = Settings {
@@ -1604,6 +1800,87 @@ mod tests {
         };
         assert_eq!(target_bitrate_mbps(&custom, 1920, 1080), 33);
     }
+    #[test]
+    fn windows_graphics_capture_is_opt_in_and_window_names_are_sanitized() {
+        // Production stays on Desktop Duplication; WGC is opt-in (setting or
+        // benchmark switch).
+        assert_eq!(Settings::default().capture_api, "dda");
+        if std::env::var_os("REPLAYX_VIDEO_TUNING").is_none() {
+            assert_eq!(capture_api(&Settings::default()), "dda");
+            let opted = Settings {
+                capture_api: "wgc".into(),
+                ..Default::default()
+            };
+            assert_eq!(capture_api(&opted), "wgc");
+        }
+        let d = Tuning::default();
+        assert!(!d.wgc && d.wgc_window.is_none() && !d.wgc_border);
+        let t = parse_tuning("capture_api=wgc,wgc_window=replayx-gameproxy.exe,wgc_border=0");
+        assert!(t.wgc && !t.wgc_border);
+        assert!(parse_tuning("wgc_border=1").wgc_border);
+        assert_eq!(t.wgc_window.as_deref(), Some("replayx-gameproxy.exe"));
+        // Characters that would end or extend the filter option are refused.
+        for bad in ["a:b", "x'y", "a[b]", "a;b", r"a\b"] {
+            assert!(
+                parse_tuning(&format!("wgc_window={bad}"))
+                    .wgc_window
+                    .is_none(),
+                "{bad}"
+            );
+        }
+        let s = Settings {
+            fps: 60,
+            ..Default::default()
+        };
+        let rect = crate::geometry::CaptureRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let f = wgc_source(&s, &t, rect, None).unwrap();
+        assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
+        // 1x with a 12.5 ms update floor by default; 2x once a session is boosted.
+        assert!(f.contains("max_framerate=1000000/12500") && f.contains("display_border=0"));
+        let boosted = Settings {
+            fps: 60,
+            wgc_boost: true,
+            ..Default::default()
+        };
+        assert!(wgc_source(&boosted, &t, rect, None)
+            .unwrap()
+            .contains("max_framerate=120"));
+        let forced = parse_tuning("capture_api=wgc,wgc_window=game.exe,wgc_oversample=2");
+        assert!(wgc_source(&s, &forced, rect, None)
+            .unwrap()
+            .contains("max_framerate=120"));
+        assert!(f.contains("capture_cursor=1"));
+    }
+
+    #[test]
+    fn capture_source_inside_the_graph_numbers_audio_from_zero() {
+        let src = "gfxcapture=hmonitor=1:width=1920:height=1080:resize_mode=scale,fps=60:round=near,setsar=1/1";
+        assert!(source_in_graph(src) && !source_in_graph("setsar=1/1"));
+        let g = filter_graphs(src, &["".into(), "".into()], true, true);
+        assert_eq!(g[0], format!("{src}[v]"));
+        assert!(g[1].contains("[0:a]") && g[1].contains("[1:a]") && !g[1].contains("[2:a]"));
+        // Ordinary inputs keep video as input 0 and audio from 1.
+        let g = filter_graphs("setsar=1", &["".into()], true, true);
+        assert!(g[0].starts_with("[0:v]") && g[1].contains("[1:a]"));
+        // NVENC on an Intel-driven display: WgcGpu is listed, but
+        // select_video_path skips it unless wgc_gpu=1 (measured slower).
+        assert!(!Tuning::default().wgc_gpu);
+        let intel = scaling_candidates("h264_nvenc", VENDOR_INTEL);
+        assert_eq!(
+            intel,
+            vec![
+                (Scaler::WgcGpu, "h264_nvenc"),
+                (Scaler::QsvHybrid, "h264_nvenc")
+            ]
+        );
+        assert!(!converts_bt709(Scaler::WgcGpu));
+    }
+
     #[test]
     fn video_and_audio_never_share_a_filter_graph() {
         // Regression guard for the 0.2.1-alpha.3 stutter fix (57% -> 0.28%).
@@ -1649,27 +1926,38 @@ mod tests {
         assert_eq!(requested_codec(&s), "h264");
     }
     #[test]
-    fn nvenc_uses_capped_constant_quality_per_codec() {
+    fn every_encoder_uses_vbr_so_a_two_minute_clip_is_about_230_mb() {
         let s = Settings::default();
         let h264 = rate_plan(&s, "h264_nvenc", 1920, 1080);
         assert_eq!(
             h264,
             RatePlan {
-                cq: Some(28),
-                target_mbps: 16,
-                cap_mbps: 24
+                cq: None,
+                target_mbps: 15,
+                cap_mbps: 23
             }
         );
+        assert_eq!(rate_plan(&s, "h264_qsv", 1920, 1080), h264);
+        assert_eq!(rate_plan(&s, "h264_amf", 1920, 1080), h264);
         let av1 = rate_plan(&s, "av1_nvenc", 1920, 1080);
         assert_eq!(
             av1,
             RatePlan {
-                cq: Some(34),
-                target_mbps: 12,
-                cap_mbps: 18
+                cq: None,
+                target_mbps: 11,
+                cap_mbps: 17
             }
         );
-        assert_eq!(rate_plan(&s, "h264_qsv", 1920, 1080).cq, None);
+        // Video plus two 192 kb/s AAC tracks for 2 minutes: about 230 MB
+        // (MiB, as Windows shows file sizes).
+        let mb = (h264.target_mbps as f64 * 1e6 + 2.0 * 192e3) / 8.0 * 120.0 / 1048576.0;
+        assert!((215.0..235.0).contains(&mb), "{mb}");
+        let mut c = command(Path::new("ffmpeg"));
+        encoding_args(&mut c, &s, "h264_nvenc", (1920, 1080), false);
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+        let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
+        assert!(pair("-rc", "vbr") && pair("-b:v", "15M") && pair("-maxrate", "23000k"));
+        assert!(!args.iter().any(|a| a == "-cq"));
         let custom = Settings {
             preset: "custom".into(),
             bitrate_mbps: 20,
@@ -1695,7 +1983,7 @@ mod tests {
             assert!(
                 pair("-c:v", encoder)
                     && pair("-rc", "vbr")
-                    && pair("-b:v", "0")
+                    && !pair("-b:v", "0")
                     && pair("-forced-idr", "1"),
                 "{encoder}"
             );

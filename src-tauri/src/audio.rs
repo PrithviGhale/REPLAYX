@@ -58,6 +58,8 @@ pub struct Meter {
     pub gaps: AtomicU64,
     pub volume: AtomicU32,
     pub muted: AtomicBool,
+    /// PCM chunks waiting for the socket writer (each chunk is 10 ms).
+    pub queued_chunks: AtomicU64,
     pub error: Mutex<Option<String>>,
     pub written_bytes: AtomicU64,
     pub last_write_ms: AtomicU64,
@@ -721,10 +723,28 @@ fn valid_process(s: &AudioSource) -> Result<()> {
     }
     Ok(())
 }
+/// Apply the mix gain to one interleaved stereo chunk and return its peak.
+/// The gain moves linearly from the previous chunk's value to the new one
+/// across the chunk (10 ms), so muting, unmuting and volume changes during a
+/// recording never produce a click.
+pub fn apply_gain(chunk: &mut [f32], from: f32, to: f32) -> f32 {
+    let frames = (chunk.len() / CHANNELS).max(1) as f32;
+    let mut peak = 0f32;
+    for (n, frame) in chunk.chunks_mut(CHANNELS).enumerate() {
+        let gain = from + (to - from) * ((n + 1) as f32 / frames);
+        for sample in frame {
+            *sample = (*sample * gain).clamp(-4., 4.);
+            peak = peak.max(sample.abs());
+        }
+    }
+    peak
+}
 /// Windows audio errors that mean the device is changing or not ready yet
 /// (AUDCLNT_E_DEVICE_INVALIDATED, _ENDPOINT_CREATE_FAILED,
 /// _SERVICE_NOT_RUNNING, _RESOURCES_INVALIDATED, E_NOTFOUND): worth retrying
 /// with the then-current default device, and a reason to reconnect, not to stop.
+/// How long a capture start waits for a changing audio device to settle.
+pub const DEVICE_SETTLE: Duration = Duration::from_secs(10);
 pub fn is_device_change(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     [
@@ -736,6 +756,25 @@ pub fn is_device_change(message: &str) -> bool {
     ]
     .iter()
     .any(|code| m.contains(code))
+}
+/// Load Windows audio once in the background after launch, so the first
+/// capture start opens its devices at the warm speed (0.8 s cold, 0.25 s
+/// warm, measured). Prepares a loopback client on the default output device
+/// the way a start does, then releases it: the stream is never started, so
+/// nothing is captured, and the microphone is never touched.
+pub fn warm_up() {
+    let _ = (|| -> Result<()> {
+        wasapi::initialize_mta().ok()?;
+        let device = DeviceEnumerator::new()?.get_default_device(&Direction::Render)?;
+        let mut client = device.get_iaudioclient()?;
+        let format = WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, CHANNELS, None);
+        let stream = StreamMode::PollingShared {
+            autoconvert: true,
+            buffer_duration_hns: 1_000_000,
+        };
+        client.initialize_client(&format, &Direction::Capture, &stream)?;
+        Ok(())
+    })();
 }
 pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
     let name = source.name.clone();
@@ -756,7 +795,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
     meter.muted.store(source.muted, Ordering::Relaxed);
     // 3s of 10ms chunks: FFmpeg may not read audio while it initialises GPU
     // devices; sustained stalls are caught by the 3s audio-write health check.
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CHUNKS);
+    let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(OUTPUT_CHANNEL_CHUNKS);
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     let st = stop.clone();
     let mt = meter.clone();
@@ -825,20 +864,23 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                     },
                 )
             };
-            // A device that is switching (headset connecting, Bluetooth changing
-            // profile, waking from sleep) answers "device invalidated" for a
-            // moment: wait and try again with the then-current default device.
+            // A device that is switching (headset connecting, a Bluetooth
+            // headset changing profile when its microphone opens, a virtual
+            // sound device restarting, waking from sleep) answers "device
+            // invalidated" for a while: try again with the then-current default
+            // device for up to DEVICE_SETTLE, backing off to one attempt a second.
+            let settle_until = Instant::now() + DEVICE_SETTLE;
             let mut attempt = 0u64;
             let (client, channels) = loop {
                 match open() {
                     Ok(opened) => break opened,
                     Err(e)
-                        if attempt < 5
+                        if Instant::now() < settle_until
                             && is_device_change(&format!("{e:#}"))
                             && !st.load(Ordering::Relaxed) =>
                     {
                         attempt += 1;
-                        thread::sleep(Duration::from_millis(250 * attempt));
+                        thread::sleep(Duration::from_millis((250 * attempt).min(1000)));
                     }
                     Err(e) => return Err(e),
                 }
@@ -975,28 +1017,18 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                         }
                         mt.dsp_faults.store(p.faults, Ordering::Relaxed);
                     }
-                    let gain = if mt.muted.load(Ordering::Relaxed) {
-                        0.
-                    } else {
-                        f32::from_bits(mt.volume.load(Ordering::Relaxed))
-                    };
-                    let mut peak = 0f32;
-                    for sample in chunk.iter_mut() {
-                        // Float PCM keeps headroom above full scale: a source
-                        // turned above 100% is limited smoothly in FFmpeg
-                        // (media::source_chain) instead of hard-clipped here.
-                        *sample = (*sample * gain).clamp(-4., 4.);
-                        peak = peak.max(sample.abs());
-                    }
-                    mt.peak.store(peak.to_bits(), Ordering::Relaxed);
-                    let chunk: Vec<u8> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    mt.queued_chunks.fetch_add(1, Ordering::Relaxed);
                     match tx.try_send(chunk) {
                         Ok(()) => {}
                         Err(mpsc::TrySendError::Full(_)) => {
+                            mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
                             mt.gaps.fetch_add(1, Ordering::Relaxed);
                             bail!("Audio output backpressure exceeded 10 s: FFmpeg stopped reading audio")
                         }
-                        Err(_) => return Ok(()),
+                        Err(_) => {
+                            mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
+                            return Ok(());
+                        }
                     }
                 }
                 thread::sleep(Duration::from_millis(4));
@@ -1010,16 +1042,19 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
             let _ = ready_tx.try_send(Err(message));
         }
     });
-    match ready_rx.recv_timeout(Duration::from_secs(8)) {
+    match ready_rx.recv_timeout(DEVICE_SETTLE + Duration::from_secs(4)) {
         Ok(Ok(())) => {}
         result => {
             stop.store(true, Ordering::Relaxed);
+            // Plain explanation first; Windows' code stays at the end for
+            // diagnostics (the app shows a friendly card for these).
             match result {
                 Ok(Err(message)) if is_device_change(&message) => bail!(
-                    "{message}. The audio device was changing or not ready, and still wasn't after several retries. Check Windows Sound settings (or reconnect the headset) and start capture again."
+                    "{name} couldn't connect to the sound device: it was changing or unavailable for {} seconds. Reconnect the headset or check Windows Sound settings, then try again. (Technical: {message})",
+                    DEVICE_SETTLE.as_secs()
                 ),
-                Ok(Err(message)) => bail!("Audio could not start: {message}"),
-                _ => bail!("{name}: the audio device did not respond within 8 seconds. Check Windows Sound settings and start capture again."),
+                Ok(Err(message)) => bail!("{name} couldn't start. (Technical: {message})"),
+                _ => bail!("{name} couldn't connect to the sound device: it did not respond. Check Windows Sound settings, then try again."),
             }
         }
     }
@@ -1048,12 +1083,27 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
             socket.set_write_timeout(Some(Duration::from_secs(10)))?;
             socket.set_nodelay(true)?;
             connected.store(true, Ordering::Relaxed);
+            let mut last_gain: Option<f32> = None;
+            let mut bytes = Vec::with_capacity(CHUNK * CHANNELS * 4);
             while !st.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(data) => {
-                        socket.write_all(&data)?;
+                    Ok(mut data) => {
+                        mt.queued_chunks.fetch_sub(1, Ordering::Relaxed);
+                        // Apply the latest controls after the bounded queue so
+                        // already queued microphone samples cannot bypass mute.
+                        let gain = if mt.muted.load(Ordering::Relaxed) {
+                            0.
+                        } else {
+                            f32::from_bits(mt.volume.load(Ordering::Relaxed))
+                        };
+                        let peak = apply_gain(&mut data, last_gain.unwrap_or(gain), gain);
+                        last_gain = Some(gain);
+                        mt.peak.store(peak.to_bits(), Ordering::Relaxed);
+                        bytes.clear();
+                        bytes.extend(data.iter().flat_map(|v| v.to_le_bytes()));
+                        socket.write_all(&bytes)?;
                         mt.written_bytes
-                            .fetch_add(data.len() as u64, Ordering::Relaxed);
+                            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         mt.last_write_ms
                             .store(created.elapsed().as_millis() as u64, Ordering::Relaxed);
                     }
@@ -1082,6 +1132,43 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn muting_and_unmuting_ramp_without_a_click() {
+        // A full-scale tone muted mid-recording: the last chunk fades to
+        // silence instead of jumping, and everything after it is silent.
+        let tone = |n: usize| -> Vec<f32> {
+            (0..n * CHANNELS)
+                .map(|i| ((i / CHANNELS) as f32 * 0.2).sin())
+                .collect()
+        };
+        let mut fading = tone(480);
+        apply_gain(&mut fading, 1.0, 0.0);
+        let step = fading
+            .chunks(CHANNELS)
+            .zip(fading.chunks(CHANNELS).skip(1))
+            .map(|(a, b)| (a[0] - b[0]).abs())
+            .fold(0f32, f32::max);
+        assert!(step < 0.25, "largest sample-to-sample step {step}");
+        assert_eq!(fading[fading.len() - 1], 0.0, "ends in silence");
+        let mut silent = tone(480);
+        assert_eq!(
+            apply_gain(&mut silent, 0.0, 0.0),
+            0.0,
+            "muted: nothing is captured"
+        );
+        assert!(silent.iter().all(|v| *v == 0.0));
+        // Unmuting fades in from silence; a steady gain changes nothing.
+        let mut rising = tone(480);
+        apply_gain(&mut rising, 0.0, 1.0);
+        assert!(rising[0].abs() < 0.01 && rising[1].abs() < 0.01);
+        let (mut steady, original) = (tone(480), tone(480));
+        apply_gain(&mut steady, 1.0, 1.0);
+        assert_eq!(steady, original);
+        // Both channels of a frame get the same gain (no stereo shift).
+        let mut pair = vec![1.0f32; 960];
+        apply_gain(&mut pair, 1.0, 0.0);
+        assert!(pair.chunks(CHANNELS).all(|f| f[0] == f[1]));
+    }
     #[test]
     fn device_changes_are_retried_and_reconnected_not_fatal() {
         // The error from the report: a device switching while it was opened.

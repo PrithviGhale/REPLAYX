@@ -364,7 +364,7 @@ fn main() -> Result<()> {
     ]
     .contains(&action)
     {
-        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E codec=C preset=P bitrate=MBPS] | probe FILE | recover DATA_DIR | overlay-test [out-dir]");
+        println!("replayx-cli encoders | devices | device-formats | audio-sessions [icon.png] | detect [seconds] | library-bench | save-bench [seconds] | start-bench [silent|system] | displays | audio-test [seconds] [system|microphone] [device-id] | audio-test [seconds] application PID | self-test | capture-test [seconds:6..7200] [silent|system|microphone|app:PID] [desktop|stretch1080] [fps=N mode=M height=H encoder=E codec=C preset=P bitrate=MBPS capture_api=dda|wgc] | probe FILE | recover DATA_DIR | overlay-test [out-dir]");
         return Ok(());
     }
     let root = std::env::current_dir()?.join("test-output");
@@ -417,6 +417,17 @@ fn main() -> Result<()> {
             Some(("mode", v)) => settings.canvas_mode = v.into(),
             Some(("height", v)) => settings.height = v.parse()?,
             Some(("width", v)) => settings.width = v.parse()?,
+            Some(("region", v)) => {
+                let (w, h) = v
+                    .split_once('x')
+                    .ok_or_else(|| anyhow::anyhow!("Use region=WIDTHxHEIGHT"))?;
+                settings.source_rect = Some(replayx_core::geometry::CaptureRect {
+                    x: 0,
+                    y: 0,
+                    width: w.parse()?,
+                    height: h.parse()?,
+                });
+            }
             Some(("preset", v)) => settings.preset = v.into(),
             Some(("scale_policy", v)) => settings.scale_policy = v.into(),
             Some(("encoder", v)) => settings.encoder = v.into(),
@@ -426,6 +437,7 @@ fn main() -> Result<()> {
                 settings.preset = "custom".into();
             }
             Some(("gpu", v)) => settings.gpu_scaling = v != "0",
+            Some(("capture_api", v)) => settings.capture_api = v.into(),
             Some(("replay", v)) => settings.replay_seconds = v.parse()?,
             Some(("buffer", v)) => settings.buffer_mb = v.parse()?,
             _ => {}
@@ -505,13 +517,18 @@ fn main() -> Result<()> {
     } else {
         None
     };
-    let worker = thread::spawn(move || first.run());
+    let worker = thread::spawn(move || {
+        let result = first.run();
+        (result, stop_started.elapsed().as_millis())
+    });
+    let mut second_ready_ms = None;
     let b = second.map(|job| {
         let r = job.run();
+        second_ready_ms = Some(stop_started.elapsed().as_millis());
         engine.complete_save(&r);
         r
     });
-    let a = worker.join().unwrap();
+    let (a, first_ready_ms) = worker.join().unwrap();
     engine.complete_save(&a);
     engine.shutdown()?;
     let (path, probe) = a?;
@@ -521,9 +538,9 @@ fn main() -> Result<()> {
     };
     println!(
         "first clip ready {} ms after the stop/save request",
-        stop_started.elapsed().as_millis()
+        first_ready_ms
     );
-    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
+    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first_ready_ms":first_ready_ms,"second_ready_ms":second_ready_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
     std::fs::write(run.join("report.json"), serde_json::to_vec_pretty(&result)?)?;
     std::fs::write(
         run.join("samples.json"),
@@ -634,8 +651,16 @@ fn start_bench(args: &[String]) -> Result<()> {
         output_dir: root.join("clips"),
         ..Default::default()
     };
+    // System audio only: a bench never opens the microphone.
+    settings.audio.truncate(1);
     if audio != "system" {
         settings.audio.clear();
+    }
+    // Optional: start-bench system capture_api=wgc (the experimental path).
+    for arg in args.iter().skip(3) {
+        if let Some(("capture_api", v)) = arg.split_once('=') {
+            settings.capture_api = v.into();
+        }
     }
     let wait = |engine: &Engine, timeout: Duration, f: &dyn Fn(&Status) -> bool| {
         let deadline = Instant::now() + timeout;
@@ -737,9 +762,11 @@ fn start_bench(args: &[String]) -> Result<()> {
     };
     {
         let engine = Engine::new(data.clone(), settings.clone())?;
+        // Like the app: REPLAYX is open for a moment before the first click.
+        thread::sleep(Duration::from_secs(3));
         case(
             &engine,
-            "First start for this display (capture paths probed)",
+            "First start, 3 s after launch (capture paths probed)",
             false,
         )?;
         case(&engine, "Second start, same session (cached path)", false)?;

@@ -239,6 +239,30 @@ pub fn recycle(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Open a web address in the default browser. Only `https://github.com/`
+/// addresses are accepted (release notes and downloads).
+pub fn open_url(url: &str) -> Result<()> {
+    use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    if !url.starts_with("https://github.com/") || url.contains(['"', ' ', '\n', '\r']) {
+        bail!("Unexpected address")
+    }
+    let (verb, file) = (wide("open"), wide(url));
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    if result.0 as isize <= 32 {
+        bail!("Windows could not open the page.")
+    }
+    Ok(())
+}
+
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "REPLAYX";
 

@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
+import { ErrorNotice } from './ErrorNotice';
+import type { Destination } from './errors';
+import { NAVIGATE_EVENT, revealAnchor } from './navigation';
+import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
 import { native, VERSION } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
@@ -14,7 +17,10 @@ import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
 import { GamesPage } from './pages/Games';
 import { PerformancePage } from './pages/Performance';
-import { SettingsPage } from './pages/Settings';
+import { SettingsPage, type SettingsTab } from './pages/Settings';
+import { UpdatePrompt } from './UpdatePrompt';
+import { startUpdates, useUpdate } from './updates';
+import { hasUpdate } from './update-logic';
 import { QuitPrompt } from './QuitPrompt';
 import { BrandMark } from './brand';
 import { Tour } from './Tour';
@@ -105,9 +111,11 @@ function Toasts() {
     <div className="toasts" aria-live="polite">
       {busy && <div className="toast info"><LoaderCircle className="spin" size={15} /><span>{busy}…</span></div>}
       {toasts.map(t => (
-        <div key={t.id} className={`toast ${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
-          <span>{t.text}</span><button aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={14} /></button>
-        </div>
+        t.error
+          ? <ErrorNotice key={t.id} error={t.error} count={t.count} onDismiss={() => dismiss(t.id)} onAction={ok => { if (ok) dismiss(t.id); }} />
+          : <div key={t.id} className={`toast ${t.kind}`} role="status">
+              <span>{t.text}{t.count > 1 && ` (×${t.count})`}</span><button aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={14} /></button>
+            </div>
       ))}
     </div>
   );
@@ -119,22 +127,50 @@ export function App() {
     return NAV.some(g => g.items.some(i => i.id === hash)) ? hash : 'home';
   });
   const { clips } = useApp();
+  // The sidebar folds to an icon rail; the choice is remembered (best effort).
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('replayx.sidebar') === 'collapsed'; } catch { return false; } });
+  const toggleSidebar = () => setCollapsed(c => {
+    try { localStorage.setItem('replayx.sidebar', c ? 'open' : 'collapsed'); } catch { /* not stored */ }
+    return !c;
+  });
   const pollError = usePollError();
-  useEffect(() => { startPolling(); }, []);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const updateWaiting = hasUpdate(useUpdate());
+  useEffect(() => { startPolling(); void startUpdates(); }, []);
   const title = NAV.flatMap(g => g.items).find(i => i.id === page)!.label;
   // Tray "Settings…" and similar open a page by name.
-  const go = React.useCallback((p: string) => { if (NAV.some(g => g.items.some(i => i.id === p))) setPage(p as Page); }, []);
+  // "settings:updates" opens a Settings tab (tray "Update available").
+  const go = React.useCallback((target: string) => {
+    const [p, tab] = target.split(':');
+    if (!NAV.some(g => g.items.some(i => i.id === p))) return;
+    if (p === 'settings' && ['general', 'hotkeys', 'updates', 'about'].includes(tab)) setSettingsTab(tab as SettingsTab);
+    setPage(p as Page);
+  }, []);
+  // Error actions open the page that fixes the problem, then its section.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const to = (e as CustomEvent<Destination>).detail;
+      go(to.tab ? `${to.page}:${to.tab}` : to.page);
+      if (to.anchor) revealAnchor(to.anchor);
+    };
+    window.addEventListener(NAVIGATE_EVENT, open);
+    return () => window.removeEventListener(NAVIGATE_EVENT, open);
+  }, [go]);
   return (
-    <div className="shell">
+    <div className={`shell${collapsed ? ' collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="brand"><BrandMark size={28} /><span>REPLAY<b>X</b></span></div>
+        <button type="button" className="nav-item sidebar-toggle" aria-expanded={!collapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={toggleSidebar}>
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>Collapse</span>
+        </button>
         <nav aria-label="Main">
           {NAV.map(g => (
             <div className="nav-group" key={g.group}>
               <div className="nav-title">{g.group}</div>
               {g.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>
+                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} aria-label={collapsed ? label : undefined} title={collapsed ? label : undefined} onClick={() => setPage(id)}>
                   <Icon size={17} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
+                  {id === 'settings' && updateWaiting && <i className="nav-dot" role="img" aria-label="Update available" title="Update available" />}
                 </button>
               ))}
             </div>
@@ -165,11 +201,12 @@ export function App() {
           {page === 'clips' && <ClipsPage />}
           {page === 'games' && <GamesPage go={setPage} />}
           {page === 'performance' && <PerformancePage />}
-          {page === 'settings' && <SettingsPage />}
+          {page === 'settings' && <SettingsPage tab={settingsTab} setTab={setSettingsTab} />}
           </PageBoundary>
         </main>
         <SaveBar />
       </div>
+      <UpdatePrompt suppressed={page === 'settings' && settingsTab === 'updates'} />
       <Toasts />
       <QuitPrompt onNavigate={go} />
       <Tour go={setPage} />

@@ -93,7 +93,6 @@ export function CapturePage() {
   // easily; encoding on the CPU is lighter with Performance.
   const hardware = !!caps?.encoders.some(e => e.available && /nvenc|qsv|amf/.test(e.name));
   const recommended = !caps || hardware ? 'balanced' : 'performance';
-  const nvenc = draft.encoder === 'h264_nvenc' || (draft.encoder === 'auto' && !!caps?.encoders.find(e => e.name === 'h264_nvenc' && e.available));
   const fellBack = active && !!live.codec && live.codec !== codec;
   const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
   const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
@@ -105,7 +104,7 @@ export function CapturePage() {
 
   return (
     <Section>
-      <Card title="Source" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing displays', refreshCaps)}>Refresh</Button>}>
+      <Card anchor="display" title="Source" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing displays', refreshCaps)}>Refresh</Button>}>
         <Segmented label="Capture method" value={draft.capture} disabled={active}
           onChange={v => patch({ capture: v, source_rect: null })}
           options={[
@@ -194,10 +193,20 @@ export function CapturePage() {
           <Segmented label="Frame rate" value={draft.fps} disabled={active} onChange={v => patch({ fps: v })}
             options={[30, 60, 120, 144].map(f => ({ value: f, label: `${f} fps`, hint: f > 60 ? 'Needs GPU headroom' : undefined }))} />
         </Field>
+        {draft.capture === 'desktop-duplication' && (
+          <Field label="Capture method"
+            hint="Windows Graphics Capture is experimental. In testing on a laptop display driven by the integrated GPU it cost games far fewer frames than Desktop Duplication; other setups are not yet verified. If it can't start, REPLAYX records with Desktop Duplication and says so on the Performance page.">
+            <Segmented label="Capture method" value={draft.capture_api} disabled={active} onChange={v => patch({ capture_api: v })}
+              options={[
+                { value: 'dda', label: 'Desktop Duplication', hint: 'The proven default' },
+                { value: 'wgc', label: 'Windows Graphics Capture (experimental)', hint: 'Lower game impact on some laptops; falls back automatically' },
+              ]} />
+          </Field>
+        )}
         <p className="muted small">Stretched 4:3 games (for example 1440×1080 shown full-screen) change the display mode itself. REPLAYX detects the change, restarts capture on the new mode and validates the encoded size, so the desktop can't leak into the frame.</p>
       </Card>
 
-      <Card tour="video-quality" title="Encoding">
+      <Card tour="video-quality" anchor="encoder" title="Encoding">
         <div className="grid-2 tight">
           <Field label="Encoder" hint="Automatic prefers fixed-function encoders (Intel low-power Quick Sync, NVIDIA NVENC) so the GPU shader cores stay free for the game.">
             <select value={draft.encoder} disabled={active} onChange={e => patch({ encoder: e.target.value })}>
@@ -218,9 +227,7 @@ export function CapturePage() {
         </Field>
         {fellBack && <div className="banner warn">The GPU driving this display can't encode {codecName[codec]}, so this capture is recording {codecName[live.codec] ?? live.codec}. Choose H.264 to hide this message.</div>}
         <p className="preset-note">
-          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · {codecName[codec]} · {draft.preset !== 'custom' && nvenc
-            ? `constant quality on NVIDIA, typically about ${rate.target} Mb/s, never above ${rate.cap}`
-            : `average ${rate.target} Mb/s, peaks up to ${rate.cap}`}
+          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · {codecName[codec]} · {`average ${rate.target} Mb/s, peaks up to ${rate.cap}`}
           <span className="muted"> — {PRESETS.find(x => x.value === draft.preset)?.text}</span>
         </p>
         <StorageEstimate target={rate.target} cap={rate.cap} audioTracks={audioTracks} audioKbps={draft.audio_bitrate_kbps} free={live.free} />

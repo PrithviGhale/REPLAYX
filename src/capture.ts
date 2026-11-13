@@ -4,13 +4,16 @@ import { useApp } from './context';
 import { duration } from './format';
 import { markStartRequest, refreshNow, useStatus } from './store';
 import { isStarting, recordMode } from './record';
+import { retryInOrder } from './retry';
 
 /** Capture actions shared by the header dock, dashboard and tray-like controls. */
 export function useCapture() {
   const { dirty, save, run, refreshClips, busy } = useApp();
-  const go = useCallback(async (name: ActionName) => {
+  /** `failed` is called when the action didn't succeed (also when pending
+   * settings couldn't be saved first). */
+  const go = useCallback(async (name: ActionName, failed?: () => void) => {
     // Starting capture uses the settings on screen: save pending edits first.
-    if (dirty && name.startsWith('start') && !(await save())) return;
+    if (dirty && name.startsWith('start') && !(await save())) { failed?.(); return; }
     const label = ({
       start_replay: 'Starting Instant Replay', stop_replay: 'Stopping Instant Replay', start_recording: 'Starting recording',
       stop_recording: 'Finalizing recording', save_replay: 'Saving replay', stop_all: 'Stopping capture', recover: 'Recovering',
@@ -19,13 +22,22 @@ export function useCapture() {
     if (name.startsWith('start')) markStartRequest(name === 'start_recording');
     // Show the engine's "Starting" state right away instead of at the next poll.
     window.setTimeout(refreshNow, 40);
-    const result = await run(label, () => api.action<{ file?: string; probe?: Probe }>(name));
+    // A failed start or save can be retried as exactly that action.
+    const retry = name === 'start_replay' || name === 'start_recording' || name === 'save_replay' ? [name] : [];
+    const result = await run(label, () => api.action<{ file?: string; probe?: Probe }>(name), undefined, { retry, failed });
     if (result && name === 'recover') await refreshClips().catch(() => undefined);
     return result;
   }, [dirty, save, run, refreshClips]);
   const saved = (r: { file?: string; probe?: Probe } | undefined) =>
     r?.probe ? `${r.file} · ${duration(r.probe.duration)} · ready` : undefined;
-  return { go, busy, saved };
+  /** Repeat failed operations in order; stops at the first that fails.
+   * Resolves to whether all of them succeeded. */
+  const retry = useCallback((ops: readonly ActionName[]) => retryInOrder(ops, async op => {
+    let ok = true;
+    await go(op, () => { ok = false; });
+    return ok;
+  }), [go]);
+  return { go, retry, busy, saved };
 }
 
 /** One Record control for every place that shows it: Record, Cancel while
