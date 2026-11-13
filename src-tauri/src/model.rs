@@ -1145,6 +1145,23 @@ mod tests {
         assert!(s.validate().is_err());
     }
     #[test]
+    fn fifteen_and_thirty_minute_replays_load_and_save_unchanged() {
+        // Saved by earlier versions; the slider shows them exactly and the
+        // engine must neither reject nor change them.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for seconds in [900, 1800] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            s.save(&path).unwrap();
+            let (loaded, problem) = Settings::load_or_recover(&path);
+            assert!(problem.is_none());
+            assert_eq!(loaded.replay_seconds, seconds);
+        }
+    }
+    #[test]
     fn any_replay_length_from_30_seconds_is_valid() {
         // 2 min (the Balanced preset) was refused: "Invalid replay duration".
         for seconds in [30, 45, 120, 135, 600, 900, 1800] {

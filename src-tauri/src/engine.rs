@@ -52,6 +52,18 @@ fn manifest_tail(path: &Path, offset: u64) -> Result<String> {
     Ok(tail)
 }
 
+impl Status {
+    /// Show a message on Home. A new message, or the same text coming back
+    /// after it was closed or cleared, is a new occurrence (a new id) and is
+    /// shown again. The same message reported again while it is still the
+    /// current one keeps its id, so repeats never re-open a closed message.
+    pub fn set_notice(&mut self, text: String) {
+        if self.notice.as_deref() != Some(text.as_str()) {
+            self.notice_id += 1;
+            self.notice = Some(text);
+        }
+    }
+}
 #[derive(Default, Clone, Serialize)]
 pub struct Status {
     pub state: String,
@@ -87,7 +99,11 @@ pub struct Status {
     /// ("start_replay", "start_recording"); empty when a plain retry wouldn't
     /// help (REPLAYX is already recovering on its own, or a save failed).
     pub error_retry: Vec<String>,
+    /// A message for Home, in plain words (see `Status::set_notice`).
     pub notice: Option<String>,
+    /// Identifies one occurrence of `notice`: the window closes messages by
+    /// this id, so the same text showing up again later is shown again.
+    pub notice_id: u64,
     /// What start-up found wrong with settings.json, if anything.
     pub settings_problem: Option<crate::model::SettingsProblem>,
     pub last_clip: Option<String>,
@@ -508,11 +524,12 @@ impl Engine {
         i.status.settings_problem = Some(problem);
         self.publish(&i);
     }
-    /// The user closed the message shown on Home. Only that message is
-    /// cleared: a newer one that arrived meanwhile stays.
-    pub fn dismiss_notice(&self, text: &str) {
+    /// The user closed the message shown on Home: only that occurrence
+    /// (`Status::notice_id`) is cleared, never a newer one that arrived
+    /// meanwhile.
+    pub fn dismiss_notice(&self, id: u64) {
         let mut i = self.0.lock().unwrap();
-        if i.status.notice.as_deref() == Some(text) {
+        if i.status.notice.is_some() && i.status.notice_id == id {
             i.status.notice = None;
             self.publish(&i);
         }
@@ -906,7 +923,8 @@ impl Engine {
         match result {
             Ok((p, probe)) => {
                 i.status.last_clip = p.file_name().map(|p| p.to_string_lossy().into());
-                i.status.notice = Some("Your clip is saved. Find it in Clips.".into());
+                i.status
+                    .set_notice("Your clip is saved. Find it in Clips.".into());
                 i.status.last_save_timings = probe.save_timings.clone();
             }
             Err(e) => {
@@ -2111,14 +2129,14 @@ impl Inner {
         let synthetic = p.pipeline.synthetic;
         let scaler = p.pipeline.scaler;
         if scaler == Scaler::Cpu && p.plan.is_some() {
-            self.status.notice = Some(
+            self.status.set_notice(
                 "Your graphics card can't resize the video for this screen, so the processor does it instead. This uses a little more CPU.".into(),
             );
         }
         (self.status.play_width, self.status.play_height) = match p.plan {
             Some(plan) if plan.sar != (1, 1) => {
                 let (w, h) = plan.display_size();
-                self.status.notice = Some(format!(
+                self.status.set_notice(format!(
                     "To keep the video smooth, REPLAYX records your screen at its full size ({}×{}). Videos still play at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
                     plan.width,
                     plan.height,
@@ -2290,7 +2308,7 @@ impl Inner {
                 if Instant::now() > deadline {
                     p.child.kill()?;
                     p.child.wait()?;
-                    self.status.notice=Some("Capture didn't stop normally and had to be closed. Open Instant Replay and choose Recover to save what was recorded.".into());
+                    self.status.set_notice("Capture didn't stop normally and had to be closed. Open Instant Replay and choose Recover to save what was recorded.".into());
                     break;
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -2331,7 +2349,7 @@ impl Inner {
                         self.status.recording = recording;
                         // The technical reason stays in Performance
                         // (scaling details) and diagnostics.
-                        self.status.notice = Some(
+                        self.status.set_notice(
                             "The first video setup didn't work on this PC, so REPLAYX switched to another one. Recording works normally."
                                 .into(),
                         );
@@ -2723,7 +2741,7 @@ impl Inner {
         self.status.recording = false;
         self.status.replay = false;
         self.status.state = "Recovering".into();
-        self.status.notice = Some(format!(
+        self.status.set_notice(format!(
             "{reason} Nothing you recorded is lost: a recording continues as a new clip, and Instant Replay starts over."
         ));
         self.recovery = Some(Recovery {
@@ -3079,7 +3097,7 @@ mod tests {
         assert_eq!(Settings::load_or_recover(&path).0.fps, 30);
     }
     #[test]
-    fn closing_a_message_clears_only_that_message() {
+    fn closing_a_message_clears_only_that_occurrence() {
         let root = tempfile::tempdir().unwrap();
         let engine = isolated(
             root.path().join("data"),
@@ -3090,17 +3108,30 @@ mod tests {
             },
         )
         .unwrap();
-        engine.update(|i| i.status.notice = Some("Your clip is saved. Find it in Clips.".into()));
-        // A newer message arrived after the old one was shown: it stays.
-        engine
-            .update(|i| i.status.notice = Some("Your screen changed or was disconnected.".into()));
-        engine.dismiss_notice("Your clip is saved. Find it in Clips.");
-        assert_eq!(
-            engine.status().notice.as_deref(),
-            Some("Your screen changed or was disconnected.")
-        );
-        engine.dismiss_notice("Your screen changed or was disconnected.");
+        let saved = || "Your clip is saved. Find it in Clips.".to_owned();
+        engine.update(|i| i.status.set_notice(saved()));
+        let first = engine.status().notice_id;
+        // Reported again while it is showing: the same occurrence.
+        engine.update(|i| i.status.set_notice(saved()));
+        assert_eq!(engine.status().notice_id, first, "repeats never re-open it");
+        // A different message arrived after the first was shown: closing
+        // the first never clears the newer one.
+        engine.update(|i| {
+            i.status
+                .set_notice("Your screen changed or was disconnected.".into())
+        });
+        let second = engine.status().notice_id;
+        assert_ne!(second, first);
+        engine.dismiss_notice(first);
+        assert_eq!(engine.status().notice_id, second);
+        assert!(engine.status().notice.is_some());
+        engine.dismiss_notice(second);
         assert_eq!(engine.status().notice, None);
+        // The same text later is a new occurrence and is shown again.
+        engine.update(|i| i.status.set_notice(saved()));
+        let again = engine.status();
+        assert_eq!(again.notice.as_deref(), Some(saved().as_str()));
+        assert!(again.notice_id > second);
     }
     #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {

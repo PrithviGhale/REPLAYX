@@ -7,10 +7,11 @@ import { activeOf, useStatus } from '../store';
 import { audioTrackCount, bytes, bytesPerSecond as rateBytes, duration, durationLabel, outputWidth, ratePlan, requestedCodec } from '../format';
 import { Button, Card, Field, Kbd } from '../ui';
 import { Section } from './shared';
+import { lengthAt, lengthMarks, lengthScale, positionOf, stepLength } from '../replay-length';
 import { ReplaySwitch } from '../ReplaySwitch';
 
-/** Replay length slider: 30 seconds to 10 minutes in 15-second steps. */
-const MIN_LENGTH = 30, MAX_LENGTH = 600, LENGTH_STEP = 15;
+/** Keys that move the length slider by stops (see replay-length.ts). */
+const LENGTH_KEYS: Record<string, number> = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 4, PageDown: -4, Home: -1e6, End: 1e6 };
 /** Disk budget for a length: its size plus 30% headroom. */
 const budgetFor = (bytes: number) => Math.min(102400, Math.max(512, Math.ceil((bytes * 1.3) / (256 * 1024 * 1024)) * 256));
 
@@ -29,6 +30,13 @@ export function ReplayPage() {
   const budget = draft.buffer_mb * 1024 * 1024;
   const covered = Math.floor(budget / bytesPerSecond);
   const short = covered < draft.replay_seconds;
+  // One stop drives the thumb, the label, the screen-reader value and the
+  // setting, also for 15 and 30 minutes saved by earlier versions.
+  const scale = lengthScale(draft.replay_seconds);
+  const position = positionOf(scale, draft.replay_seconds);
+  const setLength = (seconds: number) => {
+    if (seconds !== draft.replay_seconds) patch({ replay_seconds: seconds, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * seconds)) });
+  };
 
   return (
     <Section>
@@ -47,12 +55,21 @@ export function ReplayPage() {
             <strong>{durationLabel(draft.replay_seconds)}</strong>
             <span>about {bytes(needed)} per saved replay</span>
           </div>
-          <input type="range" className="length-slider" min={MIN_LENGTH} max={MAX_LENGTH} step={LENGTH_STEP}
-            style={{ '--fill': `${((Math.min(Math.max(draft.replay_seconds, MIN_LENGTH), MAX_LENGTH) - MIN_LENGTH) / (MAX_LENGTH - MIN_LENGTH)) * 100}%` } as React.CSSProperties}
-            value={Math.min(Math.max(draft.replay_seconds, MIN_LENGTH), MAX_LENGTH)} disabled={active}
+          <input type="range" className="length-slider" min={0} max={scale.max} step={1} value={position} disabled={active}
+            style={{ '--fill': `${(position / scale.max) * 100}%` } as React.CSSProperties}
             aria-label="Replay length" aria-valuetext={durationLabel(draft.replay_seconds)}
-            onChange={e => { const v = Number(e.target.value); patch({ replay_seconds: v, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * v)) }); }} />
-          <div className="length-scale" aria-hidden><span>30 sec</span><span>5 min</span><span>10 min</span></div>
+            onChange={e => setLength(lengthAt(scale, Number(e.target.value)))}
+            onKeyDown={e => {
+              const by = LENGTH_KEYS[e.key];
+              if (by === undefined) return;
+              e.preventDefault();
+              setLength(stepLength(scale, draft.replay_seconds, by));
+            }} />
+          <div className="length-scale" aria-hidden>
+            {lengthMarks(scale).map(m => (
+              <span key={m.seconds} style={{ '--at': m.percent / 100 } as React.CSSProperties} className={m.percent === 0 ? 'start' : m.percent === 100 ? 'end' : undefined}>{durationLabel(m.seconds)}</span>
+            ))}
+          </div>
           <div className="buffer-bar" aria-label="Current buffer">
             <span style={{ width: `${Math.min(100, (s.buffer / draft.replay_seconds) * 100)}%` }} />
           </div>

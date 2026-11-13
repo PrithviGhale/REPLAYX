@@ -1,19 +1,22 @@
 # Features
 
+> [!NOTE]
+> This guide and its screenshots (sample data) describe **0.3.1-alpha.9, which isn't released yet**. Points marked *alpha.9* aren't in the current download (0.3.1-alpha.6).
+
 <p align="center">
   <img src="../images/replay.png" alt="Instant Replay page: replay length slider with the size of a saved replay, buffer progress and disk budget" width="49%">
   <img src="../images/video.png" alt="Video settings: display, resolution, frame rate, codec, quality presets and a storage estimate" width="49%">
 </p>
 
 ## Instant Replay
-Turn it on before you play. REPLAYX keeps a rolling window of the last 30 seconds to 10 minutes **on disk** (not in memory), bounded by a disk budget you choose. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the last moments are saved as a clip; buffering carries on, and overlapping saves are fine. Clips are joined from finished 2-second segments without re-encoding, so a 60-second replay is usually ready about a second after you press save. Choose the length with a slider; it shows how much space a saved replay takes (2 minutes at 1080p60 *Balanced* is about 230 MB).
+Turn it on before you play. REPLAYX keeps a rolling window of the last 30 seconds to 30 minutes **on disk** (not in memory), bounded by a disk budget you choose. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the last moments are saved as a clip; buffering carries on, and overlapping saves are fine. Clips are joined from finished 2-second segments without re-encoding, so a 60-second replay is usually ready about a second after you press save. *alpha.9:* choose the length with a slider (30 seconds to 10 minutes in 15-second steps, then 15 and 30 minutes); it shows how much space a saved replay takes. At 1080p60 *Balanced*, 2 minutes is estimated at about 230 MB; the real size depends on the game (see Presets).
 
 ## Recording
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> starts and stops a normal recording. If Instant Replay is running, the recording joins it instantly, without restarting capture or leaving a gap. Files are Matroska (`.mkv`), which survives crashes, and an interrupted session can be recovered from the Instant Replay page.
 
 ## Quality and hardware encoding
 - **Exact output size:** 720p, 1080p, 1440p, 4K, your display's shape or custom. 1920 × 1080 always saves a 1920 × 1080 file; stretched 4:3 gameplay can be recorded full-frame.
-- **Presets:** Performance, Balanced, High quality or a custom bitrate, with a *Recommended* tag for your hardware. Each preset holds an average bitrate on every encoder, so clip sizes are predictable: Balanced at 1080p60 is about 15 Mb/s, like NVIDIA's own recorder.
+- **Presets:** Performance, Balanced, High quality or a custom bitrate, with a *Recommended* tag for your hardware. *alpha.9:* each preset aims at an average bitrate on every encoder, so clip sizes follow their length. Balanced at 1080p60 targets 15 Mb/s; re-encoding one 60-second Fortnite clip averaged 15.8 Mb/s on Intel Quick Sync and 15.2 Mb/s on NVIDIA NVENC (about 223–233 MB per 2 minutes as Windows shows sizes). Very detailed scenes can briefly use up to 23 Mb/s.
 - **Codecs:** H.264 (default, plays everywhere), HEVC and AV1 (about 25% smaller than H.264 at the same measured quality). Only codecs your PC can encode are offered, and REPLAYX never switches codec by itself.
 - **Encoders:** NVIDIA NVENC, Intel Quick Sync and AMD AMF, chosen by real probes, with a CPU fallback. A storage estimate shows MB per minute, GB per hour and the recording time left on your drive.
 

@@ -60,6 +60,8 @@ export type Status = {
   audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null;
   /** Engine actions that redo what `error` interrupted (empty: no Retry). */
   error_retry: string[]; notice: string | null;
+  /** One occurrence of `notice`; Home closes messages by this id. */
+  notice_id: number;
   /** What start-up found wrong with settings.json. */
   settings_problem: SettingsProblem | null;
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
@@ -140,7 +142,7 @@ export const api = {
   /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
   openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
-  dismissNotice: (text: string) => call<void>('dismiss_notice', { text }),
+  dismissNotice: (id: number) => call<void>('dismiss_notice', { id }),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
   micMonitorStart: (source: AudioSource, output: string) => call<void>('mic_monitor_start', { source, output }),
@@ -165,7 +167,7 @@ export const emptyStatus: Status = {
   state: 'Stopped', replay: false, recording: false, saving: 0, encoder: '', capture: '', buffer_seconds: 0,
   buffer_bytes: 0, free_bytes: 0, frames: 0, dropped_frames: 0, fps: 0, elapsed: 0, write_mbps: 0, memory_mb: 0,
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
-  audio_written_bytes: [], error: null, error_retry: [], notice: null, settings_problem: null, last_clip: null, recovery_sessions: 0, geometry: null,
+  audio_written_bytes: [], error: null, error_retry: [], notice: null, notice_id: 0, settings_problem: null, last_clip: null, recovery_sessions: 0, geometry: null,
   scaling: '', capture_api: '', capture_filter: '', capture_fallback: null, scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],

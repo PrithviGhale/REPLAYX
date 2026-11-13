@@ -682,11 +682,11 @@ fn playtime_clear(state: State<AppState>) -> Reply<()> {
     Ok(())
 }
 /// The first-run tour was finished or skipped.
-/// The user closed the message on Home (only that exact message).
+/// The user closed the message on Home (only that occurrence).
 #[tauri::command]
-async fn dismiss_notice(text: String, state: State<'_, AppState>) -> Reply<()> {
+async fn dismiss_notice(id: u64, state: State<'_, AppState>) -> Reply<()> {
     let engine = state.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.dismiss_notice(&text))
+    tauri::async_runtime::spawn_blocking(move || engine.dismiss_notice(id))
         .await
         .map_err(err)
 }

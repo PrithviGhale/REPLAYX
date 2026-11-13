@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ErrorNotice } from '../ErrorNotice';
 import { describeError, describeSettingsProblem, type SettingsProblem } from '../errors';
+import { visibleNotice } from '../notices';
 import { ChevronRight, Circle, Cpu, HardDrive, Info, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { api, native } from '../api';
 import { microphoneLabel, microphoneOn } from '../update-logic';
@@ -85,7 +86,7 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
     elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
-    free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice,
+    free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice, noticeId: x.notice_id ?? 0,
     // Compared as text: the status object is new on every poll.
     settingsProblem: x.settings_problem ? JSON.stringify(x.settings_problem) : '', hotkey: x.hotkey_error, recovery: x.recovery_sessions,
   }));
@@ -111,13 +112,14 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
     ...(s.error ? [describeError(s.error, { retry: s.retry ? s.retry.split(',') : [] })] : []),
     ...[s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(x => describeError(x)),
   ];
-  // A message stays until it is closed with ×; closing hides it at once and
-  // clears it in the engine (only that message, never a newer one).
-  const [closed, setClosed] = useState<string | null>(null);
-  const notice = s.notice && s.notice !== closed ? s.notice : null;
-  const closeNotice = (text: string) => {
-    setClosed(text);
-    if (native) void api.dismissNotice(text).catch(() => undefined).finally(refreshNow);
+  // A message stays until it is closed with ×. Closing hides that
+  // occurrence at once and clears it in the engine; the same message later is
+  // a new occurrence and shows again (see notices.ts).
+  const [closedId, setClosedId] = useState<number | null>(null);
+  const notice = visibleNotice(s.notice, s.noticeId, closedId);
+  const closeNotice = (id: number) => {
+    setClosedId(id);
+    if (native) void api.dismissNotice(id).catch(() => undefined).finally(refreshNow);
   };
 
   return (
@@ -125,8 +127,8 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
       {problems.map(e => <ErrorNotice key={e.key} error={e} />)}
       {notice && (
         <div className="banner info closable" role="status">
-          <Info size={15} /><span>{notice}</span>
-          <button type="button" className="banner-close" aria-label="Close message" title="Close" onClick={() => closeNotice(notice)}><X size={14} /></button>
+          <Info size={15} /><span>{notice.text}</span>
+          <button type="button" className="banner-close" aria-label="Close message" title="Close" onClick={() => closeNotice(notice.id)}><X size={14} /></button>
         </div>
       )}
       {s.recovery > 0 && !active && (
