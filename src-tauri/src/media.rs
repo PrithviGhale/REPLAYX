@@ -939,7 +939,9 @@ pub struct Tuning {
     pub wgc: bool,
     /// WGC window capture instead of the display: executable-name pattern.
     pub wgc_window: Option<String>,
-    /// Keep Windows' capture border (its privacy indicator). Default on.
+    /// Windows' yellow capture border around the screen while WGC records.
+    /// Off by default (IsBorderRequired = false, honoured by Windows for
+    /// REPLAYX); `wgc_border=1` shows it.
     pub wgc_border: bool,
     /// WGC capture rate as a multiple of the output rate (the engine raises a
     /// session to 2x when 1x misses slots; see `wgc_rate_multiple`).
@@ -986,7 +988,7 @@ impl Default for Tuning {
             nvenc_aq: true,
             wgc: false,
             wgc_window: None,
-            wgc_border: true,
+            wgc_border: false,
             wgc_oversample: 1,
             wgc_gpu: false,
             wgc_floor_us: Some(12_500),
@@ -1817,9 +1819,10 @@ mod tests {
             assert_eq!(capture_api(&opted), "wgc");
         }
         let d = Tuning::default();
-        assert!(!d.wgc && d.wgc_window.is_none() && d.wgc_border);
+        assert!(!d.wgc && d.wgc_window.is_none() && !d.wgc_border);
         let t = parse_tuning("capture_api=wgc,wgc_window=replayx-gameproxy.exe,wgc_border=0");
         assert!(t.wgc && !t.wgc_border);
+        assert!(parse_tuning("wgc_border=1").wgc_border);
         assert_eq!(t.wgc_window.as_deref(), Some("replayx-gameproxy.exe"));
         // Characters that would end or extend the filter option are refused.
         for bad in ["a:b", "x'y", "a[b]", "a;b", r"a\b"] {

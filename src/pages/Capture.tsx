@@ -196,7 +196,7 @@ export function CapturePage() {
         </Field>
         {draft.capture === 'desktop-duplication' && (
           <Field label="Capture method"
-            hint="Windows Graphics Capture is experimental. In testing on a laptop display driven by the integrated GPU it cost games far fewer frames than Desktop Duplication; other setups are not yet verified. If it can't start, REPLAYX records with Desktop Duplication and says so on the Performance page. Windows may draw a border around the screen while it captures.">
+            hint="Windows Graphics Capture is experimental. In testing on a laptop display driven by the integrated GPU it cost games far fewer frames than Desktop Duplication; other setups are not yet verified. If it can't start, REPLAYX records with Desktop Duplication and says so on the Performance page.">
             <Segmented label="Capture method" value={draft.capture_api} disabled={active} onChange={v => patch({ capture_api: v })}
               options={[
                 { value: 'dda', label: 'Desktop Duplication', hint: 'The proven default' },
