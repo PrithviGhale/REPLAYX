@@ -22,17 +22,22 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/home.png" alt="REPLAYX home screen with Instant Replay on, capture details, audio levels and recent clips" width="880">
+  <img src="docs/images/showcase-home.jpg" alt="REPLAYX home screen with Instant Replay on, in front of the Clips library" width="100%">
 </p>
 
-## Features
+## Why REPLAYX
 
-- **Instant Replay.** Keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the moment is a clip, usually within a second.
-- **Hardware recording.** NVIDIA, Intel and AMD encoders, H.264, HEVC or AV1, 720p–4K output. Synthetic workload measurements are in [Performance](docs/development/PERFORMANCE.md); real-game overhead remains under investigation.
-- **Clips sorted by game.** 140 games recognised automatically, each with its own icon, in a library you can search, sort and export to MP4.
-- **Clean voice, separate tracks.** The Voice Enhancer removes background noise; game, chat and microphone each get their own track.
-- **Playtime tracking.** See how long you play each game, by day, week or month, with charts.
+- **Never miss the moment.** Instant Replay keeps the last 30 seconds to 10 minutes. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and it's a clip, usually within a second.
+- **Starts when you click.** Instant Replay and Record are on in about a second.
+- **Small files, sharp video.** A 2-minute 1080p60 replay is about 230 MB, like NVIDIA's own recorder, using your graphics card's hardware encoder (NVIDIA, Intel or AMD).
+- **Clips sorted by game.** 140 games are recognised automatically, each with its own icon, in a library you can search, sort and export to MP4.
+- **Clean voice, separate tracks.** The Voice Enhancer removes background noise. Game, chat and microphone each get their own track.
 - **Private by design.** Everything stays on your PC: no account, no telemetry, no uploads.
+
+<p align="center">
+  <img src="docs/images/showcase-replay.jpg" alt="Instant Replay page: replay length slider with the size of a saved replay, and the disk budget" width="49%">
+  <img src="docs/images/showcase-library.jpg" alt="Clips library with thumbnails, filters and sorting, in front of the Games page" width="49%">
+</p>
 
 [See every feature →](docs/guide/FEATURES.md)
 
@@ -40,13 +45,17 @@
 
 1. Download **`REPLAYX_0.3.1-alpha.6_x64-setup.exe`** with the button above.
 2. Run it. It installs for your account only, without administrator rights.
-3. Builds aren't code-signed yet: if SmartScreen appears, choose **More info → Run anyway**, ideally after checking the file against the release's `SHA256SUMS.txt`.
+3. Builds aren't code-signed yet. If SmartScreen appears, choose **More info → Run anyway**, ideally after checking the file against the release's `SHA256SUMS.txt`.
 
-Requires Windows 10 or 11 (64-bit); a GPU with hardware encoding is recommended. [Full setup guide →](docs/guide/GETTING_STARTED.md)
+Requires Windows 10 or 11 (64-bit). A GPU with hardware encoding is recommended. [Full setup guide →](docs/guide/GETTING_STARTED.md)
 
 ## How Instant Replay works
 
-While Instant Replay is on, REPLAYX records continuously into a small rolling buffer on disk (short segments, oldest dropped first). When you press **Save replay**, it joins the last 30 seconds to 30 minutes into one clip without re-encoding, checks that it plays, and files it under the game you were playing. Normal recordings run alongside and are saved the same way.
+1. **Turn it on before you play.** REPLAYX keeps a rolling buffer of your screen and sound on disk, in short pieces, dropping the oldest first.
+2. **Press save** right after something happens. REPLAYX joins the last moments into one clip without re-encoding and checks that it plays.
+3. **Find it in Clips**, filed under the game you were playing. Recording keeps going, so you can save again moments later.
+
+Normal recordings run alongside and are saved the same way.
 
 ## Capture and encoders
 
@@ -58,12 +67,6 @@ While Instant Replay is on, REPLAYX records continuously into a small rolling bu
 | **Output** | 720p to 4K, 30 to 144 FPS; Native, Fit, Crop and Stretch (4:3 stretched games) |
 | **Audio** | Up to six sources: system sound, individual apps, microphone (with Voice Enhancer); one track each plus a full mix |
 
-## System requirements
-
-- Windows 10 or 11, 64-bit (Windows Graphics Capture needs Windows 10 1903 or later)
-- A GPU with hardware video encoding (NVIDIA, Intel or AMD) is strongly recommended; REPLAYX falls back to software encoding without one
-- About 2 GB of free disk space for the replay buffer (adjustable)
-
 ## Shortcuts
 
 | Save replay | Record | Replay on / off | Mute mic | Open / hide |
@@ -71,6 +74,12 @@ While Instant Replay is on, REPLAYX records continuously into a small rolling bu
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F8</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F11</kbd> |
 
 All of them work in games and can be changed in **Settings → Hotkeys**.
+
+## System requirements
+
+- Windows 10 or 11, 64-bit (Windows Graphics Capture needs Windows 10 1903 or later)
+- A GPU with hardware video encoding (NVIDIA, Intel or AMD) is strongly recommended; REPLAYX falls back to software encoding without one
+- About 2 GB of free disk space for the replay buffer (adjustable)
 
 ## Building from source
 
@@ -84,9 +93,20 @@ npx tauri dev                              # or: npx tauri build
 
 Requires Node 24, the Rust MSVC toolchain, the Visual Studio C++ build tools with a Windows SDK, and WebView2. `scripts/check.ps1` runs everything CI runs. Details: [Building](docs/development/BUILDING.md).
 
+## Repository layout
+
+| Folder | What's inside |
+| --- | --- |
+| `src/` | The app's interface (React, TypeScript) |
+| `src-tauri/` | The recording engine and desktop app (Rust) |
+| `docs/` | [User guides](docs/guide/), [development docs](docs/development/), engineering reports and release notes ([index](docs/README.md)) |
+| `scripts/` | Build and release scripts; benchmarks in `scripts/bench/` |
+| `tests/` | Frontend and Python tests (Rust tests live next to the code) |
+| `dev/` | Development preview and screenshot tools |
+
 ## Known limitations
 
-- On laptops whose screen is driven by the integrated GPU, recording can noticeably lower the FPS of CPU-heavy games (about 19% measured in Fortnite with Windows Graphics Capture and Quick Sync). Screens driven by the dedicated GPU are much less affected. Investigation: [docs/engineering](docs/README.md#engineering-reports).
+- On laptops whose screen is driven by the integrated GPU, recording can noticeably lower the FPS of CPU-heavy games (about 19% measured in Fortnite with Windows Graphics Capture and Quick Sync). Screens driven by the dedicated GPU are much less affected. Investigation: [engineering reports](docs/README.md#engineering-reports).
 - Exclusive full-screen games can hide REPLAYX's on-screen notices (recording itself is not affected).
 - Builds are not code-signed yet.
 
@@ -94,7 +114,7 @@ More: [Known limitations](docs/guide/KNOWN_LIMITATIONS.md).
 
 ## Learn more
 
-[Documentation](docs/README.md) · [FAQ](docs/guide/FAQ.md) · [Troubleshooting](docs/guide/TROUBLESHOOTING.md) · [Build from source](docs/development/BUILDING.md) · [Report a bug](https://github.com/PrithviGhale/REPLAYX/issues/new/choose) · [Contributing](.github/CONTRIBUTING.md)
+[Documentation](docs/README.md) · [FAQ](docs/guide/FAQ.md) · [Troubleshooting](docs/guide/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/PrithviGhale/REPLAYX/issues/new/choose) · [Contributing](.github/CONTRIBUTING.md)
 
 ---
 

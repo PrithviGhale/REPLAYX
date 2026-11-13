@@ -5,7 +5,7 @@
 - **Windows 10 or 11, 64-bit.** Per-app audio tracks need Windows 10 build 20348 or later (or Windows 11); keeping the overlay out of recordings needs Windows 10 version 2004 or later.
 - **A GPU with hardware video encoding** is recommended: NVIDIA GTX 900 series or newer, Intel HD 500 series or newer, or AMD RX 400 series or newer. Without one, REPLAYX encodes on the CPU. AV1 needs an NVIDIA RTX 40, Intel Arc / Core Ultra or AMD RX 7000 GPU.
 - **Microsoft Edge WebView2 Runtime:** included with Windows 11; on Windows 10 the installer downloads it if it's missing.
-- **Free disk space** for the replay buffer. The default 2 GB budget holds about 15 minutes at 1080p60 *Balanced* with typical audio.
+- **Free disk space** for the replay buffer. The default 2 GB budget holds about 17 minutes at 1080p60 *Balanced* with typical audio.
 
 ## Install
 
