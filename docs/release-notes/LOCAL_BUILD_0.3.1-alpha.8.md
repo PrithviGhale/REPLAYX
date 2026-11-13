@@ -1,7 +1,7 @@
 # Local alpha.8 build - November 11, 2026
 
 Unpublished. Branch `codex/performance-0.2.1`; baseline `825edae`, implementation
-`2b7f0f3`. See PERFORMANCE_ALPHA8.md for measurements and FORTNITE_ABA.md for the
+`2b7f0f3`. See ../engineering/PERFORMANCE_ALPHA8.md for measurements and ../engineering/FORTNITE_ABA.md for the
 manual comparison. The real Fortnite overhead remains unresolved.
 
 ## What changed

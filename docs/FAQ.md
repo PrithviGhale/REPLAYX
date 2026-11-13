@@ -7,7 +7,7 @@ Yes. It's open source under the MIT licence, with no account, ads or subscriptio
 REPLAYX records the screen through Windows (DXGI Desktop Duplication) and audio through WASAPI, the same system interfaces other recorders use. It never injects into games, reads their memory or hooks their graphics. Game detection uses only the name of the program in front.
 
 **Does it slow down my games?**
-The newer detailed synthetic workload generally measured 5–8% at 1080p60 on this RTX 4070 laptop. Fortnite screenshot averages suggest roughly 13%, but sustained game measurements are still needed. See [Performance](PERFORMANCE.md) and [the A/B/A procedure](FORTNITE_ABA.md).
+The newer detailed synthetic workload generally measured 5–8% at 1080p60 on this RTX 4070 laptop. Fortnite screenshot averages suggest roughly 13%, but sustained game measurements are still needed. See [Performance](PERFORMANCE.md) and [the A/B/A procedure](engineering/FORTNITE_ABA.md).
 
 **Where are my clips?**
 In `Videos\REPLAYX\<Game>\` by default; change it in **Settings**. Clips are `.mkv` files, which survive crashes and keep every audio track. Export any clip to MP4 from the library.

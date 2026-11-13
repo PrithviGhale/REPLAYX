@@ -2,8 +2,8 @@
 
 ## Current alpha.8 investigation
 
-See [PERFORMANCE_ALPHA8.md](PERFORMANCE_ALPHA8.md) for the pipeline audit,
-hardware experiments and limits, and [FORTNITE_ABA.md](FORTNITE_ABA.md) for the
+See [engineering/PERFORMANCE_ALPHA8.md](engineering/PERFORMANCE_ALPHA8.md) for the pipeline audit,
+hardware experiments and limits, and [engineering/FORTNITE_ABA.md](engineering/FORTNITE_ABA.md) for the
 manual game comparison. The meaningful production change is incremental replay
 maintenance; no real-game FPS improvement or under-5% qualification is claimed.
 The new detailed scene generally costs 5-8% in the synthetic A/B/A runs, so the

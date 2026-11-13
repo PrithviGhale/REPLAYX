@@ -17,7 +17,7 @@ The following were already committed as `2b7f0f3` and `970ac3b` (alpha.8):
 - Signed alpha.8 artifacts.
 
 Codex also had uncommitted work in progress. It is described in
-[docs/FORTNITE_LIVE_PROFILE.md](FORTNITE_LIVE_PROFILE.md):
+[docs/engineering/FORTNITE_LIVE_PROFILE.md](FORTNITE_LIVE_PROFILE.md):
 
 - A live Fortnite resource profile. It covered NVIDIA device telemetry and
   process CPU/memory only; no frame times were measured.

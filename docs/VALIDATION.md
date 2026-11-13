@@ -444,7 +444,7 @@ The optimized 0.1.1-alpha.1 application built successfully with `npm run tauri -
 Production-only follow-up found and fixed missing TLS-provider initialization
 before the Releases API request. The corrected native release completed a real
 GitHub check with no newer signed channel release; Rust 160/160 and Clippy passed
-again. Artifact hashes and final build details are in LOCAL_BUILD_0.3.1-alpha.7.md.
+again. Artifact hashes and final build details are in release-notes/LOCAL_BUILD_0.3.1-alpha.7.md.
 
 Final additional checks: 132/132 responsive text cases (including update popup,
 130% text), 24/24 scrolling cases, and 9/9 media checks on each of the short
@@ -483,8 +483,8 @@ Historical entries below retain their original scope and dates.
 # Local alpha.8 performance milestone - November 11, 2026
 
 The Fortnite FPS gap remains unresolved; no under-5% gameplay qualification or
-ShadowPlay-equivalence claim. See PERFORMANCE_ALPHA8.md for the complete audit,
-experiments and limits, and FORTNITE_ABA.md for manual acceptance.
+ShadowPlay-equivalence claim. See engineering/PERFORMANCE_ALPHA8.md for the complete audit,
+experiments and limits, and engineering/FORTNITE_ABA.md for manual acceptance.
 
 - 161 Rust tests passed; the opt-in release polling benchmark was executed
   separately. Rustfmt/Clippy passed, as did 51 frontend tests, TypeScript/Vite,
