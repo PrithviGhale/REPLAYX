@@ -20,6 +20,8 @@ per-process CPU, NVIDIA clocks/power, and PresentMon frame times if allowed.
 Quit the REPLAYX app first (one capture at a time).
 """
 import argparse
+import csv
+from collections import Counter
 import ctypes
 from ctypes import wintypes
 import importlib.util
@@ -37,7 +39,9 @@ import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = 'fortniteclient-win64-shipping.exe'
-CLI = ROOT / 'src-tauri' / 'target' / 'release' / 'replayx-cli.exe'
+# The adaptive-WGC test build (commit 0697476). Its own ffmpeg is in media\.
+BUILD = ROOT / 'src-tauri' / 'target-wgc3' / 'release'
+CLI = BUILD / 'replayx-cli.exe'
 # Recorder configurations (capture-test overrides). 1920x1080 at 60 FPS,
 # H.264, Balanced, stretch, 60 s replay; silent (no audio devices opened).
 # name -> (capture-test overrides, REPLAYX_VIDEO_TUNING or '').
@@ -58,11 +62,27 @@ frametimes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(frametimes)
 
 
-def find_game():
+def find_game(name):
     for p in psutil.process_iter(['name']):
-        if (p.info['name'] or '').lower() == GAME:
+        if (p.info['name'] or '').lower() == name:
             return p
     return None
+
+
+def present_modes(csv_file, process):
+    """Share of frames per PresentMon PresentMode for the game."""
+    counts = Counter()
+    with open(csv_file, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        heads = {h.strip().lower(): h for h in reader.fieldnames or []}
+        app, mode = heads.get('application'), heads.get('presentmode')
+        if not mode:
+            return None
+        for row in reader:
+            if not app or (row.get(app) or '').lower() == process.lower():
+                counts[row.get(mode) or 'unknown'] += 1
+    total = sum(counts.values()) or 1
+    return {k: round(100 * v / total, 1) for k, v in counts.most_common()}
 
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
@@ -71,11 +91,23 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintyp
 user32.IsIconic.argtypes = [wintypes.HWND]
 
 
-def game_in_front(pid):
+def game_in_front(pid, allow_cover=False):
     window = user32.GetForegroundWindow()
     owner = wintypes.DWORD()
     user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
-    return owner.value == pid and not user32.IsIconic(window)
+    if owner.value == pid and not user32.IsIconic(window):
+        return True
+    if not allow_cover:
+        return False
+    # Test fixture only: topmost and covering the screen centre.
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    w, h = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    root = user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(w // 2, h // 2)), 2)
+    user32.GetWindowThreadProcessId(root, ctypes.byref(owner))
+    return owner.value == pid
 
 
 def main():
@@ -85,13 +117,24 @@ def main():
     ap.add_argument('--seconds', type=int, default=45, help='Measured seconds per phase (30-90)')
     ap.add_argument('--presentmon', type=Path, help='PresentMon console exe (needs an administrator terminal)')
     ap.add_argument('--cap', type=int, default=360, help='Your Fortnite frame cap, to flag capped phases')
+    ap.add_argument('--process', default=GAME, help=argparse.SUPPRESS)  # test fixture dry runs only
+    ap.add_argument('--countdown', type=int, default=15, help=argparse.SUPPRESS)
     a = ap.parse_args()
+    process = a.process.lower()
+    fixture = process != GAME
+    if fixture and process != 'replayx-gameproxy.exe':
+        ap.error('Only Fortnite (or REPLAYX\'s own test fixture) can be measured')
     configs = [c.strip() for c in a.configs.split(',') if c.strip()]
     if any(c not in CONFIGS for c in configs) or not 30 <= a.seconds <= 90:
         ap.error('Unknown configuration or seconds out of range')
-    game = find_game()
+    for needed in (CLI, BUILD / 'media' / 'ffmpeg.exe'):
+        if not needed.exists():
+            raise SystemExit(f'Missing {needed}: the target-wgc3 test build is required.')
+    game = find_game(process)
     if not game:
         raise SystemExit('Start Fortnite first (this script never launches it).')
+    commit = subprocess.run(['git', 'log', '-1', '--format=%h %s'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    print(f'Recorder: {CLI} (built {time.ctime(CLI.stat().st_mtime)}; source {commit})', flush=True)
     if any((p.info['name'] or '').lower() in ('replayx.exe', 'replayx-cli.exe', 'ffmpeg.exe')
            for p in psutil.process_iter(['name'])):
         raise SystemExit('Quit REPLAYX (tray icon -> Quit) first: one capture at a time.')
@@ -102,9 +145,9 @@ def main():
         presentmon = a.presentmon.resolve()
     out = ROOT / 'test-output' / time.strftime('fortnite-session-%Y%m%d-%H%M%S')
     out.mkdir(parents=True)
-    print(f'Switch to Fortnite now and stay in the same scene. Starting in 15 s. Results: {out}', flush=True)
-    time.sleep(15)
-    if not game_in_front(game.pid):
+    print(f'Switch to Fortnite now and stay in the same scene. Starting in {a.countdown} s. Results: {out}', flush=True)
+    time.sleep(a.countdown)
+    if not game_in_front(game.pid, fixture):
         raise SystemExit('Fortnite is not in front; nothing was recorded.')
 
     samples, boundaries, children = [], [], []
@@ -147,12 +190,12 @@ def main():
     def observe(seconds, phase):
         until = time.time() + seconds
         while time.time() < until:
-            if not game.is_running() or not game_in_front(game.pid):
+            if not game.is_running() or not game_in_front(game.pid, fixture):
                 raise RuntimeError('Fortnite lost focus or exited: stopped (nothing further recorded)')
             row = dict(unix=time.time(), phase=phase, cpu={})
             for p in psutil.process_iter(['name']):
                 name = (p.info['name'] or '').lower()
-                if name in (GAME, 'replayx-cli.exe', 'ffmpeg.exe', 'dwm.exe'):
+                if name in (process, 'replayx-cli.exe', 'ffmpeg.exe', 'dwm.exe'):
                     p = procs.setdefault(p.pid, p)
                     try:
                         row['cpu'][name] = row['cpu'].get(name, 0) + p.cpu_percent() / psutil.cpu_count()
@@ -187,7 +230,7 @@ def main():
                 raise RuntimeError(f'{phase}: recorder stopped early (see {phase}/capture.log)')
             pm = None
             if presentmon:
-                pm = subprocess.Popen([str(presentmon), '--process_name', 'FortniteClient-Win64-Shipping.exe',
+                pm = subprocess.Popen([str(presentmon), '--process_name', game.name(),
                                        '--output_file', str(out / f'{phase}.csv'), '--timed', str(a.seconds),
                                        '--terminate_after_timed', '--stop_existing_session', '--no_console_stats'],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -198,7 +241,10 @@ def main():
             observe(a.seconds, phase)
             boundaries[-1]['end'] = time.time()
             if pm:
-                pm.wait(timeout=30)
+                try:
+                    pm.wait(timeout=60)
+                except subprocess.TimeoutExpired:  # never lose the session over it
+                    pm.terminate()
             if recorder:
                 deadline = time.time() + 90
                 while recorder.poll() is None and time.time() < deadline:
@@ -211,7 +257,9 @@ def main():
                     status = json.loads(reports[0].read_text(encoding='utf-8')).get('status', {})
                     boundaries[-1]['recorder'] = {k: status.get(k) for k in (
                         'capture_api', 'capture_filter', 'capture_fallback', 'scaling', 'encoder', 'fps',
-                        'dropped_frames', 'duplicated_frames', 'encoder_speed', 'video_lag_ms')}
+                        'dropped_frames', 'duplicated_frames', 'encoder_speed', 'video_lag_ms',
+                        'recovery_sessions')}
+                    # recovery_sessions 1 = the adaptive rate switched this phase to 2x.
     except Exception as e:  # report what was measured so far
         errors.append(str(e))
         print('Stopped:', e, flush=True)
@@ -257,11 +305,13 @@ def main():
         csv_file = out / f"{b['phase']}.csv"
         if csv_file.exists():
             try:
-                entry['frames'] = frametimes.summarize(csv_file, process='FortniteClient-Win64-Shipping.exe', cap=a.cap)
+                entry['frames'] = frametimes.summarize(csv_file, process=game.name(), cap=a.cap)
+                entry['present_mode_percent'] = present_modes(csv_file, game.name())
             except Exception as e:
                 entry['frames'] = {'error': str(e)}
         summary.append(entry)
-    result = dict(errors=errors, presentmon=bool(presentmon), seconds_per_phase=a.seconds, phases=summary,
+    result = dict(errors=errors, presentmon=bool(presentmon), seconds_per_phase=a.seconds, recorder=str(CLI),
+                  source=commit, process=game.name(), phases=summary,
                   limits='Without PresentMon, game FPS is not measured: GPU-engine and CPU telemetry only. '
                          'Telemetry is once a second. Scene and camera must be held identical by the player.')
     (out / 'summary.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
