@@ -3,10 +3,12 @@
 # address on GitHub and the installer's signature. REPLAYX reads it from
 # the selected release tag's latest.json (stable and prerelease channels).
 # Skips (with a notice) when no update signature was produced.
-param([Parameter(Mandatory)][string]$Repository, [Parameter(Mandatory)][string]$Tag)
+# -BundleDir: where the NSIS installer is (local builds into another target
+# folder); the release workflow uses the default.
+param([Parameter(Mandatory)][string]$Repository, [Parameter(Mandatory)][string]$Tag, [string]$BundleDir)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$dir = Join-Path $root 'src-tauri/target/release/bundle/nsis'
+$dir = if ($BundleDir) { $BundleDir } else { Join-Path $root 'src-tauri/target/release/bundle/nsis' }
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if ("v$version" -ne $Tag) { throw "Tag $Tag does not match package version $version" }
 $installer = Get-ChildItem $dir -Filter "*_${version}_x64-setup.exe" | Select-Object -First 1

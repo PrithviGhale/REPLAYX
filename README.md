@@ -44,6 +44,26 @@
 
 Requires Windows 10 or 11 (64-bit); a GPU with hardware encoding is recommended. [Full setup guide →](docs/GETTING_STARTED.md)
 
+## How Instant Replay works
+
+While Instant Replay is on, REPLAYX records continuously into a small rolling buffer on disk (short segments, oldest dropped first). When you press **Save replay**, it joins the last 30 seconds to 30 minutes into one clip without re-encoding, checks that it plays, and files it under the game you were playing. Normal recordings run alongside and are saved the same way.
+
+## Capture and encoders
+
+| | |
+| --- | --- |
+| **Capture** | Desktop Duplication (default) or Windows Graphics Capture (experimental, *Video → Capture method*); full display or a region |
+| **Encoders** | NVIDIA NVENC, Intel Quick Sync, AMD AMF, with a software fallback; *Auto* picks the most efficient one that works on your PC |
+| **Codecs** | H.264, HEVC, AV1 (where the GPU supports them) |
+| **Output** | 720p to 4K, 30 to 144 FPS; Native, Fit, Crop and Stretch (4:3 stretched games) |
+| **Audio** | Up to six sources: system sound, individual apps, microphone (with Voice Enhancer); one track each plus a full mix |
+
+## System requirements
+
+- Windows 10 or 11, 64-bit (Windows Graphics Capture needs Windows 10 1903 or later)
+- A GPU with hardware video encoding (NVIDIA, Intel or AMD) is strongly recommended; REPLAYX falls back to software encoding without one
+- About 2 GB of free disk space for the replay buffer (adjustable)
+
 ## Shortcuts
 
 | Save replay | Record | Replay on / off | Mute mic | Open / hide |
@@ -51,6 +71,26 @@ Requires Windows 10 or 11 (64-bit); a GPU with hardware encoding is recommended.
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F8</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F11</kbd> |
 
 All of them work in games and can be changed in **Settings → Hotkeys**.
+
+## Building from source
+
+```powershell
+git clone https://github.com/PrithviGhale/REPLAYX.git
+cd REPLAYX
+npm ci
+powershell -ExecutionPolicy Bypass -File scripts/prepare-bundle.ps1   # pinned, checksum-verified FFmpeg runtime
+npx tauri dev                              # or: npx tauri build
+```
+
+Requires Node 24, the Rust MSVC toolchain, the Visual Studio C++ build tools with a Windows SDK, and WebView2. `scripts/check.ps1` runs everything CI runs. Details: [Building](docs/BUILDING.md).
+
+## Known limitations
+
+- On laptops whose screen is driven by the integrated GPU, recording can noticeably lower the FPS of CPU-heavy games (about 19% measured in Fortnite with Windows Graphics Capture and Quick Sync). Screens driven by the dedicated GPU are much less affected. Investigation: [docs/engineering](docs/README.md#engineering-reports).
+- Exclusive full-screen games can hide REPLAYX's on-screen notices (recording itself is not affected).
+- Builds are not code-signed yet.
+
+More: [Known limitations](docs/KNOWN_LIMITATIONS.md).
 
 ## Learn more
 

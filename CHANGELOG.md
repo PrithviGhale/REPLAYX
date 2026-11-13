@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1-alpha.9 - quality, errors and idle cost (release candidate)
+
+Local release candidate, not published. User-facing notes: [docs/release-notes/v0.3.1-alpha.9.md](docs/release-notes/v0.3.1-alpha.9.md).
+
+- **Friendly, actionable errors** (`src/errors.ts`, `ErrorNotice`): every reported error maps to a category, severity, title, one sentence and actions (open the REPLAYX section that fixes it and highlight it, an allowlisted Windows Settings page, Retry, open the save folder); technical text stays in a collapsible section and diagnostics. Error toasts collapse repeats.
+- **Game detected once per game session**: sessions are the game's process (id + creation time); Alt+Tab, minimising, full-screen switches and extra windows never repeat the notice; a launcher hand-off or a restart within 15 s continues the session. Previously the notice returned on any Alt+Tab after a 10-minute cooldown.
+- **Notice redesign** (GDI, own thread, never focused, excluded from capture): layered surface, accent pill, icon or symbol tile, eyebrow/title/status hierarchy, monitor of the game, reduced-motion aware.
+- **Idle cost** (hidden in the tray, isolated data folder, 60 s): `replayx.exe` 1.92 -> 0.39-0.56 CPU s/min, process tree 4.7% -> 2.7% of one core, memory 367 -> 178 MB (process scans only when visible or capturing, tooltip on change, slower device checks while hidden, 5 s hidden polling, paused animations, WebView2 memory target Low while hidden).
+- **Audio**: device-change retries for up to 10 s (was about 3.75 s) with plain error text.
+- **Settings recovery**: an unreadable `settings.json` is set aside and the defaults are used, with a notice, instead of the app failing to open.
+- **WGC (opt-in)**: once-per-frame capture with an adaptive 2x switch, scaling in gfxcapture, 12.5 ms update floor, no capture border, accurate capture diagnostics; measurements in `docs/engineering/`.
+- **Fixes**: Performance metric layout (CSS leak from the Games page), misleading capture line, empty-library action.
+- Repository: dated engineering reports moved to `docs/engineering/`, local build notes to `docs/release-notes/`.
+
 ## 0.3.1-alpha.8 - local performance investigation
 
 Not published. No Fortnite FPS improvement or ShadowPlay-equivalent overhead is claimed.
