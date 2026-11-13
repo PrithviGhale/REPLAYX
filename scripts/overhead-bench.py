@@ -109,6 +109,11 @@ CONFIGS = {
     "wgc-qsv-1x": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=1"),
     "wgc-qsv-1x16": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=1,wgc_floor_us=16000"),
     "wgc-qsv-2x": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_oversample=2"),
+    "wgc-qsv-scale": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_scale=1"),
+    "wgc-nvenc-scale": (["codec=h264", "encoder=h264_nvenc", "capture_api=wgc"], "wgc_scale=1"),
+    "wgc-qsv-f125": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_floor_us=12500"),
+    "wgc-qsv-scale-f125": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_scale=1,wgc_floor_us=12500"),
+    "wgc-qsv-scale-2x": (["codec=h264", "encoder=auto", "capture_api=wgc"], "wgc_scale=1,wgc_oversample=2"),
     # The WGC + Quick Sync chain one stage at a time, raw FFmpeg into a null
     # output (nothing saved): which stage costs the game frames?
     "ff-wgc120": ("ffmpeg", "gfxcapture=monitor_idx=0:max_framerate=120:display_border=1", "fps=60"),
@@ -258,19 +263,26 @@ def run(label, args, fps, height, mode, out):
                               "--windowed", str(args.windowed), "--topmost", str(args.topmost),
                               "--waitable", str(args.waitable),
                               "--cpu-work", str(args.cpu_work), "--workers", str(args.workers),
-                              "--buffers", str(args.buffers)])
+                              "--buffers", str(args.buffers), "--mem-reads", str(args.mem_reads),
+                              "--mem-mb", str(args.mem_mb), "--mem-workers", str(args.mem_workers)])
     time.sleep(1.5)
     # The fixture opens its own full-screen window. Never manipulate unrelated
     # windows or focus through a second UI automation implementation.
     time.sleep(args.warm - 1.5)
     gpu = subprocess.Popen(["powershell", "-NoProfile", "-Command", GPU_PS.format(n=args.capture - 6)],
                            stdout=subprocess.PIPE, text=True) if cfg and args.counters else None
-    try:
-        require_fixture_foreground(proxy, args.windowed)
-        fixture_focused = foreground_pid() == proxy.pid
-    except RuntimeError:
-        proxy.kill()
-        raise
+    # Allow a slow fixture start (large memory buffers) before refusing.
+    for attempt in range(20):
+        try:
+            require_fixture_foreground(proxy, args.windowed)
+            break
+        except RuntimeError:
+            if attempt == 19 or proxy.poll() is not None:
+                proxy.kill()
+                proxy.wait(timeout=30)
+                raise
+            time.sleep(.5)
+    fixture_focused = foreground_pid() == proxy.pid
     t0 = time.perf_counter()
     probe_report = None
     if cfg and cfg[0] in ("probe", "wgc"):
@@ -398,7 +410,8 @@ def run(label, args, fps, height, mode, out):
     valid = bool(base and during and after and drift is not None and abs(drift) <= 5 and not clock_drop
                  and log.get('detail', 0) == args.detail and not user_input)
     report = {"label": label, "fps_setting": fps, "adapter": log["adapter"], "windowed": log.get("windowed", False), "waitable": log.get("waitable", False),
-              "iters": args.iters, "cpu_us": args.cpu_us, "cpu_work": args.cpu_work, "workers": args.workers, "buffers": args.buffers, "baseline": base, "capture": during,
+              "iters": args.iters, "cpu_us": args.cpu_us, "cpu_work": args.cpu_work, "workers": args.workers, "buffers": args.buffers,
+              "mem_reads": args.mem_reads, "mem_mb": args.mem_mb, "mem_workers": args.mem_workers, "baseline": base, "capture": during,
               "fixture_draw_gpu_timing": gpu_draw,
               "cpu_performance_percent": dict(before=perf_window(t0 - args.warm + 2, t0 - .5),
                                               capture=perf_window(t0 + 5, t0 + args.capture - 1),
@@ -445,6 +458,9 @@ def main():
     ap.add_argument("--cpu-work", type=int, default=0, help="Fixed CPU work per frame (iterations), not time")
     ap.add_argument("--workers", type=int, default=0, help="Background CPU worker threads in the fixture")
     ap.add_argument("--buffers", type=int, choices=[2, 3, 4], default=3, help="Fixture swapchain buffer count")
+    ap.add_argument("--mem-reads", type=int, default=0, help="Dependent random reads per frame (memory-bound work)")
+    ap.add_argument("--mem-mb", type=int, default=64)
+    ap.add_argument("--mem-workers", type=int, default=0, help="Threads streaming through memory")
     ap.add_argument("--warm", type=int, default=10)
     ap.add_argument("--post", type=int, default=20, help="Capture-off A2 window after saves finish")
     ap.add_argument("--detail", type=int, choices=[0, 1], default=1)

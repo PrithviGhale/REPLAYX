@@ -31,6 +31,10 @@ export function PerformancePage() {
   const history = useHistory();
   const names = draft.audio.filter(a => a.enabled).map(a => a.name);
   const dropPct = s.frames + s.dropped > 0 ? (100 * s.dropped) / (s.frames + s.dropped) : 0;
+  // Windows Graphics Capture delivers more frames than the output rate and the
+  // nearest is kept, so skipped frames are expected; repeats are what matter.
+  const wgc = active && s.captureApi === 'wgc';
+  const repeatPct = s.frames > 0 ? (100 * (s.duplicated ?? 0)) / s.frames : 0;
 
   return (
     <Section>
@@ -42,7 +46,9 @@ export function PerformancePage() {
       )}
       <div className="stat-grid">
         <Card className="metric"><Stat label="Encoded rate" value={active ? `${s.fps.toFixed(1)} fps` : '—'} detail={`Target ${draft.fps} fps`} tone={active && s.fps < draft.fps * 0.9 ? 'warn' : undefined} /><Sparkline values={history.map(h => h.fps)} max={draft.fps} label="Capture rate history" /></Card>
-        <Card className="metric"><Stat label="Dropped frames" value={active ? String(s.dropped) : '—'} detail={active ? `${dropPct.toFixed(2)}% of ${s.frames.toLocaleString()} frames` : 'Frames skipped to keep a constant frame rate'} tone={active && dropPct > 1 ? 'warn' : undefined} /><Sparkline values={history.map(h => h.dropped)} label="Dropped frames history" /></Card>
+        {wgc
+          ? <Card className="metric"><Stat label="Repeated frames" value={String(s.duplicated ?? 0)} detail={`${repeatPct.toFixed(2)}% of ${s.frames.toLocaleString()} frames: output slots with no new capture`} tone={repeatPct > 1 ? 'warn' : undefined} /></Card>
+          : <Card className="metric"><Stat label="Dropped frames" value={active ? String(s.dropped) : '—'} detail={active ? `${dropPct.toFixed(2)}% of ${s.frames.toLocaleString()} frames` : 'Frames skipped to keep a constant frame rate'} tone={active && dropPct > 1 ? 'warn' : undefined} /><Sparkline values={history.map(h => h.dropped)} label="Dropped frames history" /></Card>}
         <Card className="metric"><Stat label="Recorder CPU" value={active ? `${s.cpu.toFixed(1)}%` : '—'} detail="REPLAYX + encoder, share of all cores" /><Sparkline values={history.map(h => h.cpu)} label="CPU history" /></Card>
         <Card className="metric"><Stat label="Recorder memory" value={active ? `${s.mem.toFixed(0)} MB` : '—'} detail="Resident memory of REPLAYX processes" /><Sparkline values={history.map(h => h.mem)} label="Memory history" /></Card>
         <Card className="metric"><Stat label="Buffer data rate" value={active ? `${s.write.toFixed(2)} MB/s` : '—'} detail={`${bytes(s.buffer)} buffered (${duration(s.bufferS)})`} /></Card>
@@ -63,7 +69,7 @@ export function PerformancePage() {
             <div><dt>Bitrate</dt><dd>{active && s.mbps ? `${s.mbps} Mb/s target video (${draft.preset === 'custom' ? 'custom' : `${draft.preset} preset`})` : '—'} · {draft.audio_bitrate_kbps} kb/s per audio track</dd></div>
             <div><dt>Last frame / last segment</dt><dd>{active ? `${s.frameAge} ms / ${(s.segAge / 1000).toFixed(1)} s ago` : '—'}</dd></div>
             <div><dt>Encode latency</dt><dd className="muted">Not measured yet</dd></div>
-            <div><dt>Repeated / dropped by the frame-rate grid</dt><dd>{active ? `${s.duplicated ?? 0} / ${s.dropped}` : '—'} <span className="muted small">(frames FFmpeg repeated or skipped to hold {draft.fps} fps)</span></dd></div>
+            <div><dt>Repeated / dropped by the frame-rate grid</dt><dd>{active ? `${s.duplicated ?? 0} / ${s.dropped}` : '—'} <span className="muted small">{wgc ? `(Windows Graphics Capture delivers more than ${draft.fps} frames per second; the nearest is kept and the rest are skipped)` : `(frames FFmpeg repeated or skipped to hold ${draft.fps} fps)`}</span></dd></div>
             <div><dt>Source FPS / capture drops / queue depth</dt><dd className="muted">Not measured</dd></div>
             <div><dt>Per-frame latency / jitter / GPU copy load</dt><dd className="muted">Not measured live; use the offline pacing report</dd></div>
             <div><dt>GPU encoder load / adapter</dt><dd className="muted">Not measured in the app (Task Manager → Performance → GPU shows engine load)</dd></div>

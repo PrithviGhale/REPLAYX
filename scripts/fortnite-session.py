@@ -39,17 +39,20 @@ import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = 'fortniteclient-win64-shipping.exe'
-# The adaptive-WGC test build (commit 0697476). Its own ffmpeg is in media\.
-BUILD = ROOT / 'src-tauri' / 'target-wgc3' / 'release'
+# The test build with scaled WGC capture. Its own ffmpeg is in media\.
+BUILD = ROOT / 'src-tauri' / 'target-wgc4' / 'release'
 CLI = BUILD / 'replayx-cli.exe'
 # Recorder configurations (capture-test overrides). 1920x1080 at 60 FPS,
 # H.264, Balanced, stretch, 60 s replay; silent (no audio devices opened).
 # name -> (capture-test overrides, REPLAYX_VIDEO_TUNING or '').
 CONFIGS = {
-    # The new default WGC behaviour: adaptive rate (1x, 2x only if it misses slots).
+    # The default WGC path: scaled in gfxcapture, 12.5 ms update floor,
+    # 2x only if it misses output slots.
     'wgc-qsv': (['capture_api=wgc', 'encoder=auto'], ''),
+    # The November 12 session's B1: unscaled, 16 ms floor.
+    'wgc-qsv-prev': (['capture_api=wgc', 'encoder=auto'], 'wgc_scale=0,wgc_floor_us=16000'),
     # The previous WGC test build: always 2x the output rate.
-    'wgc-qsv-2x': (['capture_api=wgc', 'encoder=auto'], 'wgc_oversample=2'),
+    'wgc-qsv-2x': (['capture_api=wgc', 'encoder=auto'], 'wgc_scale=0,wgc_oversample=2'),
     'wgc-nvenc': (['capture_api=wgc', 'encoder=h264_nvenc'], ''),
     'dda-qsv': (['capture_api=dda', 'encoder=auto'], ''),
     'dda-nvenc': (['capture_api=dda', 'encoder=h264_nvenc'], ''),
@@ -112,7 +115,7 @@ def game_in_front(pid, allow_cover=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--configs', default='wgc-qsv,wgc-qsv-2x,wgc-nvenc',
+    ap.add_argument('--configs', default='wgc-qsv,wgc-qsv-prev,wgc-qsv-2x',
                     help='Comma-separated recorder configurations: ' + ', '.join(CONFIGS))
     ap.add_argument('--seconds', type=int, default=45, help='Measured seconds per phase (30-90)')
     ap.add_argument('--presentmon', type=Path, help='PresentMon console exe (needs an administrator terminal)')
@@ -129,7 +132,7 @@ def main():
         ap.error('Unknown configuration or seconds out of range')
     for needed in (CLI, BUILD / 'media' / 'ffmpeg.exe'):
         if not needed.exists():
-            raise SystemExit(f'Missing {needed}: the target-wgc3 test build is required.')
+            raise SystemExit(f'Missing {needed}: the target-wgc4 test build is required.')
     game = find_game(process)
     if not game:
         raise SystemExit('Start Fortnite first (this script never launches it).')

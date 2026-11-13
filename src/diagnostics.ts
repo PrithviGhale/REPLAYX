@@ -36,6 +36,9 @@ export function diagnosticReport(s: Status, settings: Settings, version: string)
     canvas: [s.output_width, s.output_height].map(number), configuredFPS: number(settings.fps),
     encodedFPS: number(s.fps), encodedFrames: number(s.frames),
     outputGridDrops: number(s.dropped_frames), outputGridDuplicates: number(s.duplicated_frames),
+    // With Windows Graphics Capture, surplus captures are skipped by design;
+    // duplicates (slots with no new capture) are the starvation measure.
+    outputGridDropsMeaning: s.capture_api === 'wgc' ? 'surplus captures skipped (expected)' : 'frames skipped',
     sourceFPS: null, sourceDrops: null, videoQueueDepth: null, gpuUsage: null, perFrameLatency: null,
     encoderSpeed: number(s.encoder_speed), videoLagMs: number(s.video_lag_ms),
     frameAgeMs: number(s.frame_age_ms), segmentAgeMs: number(s.segment_age_ms),

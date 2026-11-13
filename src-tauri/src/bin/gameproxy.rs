@@ -204,7 +204,48 @@ fn main() -> windows::core::Result<()> {
     // like an engine's worker threads, which load the CPU package.
     let cpu_work: u64 = arg("--cpu-work", 0);
     let workers: u32 = arg("--workers", 0);
+    // Memory-bound game work, like an engine walking scene data: per frame,
+    // --mem-reads dependent random reads over a --mem-mb buffer (larger than
+    // the CPU's last-level cache); --mem-workers threads stream through their
+    // own buffers. Sensitive to cache and memory-bandwidth contention, not
+    // only to the clock, unlike --cpu-work.
+    let mem_reads: u64 = arg("--mem-reads", 0);
+    let mem_mb: usize = arg("--mem-mb", 64usize).clamp(8, 512);
+    let mem_workers: u32 = arg("--mem-workers", 0);
+    let chase: Vec<u32> = if mem_reads > 0 {
+        // A single random cycle through the buffer (Sattolo's algorithm).
+        let n = mem_mb * 1024 * 1024 / 4;
+        let mut v: Vec<u32> = (0..n as u32).collect();
+        let mut x = 0x853c_49e6_748f_ea9bu64;
+        for i in (1..n).rev() {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let j = (x >> 33) as usize % i;
+            v.swap(i, j);
+        }
+        v
+    } else {
+        Vec::new()
+    };
+    let mut chase_at = 0u32;
     let stop_workers = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stream_threads: Vec<_> = (0..mem_workers)
+        .map(|_| {
+            let stop = stop_workers.clone();
+            std::thread::spawn(move || {
+                let mut buf = vec![1u64; mem_mb * 1024 * 1024 / 8];
+                let mut sum = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    for v in buf.iter_mut() {
+                        sum = sum.wrapping_add(*v);
+                        *v = sum;
+                    }
+                    std::hint::black_box(sum);
+                }
+            })
+        })
+        .collect();
     let worker_threads: Vec<_> = (0..workers)
         .map(|i| {
             let stop = stop_workers.clone();
@@ -445,6 +486,12 @@ fn main() -> windows::core::Result<()> {
                 let _ =
                     windows::Win32::System::Threading::WaitForSingleObjectEx(handle, 1000, true);
             }
+            if mem_reads > 0 {
+                for _ in 0..mem_reads {
+                    chase_at = chase[chase_at as usize];
+                }
+                std::hint::black_box(chase_at);
+            }
             if cpu_work > 0 {
                 let mut x = 0x2545_F491_4F6C_DD1Du64;
                 for _ in 0..cpu_work {
@@ -529,11 +576,11 @@ fn main() -> windows::core::Result<()> {
         let now = qpc as f64 / freq as f64;
         let start_qpc = now - start.elapsed().as_secs_f64();
         stop_workers.store(true, std::sync::atomic::Ordering::Relaxed);
-        for t in worker_threads {
+        for t in worker_threads.into_iter().chain(stream_threads) {
             let _ = t.join();
         }
         let report = serde_json::json!({
-            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "topmost": topmost, "waitable": waitable, "cpu_work": cpu_work, "workers": workers, "buffers": arg("--buffers", 3u32).clamp(2, 4), "iters": iters, "cpu_us": cpu_us, "detail": detail,
+            "adapter": name, "width": sw, "height": sh, "windowed": windowed, "topmost": topmost, "waitable": waitable, "cpu_work": cpu_work, "workers": workers, "mem_reads": mem_reads, "mem_mb": mem_mb, "mem_workers": mem_workers, "buffers": arg("--buffers", 3u32).clamp(2, 4), "iters": iters, "cpu_us": cpu_us, "detail": detail,
             "tearing": tearing_ok, "start_qpc_s": start_qpc, "presents_s": presents,
             "fixture_draw_gpu_ms":gpu_times,
             // DXGI_FRAME_PRESENTATION_MODE: 0 composed, 1 overlay, 2 none

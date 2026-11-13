@@ -950,10 +950,22 @@ pub struct Tuning {
     /// a scaled-frame transfer (Windows copies every full-size frame across
     /// adapters onto the game's GPU). Unmeasured on NVIDIA-driven displays.
     pub wgc_gpu: bool,
-    /// WGC minimum update interval in microseconds at 1x. 16 ms, slightly
-    /// under one 60 FPS slot: on a 240 Hz display updates land on refresh
-    /// boundaries, and a 16.7 ms floor would sometimes slip a refresh.
+    /// WGC minimum update interval in microseconds at 1x. Updates land on
+    /// display refreshes, and only when the content changed: with a 16 ms
+    /// floor a ~228 FPS game on a 240 Hz panel slipped to 20.8 ms gaps and
+    /// 10% of recorded frames were repeats. 12.5 ms (three 240 Hz
+    /// refreshes) gave 0% repeats; the encoder keeps the frame nearest each
+    /// 60 FPS slot (measured, memory-bound synthetic game).
     pub wgc_floor_us: Option<u32>,
+    /// gfxcapture scales to the encoded image size in the shader pass it
+    /// runs on every frame anyway, so the next stage reads a 1080p frame
+    /// instead of the full display (2560x1600: about 16 MB per frame). On a
+    /// laptop whose display runs on the integrated GPU, that GPU shares the
+    /// CPU's cache and memory controller: less frame traffic is less slowdown
+    /// for a CPU-bound game (14.9% -> 11.5% game FPS cost, memory-bound
+    /// synthetic game; Fortnite's CPU time per frame rose 23-49% while
+    /// recording, tracking the integrated GPU's load).
+    pub wgc_scale: bool,
 }
 impl Default for Tuning {
     fn default() -> Self {
@@ -977,7 +989,8 @@ impl Default for Tuning {
             wgc_border: true,
             wgc_oversample: 1,
             wgc_gpu: false,
-            wgc_floor_us: Some(16_000),
+            wgc_floor_us: Some(12_500),
+            wgc_scale: true,
         }
     }
 }
@@ -1016,6 +1029,7 @@ fn parse_tuning(spec: &str) -> Tuning {
                 }
                 "wgc_border" => t.wgc_border = v != "0",
                 "wgc_gpu" => t.wgc_gpu = v != "0",
+                "wgc_scale" => t.wgc_scale = v != "0",
                 "wgc_floor_us" => {
                     t.wgc_floor_us = v
                         .parse::<u32>()
@@ -1159,7 +1173,15 @@ pub fn video_input(
             return Ok(format!("{source},{timing},{}", video_filter(plan, scaler)));
         }
         let source = if wgc {
-            wgc_source(s, &t, rect, None)?
+            // Scale in gfxcapture for the paths that otherwise read the full
+            // display frame on the Intel GPU (VPP) or the CPU.
+            let scale = (t.wgc_scale
+                && matches!(
+                    scaler,
+                    Scaler::QsvZeroCopy | Scaler::QsvHybrid | Scaler::Cpu
+                ))
+            .then_some((plan.image_width, plan.image_height));
+            wgc_source(s, &t, rect, scale)?
         } else {
             format!(
                 "ddagrab=output_idx={}:framerate={}:draw_mouse={}:video_size={}x{}:offset_x={}:offset_y={}",
@@ -1820,8 +1842,8 @@ mod tests {
         };
         let f = wgc_source(&s, &t, rect, None).unwrap();
         assert!(f.starts_with("gfxcapture=window_exe=(?i)replayx-gameproxy.exe:"));
-        // 1x with a 16 ms update floor by default; 2x once a session is boosted.
-        assert!(f.contains("max_framerate=1000000/16000") && f.contains("display_border=0"));
+        // 1x with a 12.5 ms update floor by default; 2x once a session is boosted.
+        assert!(f.contains("max_framerate=1000000/12500") && f.contains("display_border=0"));
         let boosted = Settings {
             fps: 60,
             wgc_boost: true,
