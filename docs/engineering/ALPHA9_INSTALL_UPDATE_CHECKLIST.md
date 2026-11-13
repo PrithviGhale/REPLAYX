@@ -17,20 +17,25 @@ Older alpha.9 builds are in `target-alpha9\superseded-051f935` and
 - The REPLAYX installed on this PC is **0.3.1-alpha.4**
   (`%LOCALAPPDATA%\REPLAYX`), not alpha.8. Alpha.8 was never installed, so
   "update from alpha.8" means installing alpha.8 first.
-- The installer is per-user. Your settings, clips and playtime are in
-  `%LOCALAPPDATA%\io.replayx.desktop`, and installing affects only the Windows
-  account that runs it.
-- To keep your own install and data untouched, do both tests in a **second
-  Windows user account** (Settings → Accounts → Other users → Add account →
-  "I don't have this person's sign-in information" → local account). Windows
-  11 Home has no Windows Sandbox.
+- The installer uses current-user mode. Application data defaults to
+  `%LOCALAPPDATA%\io.replayx.desktop`. Recordings default to
+  `%USERPROFILE%\Videos\REPLAYX`, with a configurable output folder.
+- Use an approved disposable VM or a **separately signed-in standard Windows
+  account** with its own profile and recordings folder. Account creation and
+  installation require the owner's approval. A second account shares drivers,
+  hardware and potentially the WebView2 runtime. A different installation folder
+  in the owner's account still shares application data and registry registration.
+- A VM snapshot or independent pristine profile is needed for each scenario
+  below. Include Alpha.4 → Alpha.9 as well as Alpha.8 → Alpha.9. Obtain and verify
+  the original Alpha.4 installer before claiming that installer upgrade passed.
 
 ## A. Clean installation (second account, nothing installed)
 
 1. Copy `REPLAYX_0.3.1-alpha.9_x64-setup.exe` there. Check its SHA-256
    with `Get-FileHash`; it must equal the hash above.
-2. Run it. SmartScreen will warn, because the installer isn't
-   Authenticode-signed (expected). Choose *More info → Run anyway*.
+2. After approval, run it as the disposable standard user. If SmartScreen,
+   a security block or an elevation request appears, stop and record the result.
+   Do not bypass the block or change Windows security settings.
 3. REPLAYX opens. *Settings → About* shows **0.3.1-alpha.9**.
 4. First start: there is no settings notice, and the tour appears once.
 5. Turn on Instant Replay, wait 30 s, then press *Save replay*. A clip
@@ -58,8 +63,11 @@ Older alpha.9 builds are in `target-alpha9\superseded-051f935` and
    - Shortcuts still work.
 6. Repeat steps A.5–A.7.
 7. **In-app updater:** release builds only update from GitHub, so this can
-   only be tested after alpha.9 is published, ideally as a **pre-release**
-   first. Then:
+   be qualified against the published artifact after alpha.9 is published as a
+   correctly labelled **pre-release**. Publication exposes it to eligible alpha
+   clients. Keep the owner's Alpha.4 installation out of this test. Alpha.4's
+   older updater depends on build-time endpoint/key configuration and must be
+   assessed independently. Then, in the disposable Alpha.8 profile only:
    1. In the alpha.8 account, run *Settings → Updates → Check now*. It
       offers 0.3.1-alpha.9.
    2. *Update Now* downloads it with progress, verifies it and installs.
@@ -88,3 +96,9 @@ Never do this test in your own account.
 - Long recording or soak runs.
 
 Each needs your go-ahead, because they use the screen.
+
+## Current validation status
+
+See [ALPHA9_FINAL_INSTALL_VALIDATION.md](ALPHA9_FINAL_INSTALL_VALIDATION.md)
+for the installer isolation audit, approvals, exact candidate identity and
+the pending clean/Alpha.4/Alpha.8 installation and uninstall results.
