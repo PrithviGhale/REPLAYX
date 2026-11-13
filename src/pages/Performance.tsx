@@ -25,7 +25,7 @@ export function PerformancePage() {
     fps: x.fps, dropped: x.dropped_frames, duplicated: x.duplicated_frames, timings: x.last_save_timings, start: x.start_timings, frames: x.frames, cpu: x.cpu_percent, mem: x.memory_mb, write: x.write_mbps,
     buffer: x.buffer_bytes, bufferS: x.buffer_seconds, elapsed: x.elapsed, encoder: x.encoder, scaling: x.scaling, captureApi: x.capture_api, captureFallback: x.capture_fallback, detail: x.scaling_detail,
     ow: x.output_width, oh: x.output_height, frameAge: x.frame_age_ms, segAge: x.segment_age_ms, state: x.state,
-    speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label, error: x.error, capture: x.capture,
+    speed: x.encoder_speed, lag: x.video_lag_ms, mbps: x.target_bitrate_mbps, label: x.encoder_label, error: x.error, retry: (x.error_retry ?? []).join(','), capture: x.capture,
     geo: x.geometry ? `${x.geometry.active_width}×${x.geometry.active_height} @ ${x.geometry.refresh_hz} Hz` : '',
   }));
   const ui = useUiStart();
@@ -41,7 +41,7 @@ export function PerformancePage() {
   return (
     <Section>
       <DiagnosticReport />
-      {s.error && <ErrorNotice error={describeError(s.error)} />}
+      {s.error && <ErrorNotice error={describeError(s.error, { retry: s.retry ? s.retry.split(',') : [] })} />}
       {!active && <div className="banner info">Start Instant Replay or a recording to see live measurements. Nothing here is estimated.</div>}
       {active && s.speed > 0 && (s.speed < 0.97 || s.lag > 2000) && (
         <div className="banner warn" role="alert">The encoder is not keeping up ({s.speed.toFixed(2)}× real time, video {(s.lag / 1000).toFixed(1)} s behind). Expect stutter; capture stops if it falls 8 s behind. Lower the frame rate or resolution, or choose the Performance preset.</div>

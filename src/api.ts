@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { SettingsProblem } from './errors';
 
 /** True inside the Tauri window; false in a plain browser (UI preview only). */
 export const native = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -56,7 +57,11 @@ export type Status = {
   buffer_seconds: number; buffer_bytes: number; free_bytes: number; frames: number; dropped_frames: number;
   fps: number; elapsed: number; write_mbps: number; memory_mb: number; cpu_percent: number;
   audio_peaks: number[]; audio_packets: number[]; audio_gaps: number[]; audio_discontinuities: number[];
-  audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null; notice: string | null;
+  audio_drift_ppm: number[]; audio_written_bytes: number[]; audio_queue_ms?: number[]; error: string | null;
+  /** Engine actions that redo what `error` interrupted (empty: no Retry). */
+  error_retry: string[]; notice: string | null;
+  /** What start-up found wrong with settings.json. */
+  settings_problem: SettingsProblem | null;
   last_clip: string | null; recovery_sessions: number; geometry: Display | null; scaling: string;
   capture_api: string; capture_filter: string; capture_fallback: string | null; scaling_detail: string | null; output_width: number; output_height: number; segment_age_ms: number;
   frame_age_ms: number; hotkey_error: string | null;
@@ -159,7 +164,7 @@ export const emptyStatus: Status = {
   state: 'Stopped', replay: false, recording: false, saving: 0, encoder: '', capture: '', buffer_seconds: 0,
   buffer_bytes: 0, free_bytes: 0, frames: 0, dropped_frames: 0, fps: 0, elapsed: 0, write_mbps: 0, memory_mb: 0,
   cpu_percent: 0, audio_peaks: [], audio_packets: [], audio_gaps: [], audio_discontinuities: [], audio_drift_ppm: [],
-  audio_written_bytes: [], error: null, notice: null, last_clip: null, recovery_sessions: 0, geometry: null,
+  audio_written_bytes: [], error: null, error_retry: [], notice: null, settings_problem: null, last_clip: null, recovery_sessions: 0, geometry: null,
   scaling: '', capture_api: '', capture_filter: '', capture_fallback: null, scaling_detail: null, output_width: 0, output_height: 0, segment_age_ms: 0, frame_age_ms: 0,
   hotkey_error: null, duplicated_frames: 0, detected_game: null, last_save_timings: [],
   pending_recording: false, recording_elapsed: 0, start_timings: [],

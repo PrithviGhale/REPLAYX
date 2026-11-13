@@ -318,22 +318,43 @@ pub fn process_started(pid: u32) -> Option<u64> {
     }
 }
 /// Whether that exact process (id and creation time) is still running.
+///
+/// A process that can no longer be looked at (a protected or anti-cheat
+/// process refusing the query) counts as still running: treating it as ended
+/// would announce the game again on every check while it is in front. Only
+/// "no such process", a different creation time (the id was reused) or an
+/// exit code ends it.
 pub fn process_running(pid: u32, started: u64) -> bool {
     use windows::Win32::{
-        Foundation::{CloseHandle, STILL_ACTIVE},
-        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, STILL_ACTIVE},
+        System::Threading::{
+            GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
     };
-    if process_started(pid) != Some(started) {
-        return false;
-    }
     unsafe {
-        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return false;
+        let process = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(p) => p,
+            // No process has this id any more.
+            Err(e) if e.code() == ERROR_INVALID_PARAMETER.to_hresult() => return false,
+            Err(_) => return true,
         };
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let times = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
         let mut code = 0u32;
-        let ok = GetExitCodeProcess(process, &mut code).is_ok();
+        let exit = GetExitCodeProcess(process, &mut code);
         let _ = CloseHandle(process);
-        ok && code == STILL_ACTIVE.0 as u32
+        let same =
+            ((created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64) == started;
+        match (times, exit) {
+            (Ok(()), Ok(())) => same && code == STILL_ACTIVE.0 as u32,
+            // Opened, but the details were refused: can't tell, keep it.
+            _ => true,
+        }
     }
 }
 
@@ -370,6 +391,11 @@ mod tests {
             !process_running(pid, t),
             "an exited process ends its session"
         );
+        drop(child);
+        // Once its last handle is closed the id belongs to nobody (or to a
+        // new process with another creation time): ended either way.
+        assert!(!process_running(pid, t));
+        assert!(!process_running(0xFFFF_FFFC, 1), "no such process");
     }
 
     /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and

@@ -112,7 +112,7 @@ function Toasts() {
       {busy && <div className="toast info"><LoaderCircle className="spin" size={15} /><span>{busy}…</span></div>}
       {toasts.map(t => (
         t.error
-          ? <ErrorNotice key={t.id} error={t.error} count={t.count} onDismiss={() => dismiss(t.id)} onAction={() => dismiss(t.id)} />
+          ? <ErrorNotice key={t.id} error={t.error} count={t.count} onDismiss={() => dismiss(t.id)} onAction={ok => { if (ok) dismiss(t.id); }} />
           : <div key={t.id} className={`toast ${t.kind}`} role="status">
               <span>{t.text}{t.count > 1 && ` (×${t.count})`}</span><button aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={14} /></button>
             </div>

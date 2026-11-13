@@ -20,19 +20,30 @@ pub struct ProcessId {
     pub started: u64,
 }
 /// Decides when a detection is news: once per game *session*, not per focus
-/// change. A session is the life of the game's process. Alt+Tab, minimising,
-/// switching between full screen and borderless, or a second window never
-/// repeat it, however long the game has been running. A second process of
-/// the same game (launcher hand-off, helper) or a restart within `GRACE` of
-/// the previous process ending continues the session; a later relaunch is a
-/// new session and is announced again.
+/// change. A session is the life of the game's process (id plus creation
+/// time).
+///
+/// - Alt+Tab, minimising, switching between full screen and borderless, or a
+///   second window of the same process never repeat it, however long the
+///   game runs.
+/// - Closing the game and launching it again is a new session and is
+///   announced again, however quickly it is relaunched.
+/// - A second process of the same game that appears while an earlier one is
+///   still running (launcher hand-off, a helper, a self-restart that starts
+///   the new process before the old one has exited) continues the session.
+/// - A reused process id is a different process (its creation time differs).
+/// - Each game is tracked on its own.
+///
+/// `FLAP` is only a safety net: the same game is never announced twice
+/// within it, in case a liveness check flickers. No real close-and-relaunch
+/// brings a game window back that fast.
 #[derive(Default)]
 pub struct Announcer {
     sessions: Vec<(String, ProcessId)>,
-    ended: HashMap<String, Instant>,
+    announced: HashMap<String, Instant>,
 }
 impl Announcer {
-    pub const GRACE: Duration = Duration::from_secs(15);
+    pub const FLAP: Duration = Duration::from_secs(3);
     /// `front`: the game in front and its process (None when no game is in
     /// front). `alive`: whether a tracked process is still running.
     pub fn observe(
@@ -41,27 +52,20 @@ impl Announcer {
         now: Instant,
         alive: impl Fn(ProcessId) -> bool,
     ) -> Option<String> {
-        let mut gone = Vec::new();
-        self.sessions.retain(|(game, process)| {
-            let running = alive(*process);
-            if !running {
-                gone.push(game.clone());
-            }
-            running
-        });
-        for game in gone {
-            self.ended.insert(game, now);
-        }
-        self.ended
-            .retain(|_, t| now.duration_since(*t) < Self::GRACE);
+        self.sessions.retain(|(_, process)| alive(*process));
+        self.announced
+            .retain(|_, t| now.duration_since(*t) < Self::FLAP);
         let (game, process) = front?;
         if self.sessions.iter().any(|(_, p)| *p == process) {
             return None;
         }
-        let continuing =
-            self.sessions.iter().any(|(g, _)| g == game) || self.ended.contains_key(game);
+        let continuing = self.sessions.iter().any(|(g, _)| g == game);
         self.sessions.push((game.to_owned(), process));
-        (!continuing).then(|| game.to_owned())
+        if continuing || self.announced.contains_key(game) {
+            return None;
+        }
+        self.announced.insert(game.to_owned(), now);
+        Some(game.to_owned())
     }
 }
 
@@ -954,7 +958,7 @@ mod tests {
         );
     }
     #[test]
-    fn launcher_hand_off_and_quick_restart_continue_the_session() {
+    fn a_launcher_hand_off_continues_the_session() {
         let mut s = Sim::new();
         let launcher = p(400, 1);
         let client = p(401, 2);
@@ -962,12 +966,45 @@ mod tests {
         assert!(s.at(0, Some(("Fortnite", launcher))).is_some());
         // The real game process takes over while the launcher still runs.
         assert_eq!(s.at(5, Some(("Fortnite", client))), None);
-        // Crash and immediate restart (new process within the grace period).
-        s.running.borrow_mut().clear();
-        assert_eq!(s.at(30, None), None);
-        let restarted = p(402, 3);
-        s.running.borrow_mut().push(restarted);
-        assert_eq!(s.at(35, Some(("Fortnite", restarted))), None);
+        // The launcher exits; the game keeps running: same session.
+        s.running.borrow_mut().retain(|x| *x == client);
+        assert_eq!(s.at(20, Some(("Fortnite", client))), None);
+    }
+    #[test]
+    fn a_quick_relaunch_is_announced_again() {
+        // The 0.3.1-alpha.9 review: a relaunch within 15 s was silent.
+        for gap in [4u64, 5, 10, 14] {
+            let mut s = Sim::new();
+            let first = p(400, 1);
+            s.running.borrow_mut().push(first);
+            assert!(s.at(0, Some(("Fortnite", first))).is_some());
+            assert_eq!(s.at(20, Some(("Fortnite", first))), None);
+            // Closed (or crashed) and launched again `gap` seconds later.
+            s.running.borrow_mut().clear();
+            assert_eq!(s.at(30, None), None);
+            let again = p(402, 3);
+            s.running.borrow_mut().push(again);
+            assert_eq!(
+                s.at(30 + gap, Some(("Fortnite", again))).as_deref(),
+                Some("Fortnite"),
+                "relaunched after {gap} s"
+            );
+            // ...and once only, through Alt+Tab and full-screen switches.
+            for t in 1..30 {
+                let front = (t % 3 != 0).then_some(("Fortnite", again));
+                assert_eq!(s.at(30 + gap + t, front), None);
+            }
+        }
+    }
+    #[test]
+    fn a_relaunch_seen_without_a_gap_in_front_is_announced_too() {
+        // The old process is gone by the next check and the new one is
+        // already in front: no "nothing in front" sample in between.
+        let mut s = Sim::new();
+        s.running.borrow_mut().push(p(800, 1));
+        assert!(s.at(0, Some(("Apex Legends", p(800, 1)))).is_some());
+        *s.running.borrow_mut() = vec![p(801, 2)];
+        assert!(s.at(6, Some(("Apex Legends", p(801, 2)))).is_some());
     }
     #[test]
     fn a_reused_process_id_is_a_different_process() {
@@ -976,9 +1013,37 @@ mod tests {
         assert!(s.at(0, Some(("Minecraft", p(500, 1)))).is_some());
         s.running.borrow_mut().clear();
         assert_eq!(s.at(5, None), None);
-        // Same pid, later creation time, after the grace period: new session.
+        // Same pid, later creation time, soon after: a new session.
         s.running.borrow_mut().push(p(500, 99));
-        assert!(s.at(100, Some(("Minecraft", p(500, 99)))).is_some());
+        assert!(s.at(9, Some(("Minecraft", p(500, 99)))).is_some());
+        // The same id and creation time is the same process.
+        assert_eq!(s.at(12, Some(("Minecraft", p(500, 99)))), None);
+    }
+    #[test]
+    fn a_liveness_glitch_right_after_the_notice_does_not_repeat_it() {
+        let mut s = Sim::new();
+        let game = p(900, 1);
+        s.running.borrow_mut().push(game);
+        assert!(s.at(0, Some(("Roblox", game))).is_some());
+        // The check wrongly reports it ended for one sample, then it is back.
+        s.running.borrow_mut().clear();
+        assert_eq!(s.at(1, None), None);
+        s.running.borrow_mut().push(game);
+        assert_eq!(s.at(2, Some(("Roblox", game))), None);
+    }
+    #[test]
+    fn games_relaunch_independently() {
+        let mut s = Sim::new();
+        let (a, b) = (p(600, 1), p(700, 1));
+        s.running.borrow_mut().extend([a, b]);
+        assert!(s.at(0, Some(("Roblox", a))).is_some());
+        assert!(s.at(10, Some(("Minecraft", b))).is_some());
+        // Roblox is relaunched while Minecraft keeps running.
+        s.running.borrow_mut().retain(|x| *x == b);
+        let a2 = p(601, 2);
+        s.running.borrow_mut().push(a2);
+        assert!(s.at(20, Some(("Roblox", a2))).is_some());
+        assert_eq!(s.at(25, Some(("Minecraft", b))), None);
     }
     #[test]
     fn several_games_are_tracked_separately() {

@@ -34,6 +34,12 @@ const initialSettings = (): Settings => ({
     { kind: 'microphone', device: 'b', pid: 0, process_started: 0, name: 'Microphone', enabled: true, volume: 1.1, muted: false, boost_db: 6, voice: { ...CLEAR_VOICE } },
   ],
 });
+const settingsScenario = new URLSearchParams(window.location.search).get('settings');
+const settingsProblem: Status['settings_problem'] = settingsScenario === 'damaged'
+  ? { kind: 'damaged', backup: 'settings.unreadable-1794191412.json', technical: 'Settings are corrupt; restore or remove settings.json: EOF while parsing an object at line 1 column 18' }
+  : settingsScenario === 'unreadable' || settingsScenario === 'damaged_not_kept'
+    ? { kind: settingsScenario, technical: "Couldn't open settings.json: The process cannot access the file because it is being used by another process. (os error 32)" }
+    : null;
 const started = Date.now();
 const status = (): Status => {
   const t = (Date.now() - started) / 1000;
@@ -42,6 +48,9 @@ const status = (): Status => {
     ...emptyStatus,
     // ?state=error: the start failure users reported (friendly card on Home).
     error: scenario === 'error' ? "System audio couldn't connect to the sound device: it was changing or unavailable for 10 seconds. Reconnect the headset or check Windows Sound settings, then try again. (Technical: System audio: Windows returned an error: 0x88890004)" : null,
+    error_retry: scenario === 'error' ? ['start_replay'] : [],
+    // ?settings=damaged|unreadable|damaged_not_kept: the start-up settings notice.
+    settings_problem: settingsProblem,
     state: scenario === 'error' ? 'Error' : !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
     encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
     target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,

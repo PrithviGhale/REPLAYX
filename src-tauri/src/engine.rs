@@ -83,7 +83,13 @@ pub struct Status {
     /// Drift correction currently applied per source, in ppm.
     pub audio_drift_ppm: Vec<f32>,
     pub error: Option<String>,
+    /// The actions that redo what `error` interrupted, in order
+    /// ("start_replay", "start_recording"); empty when a plain retry wouldn't
+    /// help (REPLAYX is already recovering on its own, or a save failed).
+    pub error_retry: Vec<String>,
     pub notice: Option<String>,
+    /// What start-up found wrong with settings.json, if anything.
+    pub settings_problem: Option<crate::model::SettingsProblem>,
     pub last_clip: Option<String>,
     pub recovery_sessions: usize,
     pub geometry: Option<DisplayGeometry>,
@@ -187,6 +193,21 @@ resolution or the Performance preset in Video settings. Footage recorded so far 
 }
 /// Longest a start may take before it is abandoned with an error.
 const START_WATCHDOG: Duration = Duration::from_secs(60);
+/// The engine actions that redo an interrupted capture: replay first, so a
+/// recording attaches to it instead of starting a second encoder.
+fn retry_actions(replay: bool, recording: bool) -> Vec<String> {
+    let mut v = Vec::new();
+    if replay {
+        v.push("start_replay".to_owned());
+    }
+    if recording {
+        v.push("start_recording".to_owned());
+    }
+    v
+}
+/// Refusal while settings.json couldn't be kept safe at start-up. The UI
+/// matches "isn't changing your settings file".
+pub const SETTINGS_READ_ONLY: &str = "REPLAYX couldn't open your settings file when it started, so it isn't changing your settings file. Close any program that may be using it, then restart REPLAYX.";
 #[derive(Default)]
 struct Progress {
     /// Encoder output time in microseconds (FFmpeg progress out_time_us).
@@ -270,6 +291,12 @@ pub struct Inner {
     starting: Option<Starting>,
     /// Saves of recordings cut short by an error, started by the tick loop.
     orphaned: Vec<SaveJob>,
+    /// settings.json couldn't be read or kept safe at start-up: it must not
+    /// be written over this session.
+    settings_read_only: bool,
+    /// What a start that failed was meant to begin (replay, recording); read
+    /// by `fail_final` for `Status::error_retry`.
+    failed_intent: Option<(bool, bool)>,
     _instance_lock: fs::File,
 }
 #[derive(Clone)]
@@ -392,6 +419,8 @@ impl Engine {
                 segment_probe_tx,
                 starting: None,
                 orphaned: Vec::new(),
+                settings_read_only: false,
+                failed_intent: None,
                 _instance_lock: instance_lock,
             })),
             published.clone(),
@@ -452,6 +481,15 @@ impl Engine {
         *self.1.status.lock().unwrap() = i.status.clone();
         *self.1.settings.lock().unwrap() = i.settings.clone();
     }
+    /// Report what start-up found wrong with settings.json. When the file
+    /// couldn't be kept safe, settings changes are refused until restart, so
+    /// the defaults never replace it.
+    pub fn report_settings_problem(&self, problem: crate::model::SettingsProblem) {
+        let mut i = self.0.lock().unwrap();
+        i.settings_read_only = !problem.allows_saving();
+        i.status.settings_problem = Some(problem);
+        self.publish(&i);
+    }
     pub fn set_settings(&self, s: Settings) -> Result<()> {
         let mut i = self.0.lock().unwrap();
         if i.pipeline.is_some()
@@ -462,7 +500,7 @@ impl Engine {
             bail!("Stop capture and wait for saves before changing settings")
         };
         fs::create_dir_all(&s.output_dir)?;
-        s.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&s)?;
         i.settings = s;
         self.publish(&i);
         Ok(())
@@ -475,7 +513,7 @@ impl Engine {
             return;
         }
         i.settings.tray_hint_shown = true;
-        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        let _ = i.persist(&i.settings);
         self.publish(&i);
     }
     /// Remember that the first-run tour was finished or skipped (saved at
@@ -486,7 +524,7 @@ impl Engine {
             return;
         }
         i.settings.tour_done = true;
-        let _ = i.settings.save(&i.data_dir.join("settings.json"));
+        let _ = i.persist(&i.settings);
         self.publish(&i);
     }
     /// Change playtime settings at once (also during capture: they don't
@@ -496,7 +534,7 @@ impl Engine {
         let mut next = i.settings.clone();
         next.playtime = p;
         next.validate()?;
-        next.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&next)?;
         i.settings = next;
         self.publish(&i);
         Ok(())
@@ -506,7 +544,7 @@ impl Engine {
         let mut i = self.0.lock().unwrap();
         let mut next = i.settings.clone();
         next.updates = u.normalized();
-        next.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&next)?;
         i.settings = next;
         self.publish(&i);
         Ok(())
@@ -545,7 +583,7 @@ impl Engine {
             a.muted = !on;
         }
         next.validate()?;
-        next.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&next)?;
         i.settings = next.clone();
         // Apply to the running capture: the feed multiplies by zero when muted.
         if let Some(p) = &i.pipeline {
@@ -600,6 +638,7 @@ impl Engine {
                 bail!("Recover the interrupted recording before starting a new session")
             }
             i.status.error = None;
+            i.status.error_retry.clear();
             if i.starting.is_some() {
                 // Capture is already starting (e.g. Record pressed while replay
                 // starts): join that start instead of launching a second encoder.
@@ -626,7 +665,7 @@ impl Engine {
                     r
                 }
                 Err(e) => {
-                    i.starting = None;
+                    i.failed_intent = i.starting.take().map(|s| (s.replay, s.recording));
                     i.status.pending_recording = false;
                     i.fail(format!("{e:#}"));
                     self.publish(&i);
@@ -645,7 +684,8 @@ impl Engine {
                 Err(anyhow::anyhow!("Capture start was abandoned"))
             }
             (None, Err(e)) => Err(e),
-            (Some(_), Err(e)) => {
+            (Some(intent), Err(e)) => {
+                i.failed_intent = Some((intent.replay, intent.recording));
                 i.fail(format!("{e:#}"));
                 Err(e)
             }
@@ -845,6 +885,7 @@ impl Engine {
             }
             Err(e) => {
                 i.status.error = Some(format!("Save failed; source segments preserved: {e:#}"));
+                i.status.error_retry.clear();
             }
         }
         i.refresh_session_count();
@@ -896,7 +937,7 @@ impl Engine {
                 }
             }
         }
-        i.settings.save(&i.data_dir.join("settings.json"))?;
+        i.persist(&i.settings)?;
         Ok(())
     }
     pub fn recover(&self) -> Result<Vec<String>> {
@@ -1807,6 +1848,14 @@ fn try_discard(dir: &Path, ring: &[Segment]) -> bool {
     !dir.exists()
 }
 impl Inner {
+    /// Write settings.json, unless start-up couldn't keep the user's file
+    /// safe: then it is never written over (see `Settings::load_or_recover`).
+    fn persist(&self, s: &Settings) -> Result<()> {
+        if self.settings_read_only {
+            bail!("{SETTINGS_READ_ONLY}")
+        }
+        s.save(&self.data_dir.join("settings.json"))
+    }
     fn expected_audio(&self) -> usize {
         if let Some(p) = &self.pipeline {
             return p.expected_audio;
@@ -2244,6 +2293,10 @@ impl Inner {
         self.fail_final(error)
     }
     fn fail_final(&mut self, error: String) {
+        let (replay, recording) = self.failed_intent.take().unwrap_or((
+            self.status.replay,
+            self.recording.is_some() || self.status.pending_recording,
+        ));
         self.recovery = None;
         let _ = self.stop_pipeline();
         // 0.2.1-alpha.2 left the recording attached after a failure: the UI
@@ -2272,6 +2325,7 @@ impl Inner {
         self.status.recording = false;
         self.status.state = "Error".into();
         self.status.error = Some(error);
+        self.status.error_retry = retry_actions(replay, recording);
     }
     fn tick(&mut self) -> Result<Option<SaveJob>> {
         self.status.free_bytes = fs2::available_space(&self.settings.output_dir).unwrap_or(0);
@@ -2279,6 +2333,7 @@ impl Inner {
             if s.began.elapsed() > START_WATCHDOG {
                 // Bounded failure: the start thread discards its encoder if it
                 // ever returns; the UI gets control and a reason now.
+                self.status.error_retry = retry_actions(s.replay, s.recording);
                 self.starting = None;
                 self.status.pending_recording = false;
                 self.status.replay = false;
@@ -2654,6 +2709,7 @@ impl Inner {
                 match self.start_pipeline(false) {
                     Ok(()) => {
                         self.status.error = None;
+                        self.status.error_retry.clear();
                         self.status.replay = r.replay;
                         if r.recording {
                             let dir = self
@@ -2674,11 +2730,14 @@ impl Inner {
                     }
                     Err(e) => {
                         self.status.error = Some(format!("Capture restart failed: {e:#}"));
+                        // Recovery keeps retrying by itself.
+                        self.status.error_retry.clear();
                     }
                 }
             }
             Err(e) => {
                 self.status.error = Some(format!("Waiting for selected display: {e:#}"));
+                self.status.error_retry.clear();
             }
         }
         self.status.state = "Recovering".into();
@@ -2861,6 +2920,48 @@ mod tests {
         assert!(engine.settings().tour_done);
     }
     #[test]
+    fn a_settings_file_that_was_locked_at_start_is_never_saved_over_later() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let path = data.join("settings.json");
+        let custom = Settings {
+            output_dir: root.path().join("my clips"),
+            audio: Vec::new(),
+            fps: 30,
+            ..Default::default()
+        };
+        custom.save(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        // Another program holds the file with no sharing while REPLAYX starts.
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let (mut settings, problem) = Settings::load_or_recover(&path);
+        let problem = problem.expect("reported");
+        assert!(!problem.allows_saving());
+        settings.output_dir = root.path().join("clips");
+        settings.audio.clear();
+        let engine = isolated(data.clone(), settings.clone()).unwrap();
+        engine.report_settings_problem(problem.clone());
+        assert_eq!(engine.status().settings_problem, Some(problem));
+        drop(held); // the other program lets go
+                    // Every kind of settings write is refused, and the file is unchanged.
+        let err = engine.set_settings(settings.clone()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("isn't changing your settings file"));
+        assert!(engine.set_updates(settings.updates.clone()).is_err());
+        assert!(engine.set_playtime(settings.playtime.clone()).is_err());
+        engine.mark_tour_done();
+        engine.mark_tray_hint_shown();
+        assert_eq!(fs::read(&path).unwrap(), original);
+        // The next start reads it normally.
+        assert_eq!(Settings::load_or_recover(&path).0.fps, 30);
+    }
+    #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {
         let root = tempfile::tempdir().unwrap();
         let engine = isolated(
@@ -2989,8 +3090,12 @@ mod tests {
             let s = engine.status();
             assert_eq!(s.state, "Error");
             assert!(!s.recording && !s.pending_recording && !s.replay);
+            // Retry redoes what failed: the recording, not Instant Replay.
+            assert_eq!(s.error_retry, vec!["start_recording".to_owned()]);
             assert!(engine.0.lock().unwrap().starting.is_none());
         }
+        engine.start_replay().unwrap_err();
+        assert_eq!(engine.status().error_retry, vec!["start_replay".to_owned()]);
         assert_eq!(session_dirs(&root.path().join("data"), "buffer"), 0);
     }
     #[test]
@@ -3016,6 +3121,7 @@ mod tests {
         assert_eq!(i.status.state, "Error");
         assert!(!i.status.pending_recording);
         assert!(i.status.error.as_ref().unwrap().contains("did not start"));
+        assert_eq!(i.status.error_retry, vec!["start_recording".to_owned()]);
     }
     #[test]
     fn stop_during_start_cancels_only_a_pending_recording() {

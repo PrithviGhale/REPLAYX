@@ -10,6 +10,7 @@ import { describeError, type FriendlyError } from './errors';
 /** Errors carry their friendly form; the same problem again bumps `count`
  * instead of stacking another toast. */
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string; error?: FriendlyError; count: number };
+type Failure = { retry?: readonly string[]; failed?: () => void };
 type Ctx = {
   saved: Settings; draft: Settings; dirty: boolean; loaded: boolean;
   patch: (p: Partial<Settings>) => void; save: () => Promise<boolean>; discard: () => void;
@@ -25,8 +26,10 @@ type Ctx = {
   /** Apply a finished delete/move locally; no rescan needed. */
   dropClip: (id: string) => void; putClip: (clip: Clip) => void;
   pendingSaves: SaveEvent[];
-  busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string) => Promise<T | undefined>;
-  toast: (kind: Toast['kind'], text: string) => void; toasts: Toast[]; dismiss: (id: number) => void;
+  /** `failure.retry`: what a Retry on the error repeats; `failure.failed` is
+   * called when the work failed. */
+  busy: string | null; run: <T>(label: string, work: () => Promise<T>, success?: string, failure?: Failure) => Promise<T | undefined>;
+  toast: (kind: Toast['kind'], text: string, retry?: readonly string[]) => void; toasts: Toast[]; dismiss: (id: number) => void;
 };
 const AppContext = createContext<Ctx | null>(null);
 
@@ -43,12 +46,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const nextId = useRef(1);
 
   const dismiss = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), []);
-  const toast = useCallback((kind: Toast['kind'], text: string) => {
-    const error = kind === 'error' ? describeError(text) : undefined;
+  const toast = useCallback((kind: Toast['kind'], text: string, retry?: readonly string[]) => {
+    const error = kind === 'error' ? describeError(text, { retry }) : undefined;
     const id = nextId.current++;
     setToasts(t => {
       const same = t.find(x => (error ? x.error?.key === error.key : x.kind === kind && x.text === text));
-      if (same) return t.map(x => (x === same ? { ...x, count: x.count + 1 } : x));
+      if (same) return t.map(x => (x === same ? { ...x, error, count: x.count + 1 } : x));
       return [...t.slice(-3), { id, kind, text, error, count: 1 }];
     });
     if (kind !== 'error') window.setTimeout(() => dismiss(id), 5000);
@@ -118,14 +121,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshClips().catch(e => toast('error', errorText(e)));
   }, [refreshCaps, refreshClips, toast]);
 
-  const run = useCallback(async <T,>(label: string, work: () => Promise<T>, success?: string) => {
+  const run = useCallback(async <T,>(label: string, work: () => Promise<T>, success?: string, failure?: Failure) => {
     setBusy(label);
     try {
       const result = await work();
       if (success) toast('success', success);
       return result;
     } catch (e) {
-      toast('error', errorText(e));
+      toast('error', errorText(e), failure?.retry);
+      failure?.failed?.();
       return undefined;
     } finally {
       setBusy(null);

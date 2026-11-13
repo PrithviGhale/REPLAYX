@@ -7,9 +7,12 @@ export type Destination = { page: 'home' | 'replay' | 'capture' | 'audio' | 'cli
 export type ErrorAction =
   | { kind: 'navigate'; label: string; to: Destination }
   | { kind: 'windows'; label: string; page: 'sound' | 'microphone-privacy' | 'display' | 'storage' }
-  | { kind: 'retry'; label: string }
+  /** Redoes exactly what failed, in order. Only offered when that is known. */
+  | { kind: 'retry'; label: string; ops: RetryOp[] }
   | { kind: 'folder'; label: string };
-export type ErrorCategory = 'audio' | 'microphone' | 'microphone-permission' | 'hotkey' | 'storage' | 'save' | 'encoder'
+/** Engine actions a Retry may repeat. */
+export type RetryOp = 'start_replay' | 'start_recording' | 'save_replay';
+export type ErrorCategory = 'settings' | 'audio' | 'microphone' | 'microphone-permission' | 'hotkey' | 'storage' | 'save' | 'encoder'
   | 'display' | 'runtime' | 'start' | 'capture' | 'unknown';
 export type FriendlyError = {
   /** Stable for identical problems: used to collapse repeats. */
@@ -23,7 +26,9 @@ export type FriendlyError = {
   technical: string;
 };
 
-const retry: ErrorAction = { kind: 'retry', label: 'Retry' };
+/** Placeholder in a rule: replaced by the operation that failed, or dropped
+ * when that isn't known. */
+const retry: ErrorAction = { kind: 'retry', label: 'Retry', ops: [] };
 const sound: ErrorAction = { kind: 'windows', label: 'Windows sound settings', page: 'sound' };
 
 type Rule = { category: ErrorCategory; test: (m: string) => boolean; severity?: 'warning'; title: string; message: string; actions: ErrorAction[] };
@@ -31,6 +36,10 @@ const has = (...words: string[]) => (m: string) => words.some(w => m.includes(w)
 
 // Ordered: the first matching rule wins, most specific first.
 const RULES: Rule[] = [
+  // Refused because start-up couldn't keep the settings file safe.
+  { category: 'settings', severity: 'warning', test: has("isn't changing your settings file"),
+    title: "Settings can't be changed right now", message: "REPLAYX couldn't open your settings file when it started, so it isn't changing it. Close any program that may be using it, then restart REPLAYX.",
+    actions: [] },
   { category: 'hotkey', severity: 'warning', test: has('already used by another application', 'hotkey', 'shortcut'),
     title: 'Shortcut already in use', message: 'Another app is using one of your REPLAYX shortcuts. Pick a different key combination.',
     actions: [{ kind: 'navigate', label: 'Change shortcuts', to: { page: 'settings', tab: 'hotkeys' } }] },
@@ -38,10 +47,16 @@ const RULES: Rule[] = [
   { category: 'start', test: has('did not start within', "didn't start within"),
     title: "Capture didn't start", message: "Your display, graphics driver or sound device didn't respond in time.",
     actions: [retry, { kind: 'navigate', label: 'Video settings', to: { page: 'capture' } }] },
-  { category: 'microphone-permission', test: m => m.includes('microphone') && has('permission', 'access is denied', '0x80070005', 'privacy')(m),
+  // Only real denial evidence counts: advice such as "check the microphone
+  // permission" inside another message isn't one.
+  { category: 'microphone-permission', test: m => m.includes('microphone') && has('access is denied', 'access denied', '0x80070005', 'e_accessdenied', 'permission denied', 'blocked by privacy')(m),
     title: 'Microphone access is blocked', message: "Windows isn't letting REPLAYX use your microphone. Allow access in Windows privacy settings.",
     actions: [{ kind: 'windows', label: 'Microphone privacy settings', page: 'microphone-privacy' },
       { kind: 'navigate', label: 'Microphone settings', to: { page: 'audio', anchor: 'microphone' } }] },
+  { category: 'microphone', test: m => m.includes('microphone') && has('packets stopped', 'stopped sending', 'no packets')(m),
+    title: 'Microphone stopped', message: 'Your microphone stopped sending sound. It may have been unplugged or switched off, or Windows may be blocking it.',
+    actions: [{ kind: 'navigate', label: 'Fix microphone', to: { page: 'audio', anchor: 'microphone' } },
+      { kind: 'windows', label: 'Microphone privacy settings', page: 'microphone-privacy' }, retry] },
   { category: 'microphone', test: has('microphone'),
     title: 'Microphone unavailable', message: "We couldn't use your microphone. It may be unplugged, switched off or busy in another app.",
     actions: [{ kind: 'navigate', label: 'Fix microphone', to: { page: 'audio', anchor: 'microphone' } }, sound, retry] },
@@ -70,19 +85,58 @@ const RULES: Rule[] = [
     actions: [retry, { kind: 'navigate', label: 'Performance', to: { page: 'performance' } }] },
 ];
 
-/** The first plain sentence of a raw message, without Windows codes. */
-function plainSentence(raw: string): string {
-  const text = raw.replace(/\(technical:[\s\S]*\)$/i, '').replace(/0x[0-9a-f]{8}/gi, '').replace(/\s+/g, ' ').trim();
+const UNKNOWN = 'REPLAYX hit an unexpected problem. The technical details below can help if you report it.';
+
+/** The first sentence of a raw message, only when the whole message is plain
+ * words. Anything that looks technical (a file path, an OS error, a Windows
+ * code, JSON or parser output, an error chain "a: b: c") gives the generic
+ * summary instead: that text belongs in the technical details only. */
+export function plainSentence(raw: string): string {
+  const text = raw.replace(/\s+/g, ' ').trim();
   const first = text.split(/(?<=[.!?])\s/)[0] ?? '';
-  return first.length > 160 ? `${first.slice(0, 157)}…` : first;
+  const looksTechnical = /[\\/:;{}[\]<>"`|=_]|0x[0-9a-f]|os error|\berror \d|\bline \d|\bcolumn \d|\.(json|exe|dll|db|mkv|mp4|tmp|log)\b/i;
+  if (!first || first.length > 160 || looksTechnical.test(text)) return UNKNOWN;
+  return first;
 }
 
-export function describeError(raw: string): FriendlyError {
+const retryLabel = (ops: RetryOp[]) =>
+  ops.length === 1 && ops[0] === 'start_recording' ? 'Retry recording'
+    : ops.length === 1 && ops[0] === 'start_replay' ? 'Retry Instant Replay'
+      : ops.length === 1 && ops[0] === 'save_replay' ? 'Save again' : 'Retry';
+
+/** `context.retry`: the operations that failed, which Retry repeats. Without
+ * it no Retry is offered: guessing could start the wrong capture. */
+export function describeError(raw: string, context: { retry?: readonly string[] } = {}): FriendlyError {
   const technical = raw.trim();
   const m = technical.toLowerCase();
+  const ops = (context.retry ?? []).filter((o): o is RetryOp => o === 'start_replay' || o === 'start_recording' || o === 'save_replay');
+  const retryAction: ErrorAction[] = ops.length ? [{ kind: 'retry', label: retryLabel(ops), ops }] : [];
   const rule = RULES.find(r => r.test(m));
-  if (rule) return { key: `${rule.category}:${technical.slice(0, 80)}`, category: rule.category, severity: rule.severity ?? 'error',
-    title: rule.title, message: rule.message, actions: rule.actions, technical };
-  return { key: `unknown:${technical.slice(0, 80)}`, category: 'unknown', severity: 'error', title: 'Something went wrong',
-    message: plainSentence(technical) || 'REPLAYX hit an unexpected problem.', actions: [], technical };
+  if (!rule) return { key: `unknown:${technical.slice(0, 80)}`, category: 'unknown', severity: 'error', title: 'Something went wrong',
+    message: plainSentence(technical), actions: retryAction, technical };
+  const actions = rule.actions.flatMap(a => (a.kind === 'retry' ? retryAction : [a]));
+  return { key: `${rule.category}:${technical.slice(0, 80)}`, category: rule.category, severity: rule.severity ?? 'error',
+    title: rule.title, message: rule.message, actions, technical };
+}
+
+/** What start-up found wrong with settings.json (`Status.settings_problem`). */
+export type SettingsProblem =
+  | { kind: 'damaged'; backup: string; technical: string }
+  | { kind: 'damaged_not_kept'; technical: string }
+  | { kind: 'unreadable'; technical: string };
+
+/** The settings notice in plain words; the raw error only in the details. */
+export function describeSettingsProblem(p: SettingsProblem): FriendlyError {
+  const base = { category: 'settings' as const, severity: 'warning' as const, technical: p.technical };
+  switch (p.kind) {
+    case 'damaged': return { ...base, key: `settings:damaged:${p.backup}`, title: 'Your settings were reset',
+      message: `Your settings file was damaged, so REPLAYX started with its default settings. A copy of the old file was kept as ${p.backup}.`,
+      actions: [{ kind: 'navigate', label: 'Review settings', to: { page: 'settings', tab: 'general' } }] };
+    case 'damaged_not_kept': return { ...base, key: 'settings:damaged_not_kept', title: 'Using default settings for now',
+      message: "Your settings file is damaged and REPLAYX couldn't keep a copy of it, so it started with its defaults and won't change the file. Restart REPLAYX to try again.",
+      actions: [] };
+    case 'unreadable': return { ...base, key: 'settings:unreadable', title: "Your settings couldn't be opened",
+      message: "Another program may be using your settings file. REPLAYX started with its defaults and won't change your saved settings. Restart REPLAYX to load them.",
+      actions: [] };
+  }
 }

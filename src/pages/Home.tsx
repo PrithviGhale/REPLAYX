@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ErrorNotice } from '../ErrorNotice';
-import { describeError } from '../errors';
+import { describeError, describeSettingsProblem, type SettingsProblem } from '../errors';
 import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
 import { native } from '../api';
 import { microphoneLabel, microphoneOn } from '../update-logic';
@@ -85,7 +85,9 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
     elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
-    free: x.free_bytes, error: x.error, notice: x.notice, hotkey: x.hotkey_error, recovery: x.recovery_sessions,
+    free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice,
+    // Compared as text: the status object is new on every poll.
+    settingsProblem: x.settings_problem ? JSON.stringify(x.settings_problem) : '', hotkey: x.hotkey_error, recovery: x.recovery_sessions,
   }));
   const peaks = useStatus(x => x.audio_peaks);
   const active = useStatus(activeOf);
@@ -103,7 +105,12 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
     : 'Turn on Instant Replay before you play. It works on the desktop too — no game required.';
 
   // Problems become friendly cards with actions; plain notices stay banners.
-  const problems = [s.error, s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(describeError);
+  // The engine error offers Retry for exactly what it interrupted.
+  const problems = [
+    ...(s.settingsProblem ? [describeSettingsProblem(JSON.parse(s.settingsProblem) as SettingsProblem)] : []),
+    ...(s.error ? [describeError(s.error, { retry: s.retry ? s.retry.split(',') : [] })] : []),
+    ...[s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(x => describeError(x)),
+  ];
   const alerts = [s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
 
   return (
