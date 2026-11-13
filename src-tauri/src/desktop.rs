@@ -1672,7 +1672,9 @@ pub fn run() {
                         .filter(|_| settings.game_notifications)
                         .and_then(|game| {
                             let (pid, path, _) = crate::games::foreground_process()?;
-                            let started = crate::games::process_started(pid)?;
+                            // A protected game may refuse its creation time:
+                            // still announce it, identified by its id alone.
+                            let started = crate::games::process_started(pid).unwrap_or(0);
                             Some((game, crate::overlay::ProcessId { pid, started }, path))
                         });
                     let news = announcer.observe(

@@ -17,6 +17,8 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessId {
     pub pid: u32,
+    /// Creation time (FILETIME); 0 when Windows wouldn't tell (a protected
+    /// process): the id alone identifies it then.
     pub started: u64,
 }
 /// Decides when a detection is news: once per game *session*, not per focus

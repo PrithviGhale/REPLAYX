@@ -348,8 +348,10 @@ pub fn process_running(pid: u32, started: u64) -> bool {
         let mut code = 0u32;
         let exit = GetExitCodeProcess(process, &mut code);
         let _ = CloseHandle(process);
-        let same =
-            ((created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64) == started;
+        // 0: the creation time couldn't be read when the game was first
+        // seen; then the id alone identifies it.
+        let same = started == 0
+            || ((created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64) == started;
         match (times, exit) {
             (Ok(()), Ok(())) => same && code == STILL_ACTIVE.0 as u32,
             // Opened, but the details were refused: can't tell, keep it.
@@ -396,6 +398,9 @@ mod tests {
         // new process with another creation time): ended either way.
         assert!(!process_running(pid, t));
         assert!(!process_running(0xFFFF_FFFC, 1), "no such process");
+        assert!(!process_running(0xFFFF_FFFC, 0));
+        // Creation time unknown (0): the id alone, while it runs.
+        assert!(process_running(me, 0));
     }
 
     /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and
