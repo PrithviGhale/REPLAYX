@@ -1,20 +1,17 @@
 import { useState } from 'react';
+import type React from 'react';
 import { HardDrive, LifeBuoy, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../context';
 import { activeOf, useStatus } from '../store';
 import { audioTrackCount, bytes, bytesPerSecond as rateBytes, duration, durationLabel, outputWidth, ratePlan, requestedCodec } from '../format';
-import { Button, Card, Field, Kbd, Segmented } from '../ui';
+import { Button, Card, Field, Kbd } from '../ui';
 import { Section } from './shared';
 import { ReplaySwitch } from '../ReplaySwitch';
 
-const LENGTHS = [30, 60, 180, 300, 600, 900, 1800];
-/** Replay presets: length plus a disk budget with 30% headroom. */
-const REPLAY_PRESETS = [
-  { id: 'short', label: 'Short clips', seconds: 30, text: 'The last 30 seconds: quick highlights, least disk space.' },
-  { id: 'balanced', label: 'Balanced', seconds: 120, text: 'The last 2 minutes: enough for most plays.', recommended: true },
-  { id: 'long', label: 'Long sessions', seconds: 600, text: 'The last 10 minutes: whole rounds and matches. Needs more disk space.' },
-] as const;
+/** Replay length slider: 30 seconds to 10 minutes in 15-second steps. */
+const MIN_LENGTH = 30, MAX_LENGTH = 600, LENGTH_STEP = 15;
+/** Disk budget for a length: its size plus 30% headroom. */
 const budgetFor = (bytes: number) => Math.min(102400, Math.max(512, Math.ceil((bytes * 1.3) / (256 * 1024 * 1024)) * 256));
 
 export function ReplayPage() {
@@ -46,22 +43,16 @@ export function ReplayPage() {
       </Card>
       <div className="grid-2">
         <Card title="Replay length" subtitle="How much of the past a single save keeps.">
-          <div className="preset-cards" role="radiogroup" aria-label="Replay preset">
-            {REPLAY_PRESETS.map(p => {
-              const on = draft.replay_seconds === p.seconds;
-              return (
-                <button key={p.id} role="radio" aria-checked={on} className={`preset-card ${on ? 'on' : ''}`} disabled={active}
-                  onClick={() => patch({ replay_seconds: p.seconds, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * p.seconds)) })}>
-                  <strong>{p.label}{'recommended' in p && <em className="rec-tag">Recommended</em>}</strong>
-                  <span>{durationLabel(p.seconds)} · about {bytes(bytesPerSecond * p.seconds)} on disk</span>
-                  <small>{p.text}</small>
-                </button>
-              );
-            })}
+          <div className="length-readout">
+            <strong>{durationLabel(draft.replay_seconds)}</strong>
+            <span>about {bytes(needed)} per saved replay</span>
           </div>
-          <span className="field-label">Custom length</span>
-          <Segmented label="Replay length" value={draft.replay_seconds} disabled={active} onChange={v => patch({ replay_seconds: v, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * v)) })}
-            options={LENGTHS.map(n => ({ value: n, label: durationLabel(n) }))} />
+          <input type="range" className="length-slider" min={MIN_LENGTH} max={MAX_LENGTH} step={LENGTH_STEP}
+            style={{ '--fill': `${((Math.min(Math.max(draft.replay_seconds, MIN_LENGTH), MAX_LENGTH) - MIN_LENGTH) / (MAX_LENGTH - MIN_LENGTH)) * 100}%` } as React.CSSProperties}
+            value={Math.min(Math.max(draft.replay_seconds, MIN_LENGTH), MAX_LENGTH)} disabled={active}
+            aria-label="Replay length" aria-valuetext={durationLabel(draft.replay_seconds)}
+            onChange={e => { const v = Number(e.target.value); patch({ replay_seconds: v, buffer_mb: Math.max(draft.buffer_mb, budgetFor(bytesPerSecond * v)) }); }} />
+          <div className="length-scale" aria-hidden><span>30 sec</span><span>5 min</span><span>10 min</span></div>
           <div className="buffer-bar" aria-label="Current buffer">
             <span style={{ width: `${Math.min(100, (s.buffer / draft.replay_seconds) * 100)}%` }} />
           </div>

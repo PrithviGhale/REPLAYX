@@ -271,8 +271,10 @@ impl Settings {
         {
             bail!("Unsupported resolution or frame rate")
         }
-        if ![30, 60, 180, 300, 600, 900, 1800].contains(&self.replay_seconds) {
-            bail!("Invalid replay duration")
+        // Any length from 30 s: the Replay page slider offers up to 10 min in
+        // 15 s steps; 15 and 30 min saved by earlier versions stay valid.
+        if !(30..=1800).contains(&self.replay_seconds) {
+            bail!("Replay length must be between 30 seconds and 30 minutes")
         }
         if !(128..=102400).contains(&self.buffer_mb) || !(1..=150).contains(&self.bitrate_mbps) {
             bail!("Invalid disk budget or bitrate")
@@ -1141,6 +1143,24 @@ mod tests {
         s.fps = 30;
         s.audio[0].volume = f32::NAN;
         assert!(s.validate().is_err());
+    }
+    #[test]
+    fn any_replay_length_from_30_seconds_is_valid() {
+        // 2 min (the Balanced preset) was refused: "Invalid replay duration".
+        for seconds in [30, 45, 120, 135, 600, 900, 1800] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            assert!(s.validate().is_ok(), "{seconds}");
+        }
+        for seconds in [0, 29, 1801] {
+            let s = Settings {
+                replay_seconds: seconds,
+                ..Default::default()
+            };
+            assert!(s.validate().is_err(), "{seconds}");
+        }
     }
     #[test]
     fn traversal_blocked() {

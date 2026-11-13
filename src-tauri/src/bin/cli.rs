@@ -651,8 +651,16 @@ fn start_bench(args: &[String]) -> Result<()> {
         output_dir: root.join("clips"),
         ..Default::default()
     };
+    // System audio only: a bench never opens the microphone.
+    settings.audio.truncate(1);
     if audio != "system" {
         settings.audio.clear();
+    }
+    // Optional: start-bench system capture_api=wgc (the experimental path).
+    for arg in args.iter().skip(3) {
+        if let Some(("capture_api", v)) = arg.split_once('=') {
+            settings.capture_api = v.into();
+        }
     }
     let wait = |engine: &Engine, timeout: Duration, f: &dyn Fn(&Status) -> bool| {
         let deadline = Instant::now() + timeout;
@@ -754,9 +762,11 @@ fn start_bench(args: &[String]) -> Result<()> {
     };
     {
         let engine = Engine::new(data.clone(), settings.clone())?;
+        // Like the app: REPLAYX is open for a moment before the first click.
+        thread::sleep(Duration::from_secs(3));
         case(
             &engine,
-            "First start for this display (capture paths probed)",
+            "First start, 3 s after launch (capture paths probed)",
             false,
         )?;
         case(&engine, "Second start, same session (cached path)", false)?;

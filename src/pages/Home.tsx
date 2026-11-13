@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { ErrorNotice } from '../ErrorNotice';
 import { describeError, describeSettingsProblem, type SettingsProblem } from '../errors';
-import { AlertTriangle, ChevronRight, Circle, Cpu, HardDrive, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
-import { native } from '../api';
+import { ChevronRight, Circle, Cpu, HardDrive, Info, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
+import { api, native } from '../api';
 import { microphoneLabel, microphoneOn } from '../update-logic';
 import { useApp } from '../context';
 import { useCapture, useRecordButton } from '../capture';
 import { ReplaySwitch } from '../ReplaySwitch';
-import { activeOf, useStatus } from '../store';
+import { activeOf, refreshNow, useStatus } from '../store';
 import { bytes, duration, encoderName, outputWidth, plan, sourceRect } from '../format';
 import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
 import { SourceIcon, Section, Thumb, feedIndex } from './shared';
@@ -111,12 +111,24 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
     ...(s.error ? [describeError(s.error, { retry: s.retry ? s.retry.split(',') : [] })] : []),
     ...[s.hotkey, caps?.media_error].filter((x): x is string => !!x).map(x => describeError(x)),
   ];
-  const alerts = [s.notice && { tone: 'info', text: s.notice }].filter(Boolean) as { tone: string; text: string }[];
+  // A message stays until it is closed with ×; closing hides it at once and
+  // clears it in the engine (only that message, never a newer one).
+  const [closed, setClosed] = useState<string | null>(null);
+  const notice = s.notice && s.notice !== closed ? s.notice : null;
+  const closeNotice = (text: string) => {
+    setClosed(text);
+    if (native) void api.dismissNotice(text).catch(() => undefined).finally(refreshNow);
+  };
 
   return (
     <Section>
       {problems.map(e => <ErrorNotice key={e.key} error={e} />)}
-      {alerts.map((a, i) => <div key={i} className={`banner ${a.tone}`} role={a.tone === 'bad' ? 'alert' : undefined}><AlertTriangle size={15} />{a.text}</div>)}
+      {notice && (
+        <div className="banner info closable" role="status">
+          <Info size={15} /><span>{notice}</span>
+          <button type="button" className="banner-close" aria-label="Close message" title="Close" onClick={() => closeNotice(notice)}><X size={14} /></button>
+        </div>
+      )}
       {s.recovery > 0 && !active && (
         <button className="banner info link" onClick={() => navigate('replay')}>
           {s.recovery} interrupted capture session{s.recovery > 1 ? 's' : ''} can be recovered <ChevronRight size={14} />

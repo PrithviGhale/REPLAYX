@@ -8,11 +8,11 @@ import { micDefaults, micState } from '../src/audio.ts';
 // showed the wrong preset sizes in 0.2.1-alpha.3.
 test('preset rates match the engine', () => {
   assert.equal(targetBitrate('performance', 0, 60, 1920, 1080), 10);
-  assert.equal(targetBitrate('balanced', 0, 60, 1920, 1080), 16);
+  assert.equal(targetBitrate('balanced', 0, 60, 1920, 1080), 15);
   assert.equal(targetBitrate('quality', 0, 60, 1920, 1080), 25);
   assert.equal(targetBitrate('custom', 33, 60, 1920, 1080), 33);
-  assert.deepEqual(ratePlan('balanced', 12, 60, 1920, 1080, 'h264'), { target: 16, cap: 24 });
-  assert.deepEqual(ratePlan('balanced', 12, 60, 1920, 1080, 'av1'), { target: 12, cap: 18 });
+  assert.deepEqual(ratePlan('balanced', 12, 60, 1920, 1080, 'h264'), { target: 15, cap: 23 });
+  assert.deepEqual(ratePlan('balanced', 12, 60, 1920, 1080, 'av1'), { target: 11, cap: 17 });
   assert.deepEqual(ratePlan('custom', 20, 60, 1920, 1080, 'av1'), { target: 20, cap: 30 });
 });
 

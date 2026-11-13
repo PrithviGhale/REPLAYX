@@ -73,6 +73,13 @@ pub struct Encoder {
 }
 impl Media {
     pub fn preflight(&self) -> Result<()> {
+        self.preflight_with(|exe| command(exe))
+    }
+    /// The same check below normal priority, for the warm-up after launch.
+    pub fn preflight_low_priority(&self) -> Result<()> {
+        self.preflight_with(|exe| helper(exe))
+    }
+    fn preflight_with(&self, command: impl Fn(&Path) -> Command) -> Result<()> {
         for exe in [&self.ffmpeg, &self.ffprobe] {
             let output=command(exe).args(["-version"]).output().with_context(||format!("Cannot run {}. Windows may have blocked the media runtime; review the security notification without disabling protection.",exe.file_name().unwrap_or_default().to_string_lossy()))?;
             if !output.status.success() {
@@ -1279,13 +1286,14 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
     if s.preset == "custom" {
         return s.bitrate_mbps;
     }
-    // Matched to what NVIDIA's own recorder produced on the same laptop
-    // (about 16.5 Mb/s for 1440x1080 at 60 fps); NVENC lookahead and adaptive
-    // quantization spend those bits better than the previous 28 Mb/s did.
+    // Balanced matches NVIDIA's own recorder: a 2-minute 1080p60 clip of
+    // about 225-230 MB (as Windows shows sizes). On real Fortnite footage a
+    // 15 Mb/s target averaged 15.8 Mb/s on Quick Sync and 15.2 on NVENC, both
+    // VMAF 92.7; with two AAC tracks a 2-minute clip is 223-233 MB.
     let base = match s.preset.as_str() {
         "performance" => 10.0,
         "quality" => 25.0,
-        _ => 16.0,
+        _ => 15.0,
     };
     let pixels = (width as f64 * height as f64) / (1920.0 * 1080.0);
     let rate = (s.fps as f64 / 60.0).powf(0.75);
@@ -1294,10 +1302,10 @@ pub fn target_bitrate_mbps(s: &Settings, width: u32, height: u32) -> u32 {
 /// How a preset spends bits on one encoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct RatePlan {
-    /// NVENC constant-quality level (lower is better); None for plain VBR.
+    /// Constant-quality level, if a preset used one. None: every encoder
+    /// now uses VBR so clip sizes are predictable (kept for diagnostics).
     pub cq: Option<u32>,
-    /// Average for VBR; for constant quality the expected average in typical
-    /// gameplay (measured), used for size estimates.
+    /// Average rate; used for size estimates.
     pub target_mbps: u32,
     /// Hard peak: bounds file size and the replay buffer in complex scenes.
     pub cap_mbps: u32,
@@ -1313,23 +1321,12 @@ fn codec_factor(codec: &str) -> f64 {
         1.0
     }
 }
-/// NVENC constant-quality levels per preset. H.264 CQ 28 on real gameplay
-/// averaged 14.7 Mb/s at VMAF 97.6, matching the old 16 Mb/s VBR (97.9) at
-/// 12% less; AV1 CQ 34 gave VMAF 97.7 at 12.5 Mb/s (docs/PERFORMANCE.md).
-fn nvenc_cq(codec: &str, preset: &str) -> u32 {
-    match (codec, preset) {
-        ("av1", "performance") => 38,
-        ("av1", "quality") => 31,
-        ("av1", _) => 34,
-        (_, "performance") => 31,
-        (_, "quality") => 25,
-        _ => 28,
-    }
-}
-/// Rate control for a preset on an encoder at an output size. NVENC uses
-/// constant quality capped at 1.5x the preset rate: simple scenes cost
-/// less, complex ones get bits up to the cap. Other encoders use VBR around
-/// the preset rate. Custom is the user's rate, whatever the codec.
+/// Rate control for a preset on an encoder at an output size: VBR around the
+/// preset rate with a 1.5x peak, on every encoder, so a clip's size follows
+/// its length (2 minutes of Balanced 1080p60 is about 230 MB). NVENC used
+/// constant quality capped at 1.5x before; in busy scenes that ran at the
+/// cap (a 2-minute clip of a hard scene: 345 MB against 212 MB with VBR).
+/// Custom is the user's rate, whatever the codec.
 pub fn rate_plan(s: &Settings, encoder: &str, width: u32, height: u32) -> RatePlan {
     let h264 = target_bitrate_mbps(s, width, height);
     if s.preset == "custom" {
@@ -1339,13 +1336,9 @@ pub fn rate_plan(s: &Settings, encoder: &str, width: u32, height: u32) -> RatePl
             cap_mbps: h264 * 3 / 2,
         };
     }
-    let codec = codec_of(encoder);
-    let k = codec_factor(codec);
+    let k = codec_factor(codec_of(encoder));
     RatePlan {
-        cq: ffmpeg_encoder(encoder)
-            .0
-            .ends_with("_nvenc")
-            .then(|| nvenc_cq(codec, &s.preset)),
+        cq: None,
         target_mbps: ((h264 as f64) * k).round().max(2.0) as u32,
         cap_mbps: ((h264 as f64) * 1.5 * k).round().max(3.0) as u32,
     }
@@ -1382,14 +1375,16 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         ]),
         // VBR around the target with a 1.5x peak: action scenes get more bits
         // than menus without unbounded replay-buffer growth.
-        None => c.args([
-            "-b:v",
-            &format!("{}M", rate.target_mbps),
-            "-maxrate",
-            &format!("{}k", rate.cap_mbps * 1000),
-            "-bufsize",
-            &format!("{}k", rate.target_mbps * 2000),
-        ]),
+        None => c
+            .args(if nvenc { &["-rc", "vbr"][..] } else { &[][..] })
+            .args([
+                "-b:v",
+                &format!("{}M", rate.target_mbps),
+                "-maxrate",
+                &format!("{}k", rate.cap_mbps * 1000),
+                "-bufsize",
+                &format!("{}k", rate.target_mbps * 2000),
+            ]),
     };
     c.args(["-g", &(s.fps * 2).to_string(), "-bf", "0"]);
     // Segments must start with IDR frames so each 2s file decodes on its own and
@@ -1766,8 +1761,8 @@ mod tests {
         let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
         assert!(pair("-c:v", "h264_qsv") && pair("-low_power", "1"));
         assert!(pair("-colorspace", "bt709") && pair("-color_range", "tv"));
-        assert!(pair("-b:v", "16M") && pair("-maxrate", "24000k"));
-        assert!(!pair("-cq", "28"), "Quick Sync keeps VBR");
+        assert!(pair("-b:v", "15M") && pair("-maxrate", "23000k"));
+        assert!(!args.iter().any(|a| a == "-cq"), "VBR, no constant quality");
         let mut c = command(Path::new("ffmpeg"));
         encoding_args(
             &mut c,
@@ -1793,9 +1788,9 @@ mod tests {
             )
         };
         assert_eq!(at("performance", 60, 1920, 1080), 10);
-        assert_eq!(at("balanced", 60, 1920, 1080), 16);
+        assert_eq!(at("balanced", 60, 1920, 1080), 15);
         assert_eq!(at("quality", 60, 1920, 1080), 25);
-        assert!(at("balanced", 120, 1920, 1080) > 16 && at("balanced", 120, 1920, 1080) < 32);
+        assert!(at("balanced", 120, 1920, 1080) > 15 && at("balanced", 120, 1920, 1080) < 30);
         assert!(at("balanced", 60, 1280, 720) < 10);
         assert!(at("quality", 60, 3840, 2160) > 60);
         let custom = Settings {
@@ -1931,27 +1926,38 @@ mod tests {
         assert_eq!(requested_codec(&s), "h264");
     }
     #[test]
-    fn nvenc_uses_capped_constant_quality_per_codec() {
+    fn every_encoder_uses_vbr_so_a_two_minute_clip_is_about_230_mb() {
         let s = Settings::default();
         let h264 = rate_plan(&s, "h264_nvenc", 1920, 1080);
         assert_eq!(
             h264,
             RatePlan {
-                cq: Some(28),
-                target_mbps: 16,
-                cap_mbps: 24
+                cq: None,
+                target_mbps: 15,
+                cap_mbps: 23
             }
         );
+        assert_eq!(rate_plan(&s, "h264_qsv", 1920, 1080), h264);
+        assert_eq!(rate_plan(&s, "h264_amf", 1920, 1080), h264);
         let av1 = rate_plan(&s, "av1_nvenc", 1920, 1080);
         assert_eq!(
             av1,
             RatePlan {
-                cq: Some(34),
-                target_mbps: 12,
-                cap_mbps: 18
+                cq: None,
+                target_mbps: 11,
+                cap_mbps: 17
             }
         );
-        assert_eq!(rate_plan(&s, "h264_qsv", 1920, 1080).cq, None);
+        // Video plus two 192 kb/s AAC tracks for 2 minutes: about 230 MB
+        // (MiB, as Windows shows file sizes).
+        let mb = (h264.target_mbps as f64 * 1e6 + 2.0 * 192e3) / 8.0 * 120.0 / 1048576.0;
+        assert!((215.0..235.0).contains(&mb), "{mb}");
+        let mut c = command(Path::new("ffmpeg"));
+        encoding_args(&mut c, &s, "h264_nvenc", (1920, 1080), false);
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into()).collect();
+        let pair = |k: &str, v: &str| args.windows(2).any(|w| w[0] == k && w[1] == v);
+        assert!(pair("-rc", "vbr") && pair("-b:v", "15M") && pair("-maxrate", "23000k"));
+        assert!(!args.iter().any(|a| a == "-cq"));
         let custom = Settings {
             preset: "custom".into(),
             bitrate_mbps: 20,
@@ -1977,7 +1983,7 @@ mod tests {
             assert!(
                 pair("-c:v", encoder)
                     && pair("-rc", "vbr")
-                    && pair("-b:v", "0")
+                    && !pair("-b:v", "0")
                     && pair("-forced-idr", "1"),
                 "{encoder}"
             );

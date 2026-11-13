@@ -193,6 +193,9 @@ resolution or the Performance preset in Video settings. Footage recorded so far 
 }
 /// Longest a start may take before it is abandoned with an error.
 const START_WATCHDOG: Duration = Duration::from_secs(60);
+/// Engine check interval, and while capture is starting.
+const TICK: Duration = Duration::from_millis(200);
+const TICK_STARTING: Duration = Duration::from_millis(40);
 /// The engine actions that redo an interrupted capture: replay first, so a
 /// recording attaches to it instead of starting a second encoder.
 fn retry_actions(replay: bool, recording: bool) -> Vec<String> {
@@ -355,7 +358,18 @@ fn cleanup_saved_snapshot(dir: &Path, segments: &[Segment]) -> Result<()> {
 }
 impl Engine {
     pub fn new(data_dir: PathBuf, settings: Settings) -> Result<Self> {
-        Self::with_media(data_dir, settings, Media::discover()?)
+        let media = Media::discover()?;
+        let engine = Self::with_media(data_dir, settings, media.clone())?;
+        // Do the one-time start work now, in the background and below normal
+        // priority, so the first Instant Replay or Record after launching
+        // REPLAYX doesn't wait for it: the media runtime check (which also
+        // brings FFmpeg's files into the disk cache) and loading Windows audio.
+        // Opens no device stream and never the microphone.
+        thread::spawn(move || {
+            let _ = preflight_once(&media, true);
+            audio::warm_up();
+        });
+        Ok(engine)
     }
     fn with_media(data_dir: PathBuf, settings: Settings, media: Media) -> Result<Self> {
         let segment_starts: Arc<Mutex<std::collections::HashMap<PathBuf, f64>>> =
@@ -426,8 +440,9 @@ impl Engine {
             published.clone(),
         );
         let weak = Arc::downgrade(&e.0);
+        let mut pause = TICK;
         thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(pause);
             let Some(arc) = weak.upgrade() else { break };
             // Sample the foreground window without holding the engine lock: the
             // query may involve another thread, which must never wait on us.
@@ -455,6 +470,9 @@ impl Engine {
                     engine.complete_save(&result);
                 });
             }
+            // While capture is starting, check often so the state turns to
+            // Buffering/Recording as soon as the first frame is encoded.
+            pause = if i.warming_up() { TICK_STARTING } else { TICK };
             *published.status.lock().unwrap() = i.status.clone();
         });
         Ok(e)
@@ -489,6 +507,15 @@ impl Engine {
         i.settings_read_only = !problem.allows_saving();
         i.status.settings_problem = Some(problem);
         self.publish(&i);
+    }
+    /// The user closed the message shown on Home. Only that message is
+    /// cleared: a newer one that arrived meanwhile stays.
+    pub fn dismiss_notice(&self, text: &str) {
+        let mut i = self.0.lock().unwrap();
+        if i.status.notice.as_deref() == Some(text) {
+            i.status.notice = None;
+            self.publish(&i);
+        }
     }
     pub fn set_settings(&self, s: Settings) -> Result<()> {
         let mut i = self.0.lock().unwrap();
@@ -879,8 +906,7 @@ impl Engine {
         match result {
             Ok((p, probe)) => {
                 i.status.last_clip = p.file_name().map(|p| p.to_string_lossy().into());
-                i.status.notice =
-                    Some("Clip ready — streams and playback boundaries checked".into());
+                i.status.notice = Some("Your clip is saved. Find it in Clips.".into());
                 i.status.last_save_timings = probe.save_timings.clone();
             }
             Err(e) => {
@@ -1072,14 +1098,21 @@ fn mark(timings: &mut Vec<media::StageTiming>, began: Instant, stage: impl Into<
     });
 }
 /// Check the media runtime once per process instead of on every start (it
-/// costs two process launches).
-fn preflight_once(media: &Media) -> Result<()> {
+/// costs two process launches, 1.7 s measured on a first start). The lock is
+/// held during the check, so a start that arrives while the warm-up after
+/// launch is running it waits for that result instead of checking again.
+fn preflight_once(media: &Media, low_priority: bool) -> Result<()> {
     static PASSED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-    if PASSED.lock().unwrap().contains(&media.ffmpeg) {
+    let mut passed = PASSED.lock().unwrap_or_else(|p| p.into_inner());
+    if passed.contains(&media.ffmpeg) {
         return Ok(());
     }
-    media.preflight()?;
-    PASSED.lock().unwrap().push(media.ffmpeg.clone());
+    if low_priority {
+        media.preflight_low_priority()?;
+    } else {
+        media.preflight()?;
+    }
+    passed.push(media.ffmpeg.clone());
     Ok(())
 }
 /// The GPU capture/encoder chain that last passed its probe for this display
@@ -1361,7 +1394,7 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     let s = &req.settings;
     let synthetic = req.synthetic;
     let mut timings = Vec::new();
-    preflight_once(&req.media)?;
+    preflight_once(&req.media, false)?;
     mark(&mut timings, began, "Media runtime checked");
     let geometry = if !synthetic && s.capture == "desktop-duplication" {
         let g = geometry::display(s.display)?;
@@ -1432,12 +1465,27 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
     fs::create_dir_all(&dir)?;
     let started = (|| -> Result<_> {
         fs::write(dir.join("session.json"), serde_json::to_vec_pretty(s)?)?;
-        let mut feeds = Vec::new();
-        if !synthetic {
-            for source in s.audio.iter().filter(|s| s.enabled) {
-                feeds.push(audio::spawn(source.clone())?);
-            }
-        }
+        // Open every audio source at the same time (each takes about 0.25 s,
+        // more while a device settles), keeping the configured order.
+        let feeds: Vec<audio::AudioFeed> = if synthetic {
+            Vec::new()
+        } else {
+            thread::scope(|scope| {
+                let opening: Vec<_> = s
+                    .audio
+                    .iter()
+                    .filter(|a| a.enabled)
+                    .map(|a| scope.spawn(move || audio::spawn(a.clone())))
+                    .collect();
+                opening
+                    .into_iter()
+                    .map(|t| {
+                        t.join()
+                            .unwrap_or_else(|_| Err(anyhow::anyhow!("Audio source failed to open")))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?
+        };
         mark(&mut timings, began, "Audio sources opened");
         let mut c = media::command(&req.media.ffmpeg);
         c.current_dir(&dir).args([
@@ -1848,6 +1896,14 @@ fn try_discard(dir: &Path, ring: &[Segment]) -> bool {
     !dir.exists()
 }
 impl Inner {
+    /// Capture is starting: no first encoded frame yet.
+    fn warming_up(&self) -> bool {
+        self.starting.is_some()
+            || self
+                .pipeline
+                .as_ref()
+                .is_some_and(|p| !p.reported_first_frame)
+    }
     /// Write settings.json, unless start-up couldn't keep the user's file
     /// safe: then it is never written over (see `Settings::load_or_recover`).
     fn persist(&self, s: &Settings) -> Result<()> {
@@ -2056,18 +2112,16 @@ impl Inner {
         let scaler = p.pipeline.scaler;
         if scaler == Scaler::Cpu && p.plan.is_some() {
             self.status.notice = Some(
-                "GPU scaling is unavailable on this display adapter; using the CPU fallback (see Performance for details).".into(),
+                "Your graphics card can't resize the video for this screen, so the processor does it instead. This uses a little more CPU.".into(),
             );
         }
         (self.status.play_width, self.status.play_height) = match p.plan {
             Some(plan) if plan.sar != (1, 1) => {
                 let (w, h) = plan.display_size();
                 self.status.notice = Some(format!(
-                    "Recording your display's {}×{} pixels instead of resizing to {}×{}, marked to play at {w}×{h}. Keeping every frame on the GPU is what makes the recording smooth: this GPU can only resize through a CPU copy, which stutters in games. Players and editors show it at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
+                    "To keep the video smooth, REPLAYX records your screen at its full size ({}×{}). Videos still play at {w}×{h}. For a file that is exactly {}×{}, choose Exact size in Video settings.",
                     plan.width,
                     plan.height,
-                    self.settings.output_width(),
-                    self.settings.height,
                     self.settings.output_width(),
                     self.settings.height
                 ));
@@ -2236,7 +2290,7 @@ impl Inner {
                 if Instant::now() > deadline {
                     p.child.kill()?;
                     p.child.wait()?;
-                    self.status.notice=Some("Capture required forced shutdown; recover remaining segments before restarting".into());
+                    self.status.notice=Some("Capture didn't stop normally and had to be closed. Open Instant Replay and choose Recover to save what was recorded.".into());
                     break;
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -2275,11 +2329,12 @@ impl Inner {
                     Ok(()) => {
                         self.status.replay = replay;
                         self.status.recording = recording;
-                        self.status.notice = Some(format!(
-                            "{} + {encoder} failed during startup ({error}). Switched to {}.",
-                            scaler.label(),
-                            self.status.scaling
-                        ));
+                        // The technical reason stays in Performance
+                        // (scaling details) and diagnostics.
+                        self.status.notice = Some(
+                            "The first video setup didn't work on this PC, so REPLAYX switched to another one. Recording works normally."
+                                .into(),
+                        );
                         return;
                     }
                     Err(e) => {
@@ -2380,7 +2435,7 @@ impl Inner {
             p.last_geometry_check = Instant::now();
             let current = geometry::display(self.settings.display);
             if current.as_ref().ok() != p.geometry.as_ref() {
-                return self.begin_recovery("Display geometry changed or the display disconnected; previous footage is preserved.");
+                return self.begin_recovery("Your screen changed or was disconnected.");
             }
         }
         self.collect_segments()?;
@@ -2439,10 +2494,10 @@ impl Inner {
                 .clone()
                 .filter(|e| audio::is_device_change(e))
         });
-        if let Some(e) = device_changed.filter(|_| !p.synthetic) {
-            return self.begin_recovery(&format!(
-                "An audio device changed ({e}); reconnecting audio."
-            ));
+        // The device's error stays in diagnostics; the notice stays plain.
+        if device_changed.is_some() && !p.synthetic {
+            return self
+                .begin_recovery("Your sound device changed, so REPLAYX is reconnecting it.");
         }
         if let Some(exit) = p.child.try_wait()? {
             let reason = p
@@ -2469,7 +2524,7 @@ impl Inner {
                 .any(|s| reason.contains(s))
             {
                 return self.begin_recovery(
-                    "Desktop Duplication lost its device; attempting bounded recovery.",
+                    "Screen capture was interrupted (for example by a display or driver change), so REPLAYX is restarting it.",
                 );
             }
             bail!("Capture exited ({exit}). {reason}")
@@ -2504,12 +2559,8 @@ impl Inner {
             // capture at 2x for the rest of this session. The bounded restart
             // keeps the replay buffer.
             self.settings.wgc_boost = true;
-            self.status.notice = Some(
-                "Capture switched to a higher Windows Graphics Capture rate for smooth video."
-                    .into(),
-            );
             return self.begin_recovery(
-                "Windows Graphics Capture rate raised for smoother video; previous footage is preserved.",
+                "REPLAYX now captures your screen more often to keep the video smooth.",
             );
         }
         self.status.audio_peaks = p
@@ -2672,7 +2723,9 @@ impl Inner {
         self.status.recording = false;
         self.status.replay = false;
         self.status.state = "Recovering".into();
-        self.status.notice=Some(format!("{reason} A recording continues as a new verified part; replay restarts with a fresh buffer. Footage saved so far is kept."));
+        self.status.notice = Some(format!(
+            "{reason} Nothing you recorded is lost: a recording continues as a new clip, and Instant Replay starts over."
+        ));
         self.recovery = Some(Recovery {
             replay,
             recording,
@@ -3024,6 +3077,30 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), original);
         // The next start reads it normally.
         assert_eq!(Settings::load_or_recover(&path).0.fps, 30);
+    }
+    #[test]
+    fn closing_a_message_clears_only_that_message() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = isolated(
+            root.path().join("data"),
+            Settings {
+                output_dir: root.path().join("clips"),
+                audio: Vec::new(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        engine.update(|i| i.status.notice = Some("Your clip is saved. Find it in Clips.".into()));
+        // A newer message arrived after the old one was shown: it stays.
+        engine
+            .update(|i| i.status.notice = Some("Your screen changed or was disconnected.".into()));
+        engine.dismiss_notice("Your clip is saved. Find it in Clips.");
+        assert_eq!(
+            engine.status().notice.as_deref(),
+            Some("Your screen changed or was disconnected.")
+        );
+        engine.dismiss_notice("Your screen changed or was disconnected.");
+        assert_eq!(engine.status().notice, None);
     }
     #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {

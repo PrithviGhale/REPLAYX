@@ -93,7 +93,6 @@ export function CapturePage() {
   // easily; encoding on the CPU is lighter with Performance.
   const hardware = !!caps?.encoders.some(e => e.available && /nvenc|qsv|amf/.test(e.name));
   const recommended = !caps || hardware ? 'balanced' : 'performance';
-  const nvenc = draft.encoder === 'h264_nvenc' || (draft.encoder === 'auto' && !!caps?.encoders.find(e => e.name === 'h264_nvenc' && e.available));
   const fellBack = active && !!live.codec && live.codec !== codec;
   const audioTracks = audioTrackCount(draft.audio.filter(a => a.enabled).length, draft.separate_tracks);
   const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
@@ -228,9 +227,7 @@ export function CapturePage() {
         </Field>
         {fellBack && <div className="banner warn">The GPU driving this display can't encode {codecName[codec]}, so this capture is recording {codecName[live.codec] ?? live.codec}. Choose H.264 to hide this message.</div>}
         <p className="preset-note">
-          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · {codecName[codec]} · {draft.preset !== 'custom' && nvenc
-            ? `constant quality on NVIDIA, typically about ${rate.target} Mb/s, never above ${rate.cap}`
-            : `average ${rate.target} Mb/s, peaks up to ${rate.cap}`}
+          <strong>{PRESETS.find(x => x.value === draft.preset)?.label}</strong> · {p.width} × {p.height} at {draft.fps} fps · {codecName[codec]} · {`average ${rate.target} Mb/s, peaks up to ${rate.cap}`}
           <span className="muted"> — {PRESETS.find(x => x.value === draft.preset)?.text}</span>
         </p>
         <StorageEstimate target={rate.target} cap={rate.cap} audioTracks={audioTracks} audioKbps={draft.audio_bitrate_kbps} free={live.free} />

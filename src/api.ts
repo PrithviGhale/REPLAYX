@@ -140,6 +140,7 @@ export const api = {
   /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
   openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
+  dismissNotice: (text: string) => call<void>('dismiss_notice', { text }),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
   micMonitorStart: (source: AudioSource, output: string) => call<void>('mic_monitor_start', { source, output }),

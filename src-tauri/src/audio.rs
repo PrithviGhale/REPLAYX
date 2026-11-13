@@ -757,6 +757,25 @@ pub fn is_device_change(message: &str) -> bool {
     .iter()
     .any(|code| m.contains(code))
 }
+/// Load Windows audio once in the background after launch, so the first
+/// capture start opens its devices at the warm speed (0.8 s cold, 0.25 s
+/// warm, measured). Prepares a loopback client on the default output device
+/// the way a start does, then releases it: the stream is never started, so
+/// nothing is captured, and the microphone is never touched.
+pub fn warm_up() {
+    let _ = (|| -> Result<()> {
+        wasapi::initialize_mta().ok()?;
+        let device = DeviceEnumerator::new()?.get_default_device(&Direction::Render)?;
+        let mut client = device.get_iaudioclient()?;
+        let format = WaveFormat::new(32, 32, &SampleType::Float, RATE as usize, CHANNELS, None);
+        let stream = StreamMode::PollingShared {
+            autoconvert: true,
+            buffer_duration_hns: 1_000_000,
+        };
+        client.initialize_client(&format, &Direction::Capture, &stream)?;
+        Ok(())
+    })();
+}
 pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
     let name = source.name.clone();
     let microphone = source.kind == "microphone";

@@ -51,6 +51,8 @@ const status = (): Status => {
     error_retry: scenario === 'error' ? ['start_replay'] : [],
     // ?settings=damaged|unreadable|damaged_not_kept: the start-up settings notice.
     settings_problem: settingsProblem,
+    // ?notice=TEXT: a Home message (closable).
+    notice: new URLSearchParams(window.location.search).get('notice'),
     state: scenario === 'error' ? 'Error' : !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
     encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
     target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,

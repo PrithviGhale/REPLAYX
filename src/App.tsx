@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ErrorNotice } from './ErrorNotice';
 import type { Destination } from './errors';
 import { NAVIGATE_EVENT, revealAnchor } from './navigation';
-import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
+import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
 import { native, VERSION } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
@@ -127,6 +127,12 @@ export function App() {
     return NAV.some(g => g.items.some(i => i.id === hash)) ? hash : 'home';
   });
   const { clips } = useApp();
+  // The sidebar folds to an icon rail; the choice is remembered (best effort).
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('replayx.sidebar') === 'collapsed'; } catch { return false; } });
+  const toggleSidebar = () => setCollapsed(c => {
+    try { localStorage.setItem('replayx.sidebar', c ? 'open' : 'collapsed'); } catch { /* not stored */ }
+    return !c;
+  });
   const pollError = usePollError();
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const updateWaiting = hasUpdate(useUpdate());
@@ -151,15 +157,18 @@ export function App() {
     return () => window.removeEventListener(NAVIGATE_EVENT, open);
   }, [go]);
   return (
-    <div className="shell">
+    <div className={`shell${collapsed ? ' collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="brand"><BrandMark size={28} /><span>REPLAY<b>X</b></span></div>
+        <button type="button" className="nav-item sidebar-toggle" aria-expanded={!collapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={toggleSidebar}>
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>Collapse</span>
+        </button>
         <nav aria-label="Main">
           {NAV.map(g => (
             <div className="nav-group" key={g.group}>
               <div className="nav-title">{g.group}</div>
               {g.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>
+                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} aria-label={collapsed ? label : undefined} title={collapsed ? label : undefined} onClick={() => setPage(id)}>
                   <Icon size={17} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
                   {id === 'settings' && updateWaiting && <i className="nav-dot" role="img" aria-label="Update available" title="Update available" />}
                 </button>
