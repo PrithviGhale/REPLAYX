@@ -1,4 +1,13 @@
-# Known limitations — 0.3.1-alpha.8
+# Known limitations — 0.3.1-alpha.9
+
+## Alpha.9 release validation
+
+- Final isolated clean installation, Alpha.4/Alpha.8 upgrades, uninstall recording retention and real installer-based updating remain unfinished. The earlier account-creation attempt stopped before any installer was run. See [installation validation](../engineering/ALPHA9_FINAL_INSTALL_VALIDATION.md).
+- Physical Bluetooth switching, microphone listening quality, editor multitrack playback, fullscreen stretched-resolution transitions, multi-monitor notices and strong anti-cheat compatibility require further hardware testing.
+- The roughly 223–233 MB estimate for two minutes of Balanced 1080p60 comes from re-encoding one 60-second Fortnite clip. Actual final-build gameplay replay size remains unmeasured and varies with content and settings.
+- Alpha.9 retries changing audio devices for up to 10 seconds. The older Alpha.6 behavior documented below used about four seconds.
+
+## Earlier performance evidence
 
 REPLAYX is **alpha** software. New Fortnite screenshot averages suggest roughly 13% overhead; the earlier ~45% report and the new samples are not controlled benchmarks. The real-game overhead remains unresolved. Current synthetic measurements do not establish real-game improvement or Discord compatibility. Physical microphone, editor multitrack playback and fullscreen stretched transitions require manual testing. Evidence is in [VALIDATION.md](../development/VALIDATION.md) and [the alpha.8 investigation](../engineering/PERFORMANCE_ALPHA8.md).
 

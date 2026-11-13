@@ -1,3 +1,11 @@
+# Validation — 0.3.1-alpha.9 (November 13, 2026)
+
+Independent review of `a63ef4474e403f9865fd44aa4cf16a2191debffe` passed the three requested fixes. Local safe checks passed 190 Rust tests (registry and Recycle Bin tests excluded, one optional benchmark ignored), 71 frontend tests, nine Python tests, TypeScript and the production frontend build, Clippy with warnings denied, rustfmt and whitespace checks. All 98 checked local documentation/image references resolved. Component checks verified eight slider keyboard transitions and exact saved-length round trips for all 1,771 supported integer durations.
+
+The owner subsequently authorized merging to main and publishing an alpha prerelease. Release notes list the unfinished isolated installation, upgrade, uninstall, hardware and real installer-update tests explicitly. This publication authorization does not establish that those tests passed. No owner-profile installation or capture is part of release preparation.
+
+The `cf92d5a` installer predates later fixes and is superseded for publication. A fresh signed package must be built from the release commit and verified before upload. Final package details are recorded with the release checksums.
+
 # Validation — 0.3.1-alpha.4 (November 9, 2026)
 
 Game icons for installed games, Open/hide shortcut, text-fit fixes. Builds ran at below-normal priority; the running app was not touched.
