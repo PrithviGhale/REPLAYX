@@ -1608,18 +1608,26 @@ pub fn run() {
                         status_overlay.update(frame.clone());
                         overlay_frame = frame;
                     }
+                    // The process in front is the game just classified: its id and
+                    // creation time identify the game session (Alt+Tab never starts a
+                    // new one), and its executable's icon decorates the notice.
+                    // Never queries REPLAYX's own windows.
+                    let front = status
+                        .foreground_game
+                        .as_deref()
+                        .filter(|_| settings.game_notifications)
+                        .and_then(|game| {
+                            let (pid, path, _) = crate::games::foreground_process()?;
+                            let started = crate::games::process_started(pid)?;
+                            Some((game, crate::overlay::ProcessId { pid, started }, path))
+                        });
                     let news = announcer.observe(
-                        status
-                            .foreground_game
-                            .as_deref()
-                            .filter(|_| settings.game_notifications),
+                        front.as_ref().map(|(game, id, _)| (*game, *id)),
                         std::time::Instant::now(),
+                        |p| crate::games::process_running(p.pid, p.started),
                     );
                     if let Some(game) = news {
-                        // The process in front is the game just classified; its icon
-                        // decorates the notice. Never queries REPLAYX's own windows.
-                        let icon_exe = crate::games::foreground_process()
-                            .map(|(_, path, _)| PathBuf::from(path));
+                        let icon_exe = front.as_ref().map(|(_, _, path)| PathBuf::from(path));
                         notices.show(crate::overlay::Notice {
                             title: format!("{game} detected"),
                             subtitle: crate::overlay::capture_line(

@@ -12,39 +12,56 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Decides when a detection is news: only when the game in front changes to
-/// a game, and at most once per game per cooldown (alt-tabbing back and forth
-/// does not repeat it).
-pub struct Announcer {
-    last: Option<String>,
-    shown: HashMap<String, Instant>,
-    cooldown: Duration,
+/// A game process: its id plus creation time, so a reused process id is
+/// never mistaken for the same game session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessId {
+    pub pid: u32,
+    pub started: u64,
 }
-impl Default for Announcer {
-    fn default() -> Self {
-        Self {
-            last: None,
-            shown: HashMap::new(),
-            cooldown: Duration::from_secs(600),
-        }
-    }
+/// Decides when a detection is news: once per game *session*, not per focus
+/// change. A session is the life of the game's process. Alt+Tab, minimising,
+/// switching between full screen and borderless, or a second window never
+/// repeat it, however long the game has been running. A second process of
+/// the same game (launcher hand-off, helper) or a restart within `GRACE` of
+/// the previous process ending continues the session; a later relaunch is a
+/// new session and is announced again.
+#[derive(Default)]
+pub struct Announcer {
+    sessions: Vec<(String, ProcessId)>,
+    ended: HashMap<String, Instant>,
 }
 impl Announcer {
-    pub fn observe(&mut self, game: Option<&str>, now: Instant) -> Option<String> {
-        if game == self.last.as_deref() {
+    pub const GRACE: Duration = Duration::from_secs(15);
+    /// `front`: the game in front and its process (None when no game is in
+    /// front). `alive`: whether a tracked process is still running.
+    pub fn observe(
+        &mut self,
+        front: Option<(&str, ProcessId)>,
+        now: Instant,
+        alive: impl Fn(ProcessId) -> bool,
+    ) -> Option<String> {
+        let mut gone = Vec::new();
+        self.sessions.retain(|(game, process)| {
+            let running = alive(*process);
+            if !running {
+                gone.push(game.clone());
+            }
+            running
+        });
+        for game in gone {
+            self.ended.insert(game, now);
+        }
+        self.ended
+            .retain(|_, t| now.duration_since(*t) < Self::GRACE);
+        let (game, process) = front?;
+        if self.sessions.iter().any(|(_, p)| *p == process) {
             return None;
         }
-        self.last = game.map(str::to_owned);
-        let game = game?;
-        if self
-            .shown
-            .get(game)
-            .is_some_and(|t| now.duration_since(*t) < self.cooldown)
-        {
-            return None;
-        }
-        self.shown.insert(game.to_owned(), now);
-        Some(game.to_owned())
+        let continuing =
+            self.sessions.iter().any(|(g, _)| g == game) || self.ended.contains_key(game);
+        self.sessions.push((game.to_owned(), process));
+        (!continuing).then(|| game.to_owned())
     }
 }
 
@@ -478,28 +495,108 @@ impl EncodeWideNul for std::ffi::OsStr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    const fn p(pid: u32, started: u64) -> ProcessId {
+        ProcessId { pid, started }
+    }
+    /// Announcer driven by a fake process table.
+    struct Sim {
+        a: Announcer,
+        t0: Instant,
+        running: RefCell<Vec<ProcessId>>,
+    }
+    impl Sim {
+        fn new() -> Self {
+            Self {
+                a: Announcer::default(),
+                t0: Instant::now(),
+                running: RefCell::new(Vec::new()),
+            }
+        }
+        fn at(&mut self, s: u64, front: Option<(&str, ProcessId)>) -> Option<String> {
+            let running = self.running.borrow().clone();
+            self.a
+                .observe(front, self.t0 + Duration::from_secs(s), |x| {
+                    running.contains(&x)
+                })
+        }
+    }
     #[test]
     fn a_game_is_announced_once_not_on_every_poll() {
-        let mut a = Announcer::default();
-        let t = Instant::now();
-        assert_eq!(a.observe(Some("Roblox"), t).as_deref(), Some("Roblox"));
-        for s in 1..30 {
-            assert_eq!(a.observe(Some("Roblox"), t + Duration::from_secs(s)), None);
+        let mut s = Sim::new();
+        let roblox = p(100, 1);
+        s.running.borrow_mut().push(roblox);
+        assert_eq!(s.at(0, Some(("Roblox", roblox))).as_deref(), Some("Roblox"));
+        for t in 1..30 {
+            assert_eq!(s.at(t, Some(("Roblox", roblox))), None);
         }
-        // Alt-tab to the desktop and back within the cooldown: no repeat.
-        assert_eq!(a.observe(None, t + Duration::from_secs(40)), None);
-        assert_eq!(a.observe(Some("Roblox"), t + Duration::from_secs(45)), None);
-        // A different game is news; Roblox again after the cooldown is too.
+    }
+    #[test]
+    fn alt_tab_minimise_and_fullscreen_switches_never_repeat_it() {
+        let mut s = Sim::new();
+        let game = p(200, 7);
+        s.running.borrow_mut().push(game);
+        assert!(s.at(0, Some(("Fortnite", game))).is_some());
+        // Alt+Tab out and back many times, also long after the old 10 minute
+        // cooldown (the 0.3.1-alpha.8 repeat), and minimised for a while.
+        for k in 1..20u64 {
+            assert_eq!(s.at(k * 120, None), None);
+            assert_eq!(s.at(k * 120 + 5, Some(("Fortnite", game))), None);
+        }
+        // Full screen <-> borderless keeps the process: still nothing new.
+        assert_eq!(s.at(5000, Some(("Fortnite", game))), None);
+    }
+    #[test]
+    fn closing_and_relaunching_is_a_new_session() {
+        let mut s = Sim::new();
+        let first = p(300, 1);
+        s.running.borrow_mut().push(first);
+        assert!(s.at(0, Some(("Valorant", first))).is_some());
+        s.running.borrow_mut().clear(); // game closed
+        assert_eq!(s.at(10, None), None);
+        let second = p(301, 2);
+        s.running.borrow_mut().push(second);
         assert_eq!(
-            a.observe(Some("Fortnite"), t + Duration::from_secs(60))
-                .as_deref(),
-            Some("Fortnite")
+            s.at(60, Some(("Valorant", second))).as_deref(),
+            Some("Valorant")
         );
-        assert_eq!(
-            a.observe(Some("Roblox"), t + Duration::from_secs(700))
-                .as_deref(),
-            Some("Roblox")
-        );
+    }
+    #[test]
+    fn launcher_hand_off_and_quick_restart_continue_the_session() {
+        let mut s = Sim::new();
+        let launcher = p(400, 1);
+        let client = p(401, 2);
+        s.running.borrow_mut().extend([launcher, client]);
+        assert!(s.at(0, Some(("Fortnite", launcher))).is_some());
+        // The real game process takes over while the launcher still runs.
+        assert_eq!(s.at(5, Some(("Fortnite", client))), None);
+        // Crash and immediate restart (new process within the grace period).
+        s.running.borrow_mut().clear();
+        assert_eq!(s.at(30, None), None);
+        let restarted = p(402, 3);
+        s.running.borrow_mut().push(restarted);
+        assert_eq!(s.at(35, Some(("Fortnite", restarted))), None);
+    }
+    #[test]
+    fn a_reused_process_id_is_a_different_process() {
+        let mut s = Sim::new();
+        s.running.borrow_mut().push(p(500, 1));
+        assert!(s.at(0, Some(("Minecraft", p(500, 1)))).is_some());
+        s.running.borrow_mut().clear();
+        assert_eq!(s.at(5, None), None);
+        // Same pid, later creation time, after the grace period: new session.
+        s.running.borrow_mut().push(p(500, 99));
+        assert!(s.at(100, Some(("Minecraft", p(500, 99)))).is_some());
+    }
+    #[test]
+    fn several_games_are_tracked_separately() {
+        let mut s = Sim::new();
+        let (a, b) = (p(600, 1), p(700, 1));
+        s.running.borrow_mut().extend([a, b]);
+        assert!(s.at(0, Some(("Roblox", a))).is_some());
+        assert!(s.at(10, Some(("Minecraft", b))).is_some());
+        assert_eq!(s.at(20, Some(("Roblox", a))), None);
+        assert_eq!(s.at(30, Some(("Minecraft", b))), None);
     }
     #[test]
     fn capture_events_name_what_happened() {

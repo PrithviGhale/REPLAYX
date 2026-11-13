@@ -296,6 +296,47 @@ pub fn window_process(hwnd: windows::Win32::Foundation::HWND) -> Option<(u32, St
     }
 }
 
+/// Creation time of a process (100 ns units since 1601), with its id the
+/// identity of one game session.
+pub fn process_started(pid: u32) -> Option<u64> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let ok = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
+    }
+}
+/// Whether that exact process (id and creation time) is still running.
+pub fn process_running(pid: u32, started: u64) -> bool {
+    use windows::Win32::{
+        Foundation::{CloseHandle, STILL_ACTIVE},
+        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    if process_started(pid) != Some(started) {
+        return false;
+    }
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return false;
+        };
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(process, &mut code).is_ok();
+        let _ = CloseHandle(process);
+        ok && code == STILL_ACTIVE.0 as u32
+    }
+}
+
 /// Classify whatever is in the foreground right now.
 pub fn sample(overrides: &[GameMapping]) -> Foreground {
     match foreground_process() {
@@ -307,6 +348,23 @@ pub fn sample(overrides: &[GameMapping]) -> Foreground {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_identity_follows_the_real_process_lifetime() {
+        let me = std::process::id();
+        let started = process_started(me).expect("own creation time");
+        assert!(process_running(me, started));
+        assert!(!process_running(me, started + 1), "a different creation time is another process");
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 2 127.0.0.1 >nul"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let t = process_started(pid).expect("child creation time");
+        assert!(process_running(pid, t));
+        child.wait().unwrap();
+        assert!(!process_running(pid, t), "an exited process ends its session");
+    }
 
     /// Reproduces the 0.2.1-alpha.1 Record freeze mechanism in-process and
     /// proves the sampler no longer takes part in it. A window is owned by a
