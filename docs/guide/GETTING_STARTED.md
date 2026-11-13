@@ -15,7 +15,7 @@
    Get-FileHash .\REPLAYX_*_x64-setup.exe
    ```
 3. Run the installer. It installs for your Windows account only and doesn't need administrator rights.
-4. Builds aren't code-signed yet, so SmartScreen may say *Windows protected your PC*. Choose **More info → Run anyway** only if the checksum matched.
+4. Builds aren't Windows code-signed yet, so SmartScreen may say *Windows protected your PC*. If Windows blocks the installer, stop and review the warning with security protections enabled.
 
 Uninstalling never deletes your clips in `Videos\REPLAYX`.
 

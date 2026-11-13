@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.6/REPLAYX_0.3.1-alpha.6_x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.6-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.9/REPLAYX_0.3.1-alpha.9_x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.9-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
   <br>
-  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.6">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
+  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.9">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
 </p>
 
 <p align="center">
@@ -24,12 +24,12 @@
 <p align="center">
   <img src="docs/images/showcase-home.jpg" alt="REPLAYX home screen with Instant Replay on, in front of the Clips library" width="100%">
   <br>
-  <sub>The upcoming 0.3.1-alpha.9 interface, shown with sample data.</sub>
+  <sub>The Alpha.9 interface, shown with sample data.</sub>
 </p>
 
 ## Why REPLAYX
 
-Everything in this list is in the current download (0.3.1-alpha.6):
+Everything in this list is in the current download (0.3.1-alpha.9):
 
 - **Never miss the moment.** Instant Replay keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the moment is a clip, usually within a second.
 - **Hardware recording.** NVIDIA, Intel and AMD encoders; H.264, HEVC or AV1; 720p to 4K output.
@@ -38,9 +38,9 @@ Everything in this list is in the current download (0.3.1-alpha.6):
 - **Playtime tracking** per game, by day, week or month.
 - **Private by design.** Everything stays on your PC: no account, no telemetry, no uploads.
 
-## Coming in 0.3.1-alpha.9
+## New in 0.3.1-alpha.9
 
-Not released yet. The download above is still 0.3.1-alpha.6. Times and sizes below were measured on one development laptop (Intel Core i9-13900H with Intel and NVIDIA graphics, Windows 11). They aren't guarantees and vary with the PC, game and settings.
+Alpha.9 is an alpha prerelease. Times and sizes below were measured on one development laptop (Intel Core i9-13900H with Intel and NVIDIA graphics, Windows 11). Results vary with the PC, game and settings. Installed-app and additional hardware tests remain unfinished. See the release notes for details.
 
 - **Faster start.** With Windows Graphics Capture, Intel Quick Sync and system sound only, the first Instant Replay or Record after opening REPLAYX reached recording in about 1.2 s instead of about 3.3 s. Later starts took about 1.1 s.
 - **Smaller clips.** *Balanced* at 1080p60 targets an average of 15 Mb/s on every encoder. Re-encoding one 60-second Fortnite clip with REPLAYX's settings averaged 15.8 Mb/s on Intel Quick Sync and 15.2 Mb/s on NVIDIA NVENC. That's about 223–233 MB per 2 minutes as Windows shows sizes, similar to NVIDIA's own recorder, at a VMAF quality score of 92.7. Very detailed scenes can briefly use up to 23 Mb/s.
@@ -50,19 +50,19 @@ Not released yet. The download above is still 0.3.1-alpha.6. Times and sizes bel
 Details: [alpha.9 release notes](docs/release-notes/v0.3.1-alpha.9.md).
 
 <p align="center">
-  <img src="docs/images/showcase-replay.jpg" alt="Upcoming alpha.9 Instant Replay page: replay length slider with the size of a saved replay, and the disk budget" width="49%">
-  <img src="docs/images/showcase-library.jpg" alt="Upcoming alpha.9 Clips library with thumbnails, filters and sorting, in front of the Games page" width="49%">
+  <img src="docs/images/showcase-replay.jpg" alt="Alpha.9 Instant Replay page: replay length slider with the size of a saved replay, and the disk budget" width="49%">
+  <img src="docs/images/showcase-library.jpg" alt="Alpha.9 Clips library with thumbnails, filters and sorting, in front of the Games page" width="49%">
   <br>
-  <sub>The upcoming 0.3.1-alpha.9 interface, shown with sample data.</sub>
+  <sub>The Alpha.9 interface, shown with sample data.</sub>
 </p>
 
 [See every feature →](docs/guide/FEATURES.md)
 
 ## Install
 
-1. Download **`REPLAYX_0.3.1-alpha.6_x64-setup.exe`** with the button above.
+1. Download **`REPLAYX_0.3.1-alpha.9_x64-setup.exe`** with the button above.
 2. Run it. It installs for your account only, without administrator rights.
-3. Builds aren't code-signed yet. If SmartScreen appears, choose **More info → Run anyway**, ideally after checking the file against the release's `SHA256SUMS.txt`.
+3. Builds aren't Windows code-signed yet. Compare the file with the release's `SHA256SUMS.txt`. If SmartScreen or Windows Security blocks it, stop and review the warning with security protections enabled.
 
 Requires Windows 10 or 11 (64-bit). A GPU with hardware encoding is recommended. [Full setup guide →](docs/guide/GETTING_STARTED.md)
 

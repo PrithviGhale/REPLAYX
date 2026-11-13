@@ -1,7 +1,7 @@
 # Features
 
 > [!NOTE]
-> This guide and its screenshots (sample data) describe **0.3.1-alpha.9, which isn't released yet**. Points marked *alpha.9* aren't in the current download (0.3.1-alpha.6).
+> This guide and its screenshots (sample data) describe **0.3.1-alpha.9**, available as an alpha prerelease. Points marked *alpha.9* were added in this release.
 
 <p align="center">
   <img src="../images/replay.png" alt="Instant Replay page: replay length slider with the size of a saved replay, buffer progress and disk budget" width="49%">

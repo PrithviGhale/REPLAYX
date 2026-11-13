@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.3.1-alpha.9 - quality, errors and idle cost (release candidate)
+## 0.3.1-alpha.9 - faster starts, clearer controls and signed updates
 
-Local release candidate, not published. User-facing notes: [docs/release-notes/v0.3.1-alpha.9.md](docs/release-notes/v0.3.1-alpha.9.md).
+Published November 13, 2026 as an alpha prerelease. Includes the unpublished Alpha.7 and Alpha.8 work. User-facing notes: [docs/release-notes/v0.3.1-alpha.9.md](docs/release-notes/v0.3.1-alpha.9.md).
 
 - **Faster capture start** (`replayx-cli start-bench system capture_api=wgc`, Quick Sync, this laptop): the first Instant Replay or Record after launch reaches *Recording* in about 1.15 s (was about 3.3 s; 2.0 s vs 4.5 s when the capture path is probed the first time). The media runtime check and Windows audio are warmed up in the background after launch (no stream started, never the microphone); the engine checks every 40 ms while starting (was 200 ms), so *On* shows the moment the first frame is encoded; several audio sources open at the same time.
 - **About 230 MB per 2-minute clip** (Balanced, 1080p60, as Windows shows sizes): the target is 15 Mb/s (was 16) and NVENC uses VBR like Quick Sync and AMF instead of capped constant quality. Re-encoding real Fortnite footage: Quick Sync 15.8 Mb/s, NVENC 15.2 Mb/s, both VMAF 92.7; a hard synthetic scene stays at the target (NVENC constant quality reached 345 MB per 2 minutes there).

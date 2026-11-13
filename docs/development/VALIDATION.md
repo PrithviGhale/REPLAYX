@@ -4,7 +4,19 @@ Independent review of `a63ef4474e403f9865fd44aa4cf16a2191debffe` passed the thre
 
 The owner subsequently authorized merging to main and publishing an alpha prerelease. Release notes list the unfinished isolated installation, upgrade, uninstall, hardware and real installer-update tests explicitly. This publication authorization does not establish that those tests passed. No owner-profile installation or capture is part of release preparation.
 
-The `cf92d5a` installer predates later fixes and is superseded for publication. A fresh signed package must be built from the release commit and verified before upload. Final package details are recorded with the release checksums.
+The `cf92d5a` installer predates later fixes and is superseded. Its original files are preserved in `src-tauri/target-alpha9/superseded-cf92d5a/`.
+
+Alpha.9 was published as a prerelease on November 13, 2026 from main commit `fd526f31a704b92508e07efef921298ea5f3a6c5`. Main's GitHub source checks passed. The fresh optimized release and NSIS build completed. The app and installer's FileVersion/ProductVersion are `0.3.1-alpha.9`, all seven checked version declarations agree, and the generated NSIS script uses current-user installation. All ten bundled runtime binary files match the unchanged pinned runtime byte for byte. The updater signature verifies for exactly this version and `latest.json` carries the same signature and release-specific URL. A Windows Defender custom scan found no threats. Authenticode remains unsigned.
+
+| Artifact | Bytes | SHA-256 |
+| --- | --- | --- |
+| `src-tauri/target-alpha9/release/replayx.exe` | 17,731,584 | `185832062a303862f759b34b681780118c72b3e609bbb618b9a1ce57a071ac07` |
+| `src-tauri/target-alpha9/release/bundle/nsis/REPLAYX_0.3.1-alpha.9_x64-setup.exe` | 61,411,826 | `ab3ced4497129a193ede572d195074f2d8c889535e40eff2ace6496806507ba2` |
+| `ffmpeg-corresponding-source-n9.0.2-47-gb204e94e90.tar` | 1,256,304,640 | `41ec89ffcef1f690e58c5de25008021e167c50f4768db94fe5c741ecb9daa090` |
+
+The corresponding-source archive is reused from Alpha.6 because its runtime pin is unchanged. Its checksum matches the previous public release and its source README identifies the matching FFmpeg and build-recipe revisions. All five uploaded assets were checked against GitHub's server-side size/digest before publication. After publication, the public installer, signature, manifest and checksums downloaded successfully without authentication. The downloaded installer retains the expected SHA-256 and its exact-version update signature verifies. The published tag points to the recorded merge commit.
+
+The installed owner executable still matches the original Alpha.4 hash. The settings and update-state files differ from the older 06:19 UTC baseline, with modification times of 16:21 and 15:17 UTC respectively, both before this release preparation began at 18:40 UTC. The library index and absent playtime file match the older baseline. No owner-profile application or installer was launched and user recordings were not accessed during release preparation. This does not provide new installed-app or hardware qualification.
 
 # Validation — 0.3.1-alpha.4 (November 9, 2026)
 
