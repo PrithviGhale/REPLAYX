@@ -75,17 +75,59 @@ engine. Fixing them would change the qualified app bytes, so this is left for
 These are under `release/verified-stable-0.4.0-redesign`, which is ignored by
 git:
 - `release-assets/REPLAYX.exe`;
-- `latest.json`, SHA-256 `ac158ca6…`, which points at
-  `releases/download/v0.4.0/REPLAYX.exe`;
+- `latest.json`, SHA-256
+  `d52cb5911be66c583af39bea568174311aff47304ae12d0e12fad3c97a282527`,
+  which points at `releases/download/v0.4.0/REPLAYX.exe`;
 - `FFmpeg-source.tar`, SHA-256 `41ec89ff…`;
 - `release-body.md`;
 - `REPLAYX-installer-qa-0.4.0.zip`, SHA-256
-  `8ecf7ac1f51afd167917fa3e0cbcca37f0cbe58061f1555ce78c98ee06860473`.
+  `1aef822b67522cb97e40789c089bf845b62dbfdb30abbe593809cca2d21a32ee`. It
+  includes the public Alpha.6 installer, `eb78357d…`.
+
+## Hosted installer qualification (GitHub-hosted Windows Server 2025)
+
+The QA ZIP was uploaded to the private `qa-stable-0.4.0` draft (asset
+`768794745`). Each dispatch used a freshly issued download URL of about five
+minutes, held in a temporary Actions secret. The secret was deleted once
+every job had downloaded the archive.
+
+| Scenario | Run | Result |
+| --- | --- | --- |
+| Clean install (first attempt, app pinned from the unmarked build file) | [44588705407](https://github.com/PrithviGhale/REPLAYX/actions/runs/44588705407) | Failed at installed payload. Fixed by pinning the packed app (above). |
+| Clean install | [44589201400](https://github.com/PrithviGhale/REPLAYX/actions/runs/44589201400) | PASS |
+| Upgrades from Alpha.4, Alpha.9, rc.1, rc.2 | [44589441525](https://github.com/PrithviGhale/REPLAYX/actions/runs/44589441525) | PASS (4/4) |
+| Upgrade from Alpha.6 (current GitHub Latest) | [44589570814](https://github.com/PrithviGhale/REPLAYX/actions/runs/44589570814) | PASS |
+| Alpha.9 updater-mode install and restart | [44589682156](https://github.com/PrithviGhale/REPLAYX/actions/runs/44589682156) | PASS; setup restarted the app |
+
+**Every passing case:**
+- **Signatures:** the archive and version-bound signature checks passed; the
+  installed app, worker and FFmpeg runtime matched their pins.
+- **Startup:** the app started with a window and WebView2 child.
+- **Data retention:** the seeded settings and recording survived uninstall,
+  and the recording's checksum was unchanged.
+- **Uninstall cleanup:** no registration, shortcuts or program files
+  remained.
+- **Retired diagnostic tools:**
+
+  | Upgrade from | Tools installed by the baseline | After upgrade |
+  | --- | ---: | ---: |
+  | Alpha.4 | 2 | 0 |
+  | Alpha.6 | 2 | 0 |
+  | Alpha.9 (both runs) | 4 | 0 |
+
+**Outside this qualification:**
+- **Graceful exit.** The harness stops its own test process after closing the
+  window: "did not exit". This happens for the Alpha baselines too.
+- **Interactive Windows 11 Home setup** and **WebView2 control interaction.**
+- **Physical capture.**
+- **Live production update discovery.** It is only possible after
+  publication.
+
+Evidence is under `test-output/claude-0.4.0/qa-runs`.
 
 ## Still required before publication (owner approval)
 
-1. Push this branch, then run the hosted installer matrix against the QA ZIP:
-   clean, then the four upgrades, then `alpha9-updater`.
+1. Done: the hosted installer matrix (above).
 2. Retarget the existing `v0.4.0` draft at the release commit, replace its
    assets and body, and keep it a draft.
 3. The owner's manual test of the candidate.
