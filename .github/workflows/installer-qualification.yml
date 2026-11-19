@@ -24,7 +24,7 @@ on:
       scope:
         description: Choose an individual scenario or a group
         type: choice
-        options: [clean, upgrades, all, alpha4, alpha9, rc1, rc2, alpha9-updater]
+        options: [clean, upgrades, all, alpha4, alpha6, alpha9, rc1, rc2, alpha9-updater]
         default: clean
 
 permissions:

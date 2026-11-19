@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory)][string]$Archive,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ArchiveSha256,
     [Parameter(Mandatory)][ValidateSet('0.4.0-rc.3','0.4.0')][string]$CandidateVersion,
-    [ValidateSet('clean','alpha4','alpha9','rc1','rc2','alpha9-updater')][string]$Scenario = 'clean',
+    [ValidateSet('clean','alpha4','alpha6','alpha9','rc1','rc2','alpha9-updater')][string]$Scenario = 'clean',
     [Parameter(Mandatory)][string]$Output,
     [switch]$IntegrityOnly,
     [switch]$AllowUnsigned040
@@ -30,6 +30,9 @@ $logs = (New-Item -ItemType Directory -Path (Join-Path $work 'logs')).FullName
 $checks = [ordered]@{}
 $evidence = [ordered]@{ scenario = $Scenario; candidate = $CandidateVersion; archive_sha256 = $ArchiveSha256; integrity_only = [bool]$IntegrityOnly; steps = $checks }
 $pins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'rc3-pins.json') -Raw | ConvertFrom-Json
+# The stable archive also carries the Alpha.6 baseline; the rc.3 archive does not.
+$pinMembers = @($pins.members) + @(if ($CandidateVersion -eq '0.4.0') { $pins.stable_members })
+if ($Scenario -eq 'alpha6' -and $CandidateVersion -ne '0.4.0') { throw 'The Alpha.6 baseline is only in the stable archive.' }
 $phase = 'archive integrity'
 $expectInstallerRestart = $Scenario -eq 'alpha9-updater'
 if ($expectInstallerRestart -and $CandidateVersion -ne '0.4.0') {
@@ -44,7 +47,7 @@ function Assert-Hash([string]$Path, [string]$Expected) {
 function Get-Payload {
     $file = (Resolve-Path -LiteralPath $Archive).Path
     Assert-Hash $file $ArchiveSha256
-    $expected = @($pins.members.name)
+    $expected = @($pinMembers.name)
     if ($CandidateVersion -eq '0.4.0') { $expected += 'latest.json' }
     $destination = (New-Item -ItemType Directory -Path (Join-Path $work 'input')).FullName
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -55,7 +58,7 @@ function Get-Payload {
             $members = @($zip.Entries | Where-Object { $_.FullName -ceq $name })
             if ($members.Count -ne 1) { throw "Expected exactly one flat archive member named $name." }
             $member = $members[0]
-            $pin = $pins.members | Where-Object name -CEQ $name
+            $pin = $pinMembers | Where-Object name -CEQ $name
             $stableCandidate = $name -eq 'Candidate-setup.exe' -and $CandidateVersion -eq '0.4.0'
             $size = if ($name -eq 'latest.json') { 1048576 } elseif ($stableCandidate) { 536870912 } else { $pin.bytes }
             if ($member.Length -le 0 -or $member.Length -gt $size -or (!$stableCandidate -and $name -ne 'latest.json' -and $member.Length -ne $size)) {
@@ -237,12 +240,16 @@ try {
 
     $legacyPrograms = @('replayx-cli.exe','replayx-gameproxy.exe','replayx-dda-profile.exe','replayx-wgc-profile.exe')
     $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -in 'alpha9','alpha9-updater') { $legacyPrograms }
-    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha9 = 'Alpha9-setup.exe'; 'alpha9-updater' = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
+    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha6 = 'Alpha6-setup.exe'; alpha9 = 'Alpha9-setup.exe'; 'alpha9-updater' = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
     if ($Scenario -ne 'clean') {
         $phase = 'baseline install'
         $baseline = $baselines[$Scenario]
         Invoke-CheckedExe (Join-Path $payload $baseline) @('/S') $phase 120
-        Assert-Installed ($pins.members | Where-Object name -EQ $baseline).version
+        Assert-Installed ($pinMembers | Where-Object name -EQ $baseline).version
+        if ($Scenario -eq 'alpha6') {
+            # Not catalogued before this run: record what Alpha.6 installed; the upgrade must remove all of it.
+            $expectedLegacyPrograms = @($legacyPrograms | Where-Object { Test-Path -LiteralPath (Join-Path $installDir $_) -PathType Leaf })
+        }
         foreach ($legacy in $expectedLegacyPrograms) {
             if (!(Test-Path -LiteralPath (Join-Path $installDir $legacy) -PathType Leaf)) {
                 throw "Expected the archived baseline to install $legacy."
@@ -254,11 +261,11 @@ try {
     $phase = 'guest fixture'
     $clips = (New-Item -ItemType Directory -Path (Join-Path $work 'clips')).FullName
     $savedClip = Join-Path $clips 'Generated-sample.mkv'
-    $fixturePin = $pins.members | Where-Object name -EQ 'Generated-sample.mkv'
+    $fixturePin = $pinMembers | Where-Object name -EQ 'Generated-sample.mkv'
     Copy-Item -LiteralPath (Join-Path $payload $fixturePin.name) -Destination $savedClip
     $settings = [ordered]@{
         output_dir = $clips; replay_hotkey = 'Control+Alt+F10'
-        replay_seconds = if ($Scenario -eq 'alpha4') { 180 } else { 75 }
+        replay_seconds = if ($Scenario -in 'alpha4','alpha6') { 180 } else { 75 }
         close_to_tray = $false; check_updates = $false; tour_done = $true; launch_at_startup = $false
         updates = @{ auto_check = $false; auto_download = $false; auto_install = $false }
     }

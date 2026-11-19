@@ -19,7 +19,7 @@ $sha = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash
 
 $pins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-qa/rc3-pins.json') -Raw | ConvertFrom-Json
 $baselines = [ordered]@{}
-foreach ($pin in $pins.members | Where-Object name -NE 'Candidate-setup.exe') {
+foreach ($pin in @($pins.members) + @($pins.stable_members) | Where-Object name -NE 'Candidate-setup.exe') {
     $file = Get-Item -LiteralPath (Join-Path $BaselineDir $pin.name)
     if ($file.Length -ne $pin.bytes -or (Get-FileHash -LiteralPath $file.FullName).Hash -ne $pin.sha256) {
         throw "Unexpected QA baseline bytes for $($pin.name)."

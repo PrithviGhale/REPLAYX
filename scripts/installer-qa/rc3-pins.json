@@ -90,5 +90,13 @@
       "sha256": "B295C6810CF176950103204924DDBB51C1E93F05AA2D764A828A3D003E350796",
       "bytes": 2343936
     }
+  ],
+  "stable_members": [
+    {
+      "name": "Alpha6-setup.exe",
+      "sha256": "EB78357DE97C14A7FD78B44FD7A2F88AC0950399160882985AF153AC592CAC20",
+      "version": "0.3.1-alpha.6",
+      "bytes": 61138175
+    }
   ]
 }
