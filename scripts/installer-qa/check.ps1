@@ -237,6 +237,7 @@ try {
         close_to_tray = $false; check_updates = $false; tour_done = $true; launch_at_startup = $false
         updates = @{ auto_check = $false; auto_download = $false; auto_install = $false }
     }
+    if ($Scenario -eq 'clean') { $settings.settings_version = 6 }
     if ($Scenario -in 'rc1','rc2') {
         $settings.recording_engine = 'native'
         $settings.crosshair = @{ enabled = $false; color = '#22AAEE' }
@@ -277,24 +278,29 @@ try {
     Assert-Fixture
     $phase = 'uninstall and data retention'
     Invoke-CheckedExe $uninstaller @('/S') 'silent uninstall' 120
-    # NSIS can return from the original process before its temporary uninstaller finishes.
+    # NSIS launches a temporary uninstaller. Its file deletion precedes registry
+    # and shortcut removal, so wait for all three outcomes on the runner.
     $uninstallClock = [Diagnostics.Stopwatch]::StartNew()
-    while ((Test-Path -LiteralPath $installDir) -and $uninstallClock.Elapsed.TotalSeconds -lt 30) {
+    do {
+        $registration = @(Get-Registration)
+        $installationPresent = Test-Path -LiteralPath $installDir
+        $shortcuts = @(foreach ($folder in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('DesktopDirectory'))) {
+            if ($folder -and (Test-Path -LiteralPath $folder)) {
+                Get-ChildItem -LiteralPath $folder -Recurse -File -Filter 'REPLAYX.lnk' | Select-Object -ExpandProperty FullName
+            }
+        })
+        if (!$registration.Count -and !$installationPresent -and !$shortcuts.Count) { break }
         Start-Sleep -Milliseconds 500
-    }
-    $evidence.registration_remaining = @(Get-Registration)
-    $evidence.install_files_remaining = @(if (Test-Path -LiteralPath $installDir) {
+    } while ($uninstallClock.Elapsed.TotalSeconds -lt 45)
+    $evidence.uninstall_cleanup_ms = $uninstallClock.ElapsedMilliseconds
+    $evidence.registration_remaining = $registration
+    $evidence.shortcuts_remaining = $shortcuts
+    $evidence.install_files_remaining = @(if ($installationPresent) {
         Get-ChildItem -LiteralPath $installDir -Recurse -Force | Select-Object -ExpandProperty FullName
     })
-    if ($evidence.registration_remaining.Count -or (Test-Path -LiteralPath $installDir)) {
-        throw 'Uninstall left the registered application or installation directory.'
+    if ($registration.Count -or $installationPresent -or $shortcuts.Count) {
+        throw 'Uninstall left application registration, files, or shortcuts after the cleanup timeout.'
     }
-    $evidence.shortcuts_remaining = @(foreach ($folder in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('DesktopDirectory'))) {
-        if ($folder -and (Test-Path -LiteralPath $folder)) {
-            Get-ChildItem -LiteralPath $folder -Recurse -File -Filter 'REPLAYX.lnk' | Select-Object -ExpandProperty FullName
-        }
-    })
-    if ($evidence.shortcuts_remaining.Count -ne 0) { throw 'REPLAYX shortcuts remain after uninstall.' }
     Assert-Fixture
     $checks[$phase] = 'PASS'
 } catch {
