@@ -1,0 +1,74 @@
+name: Installer qualification (manual)
+run-name: Installer QA (${{ inputs.scope }}) for asset ${{ inputs.asset_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id:
+        description: ID of the approved same-repository draft QA ZIP asset
+        required: true
+        type: string
+      archive_sha256:
+        description: SHA-256 of the approved QA ZIP
+        required: true
+        type: string
+      candidate_version:
+        description: Version of the candidate inside the QA ZIP
+        type: choice
+        options: ['0.4.0-rc.3', '0.4.0']
+        default: '0.4.0-rc.3'
+      scope:
+        description: Qualify the clean install, four upgrades, or all five scenarios
+        type: choice
+        options: [clean, upgrades, all]
+        default: clean
+
+permissions:
+  contents: read
+
+jobs:
+  silent-installer:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(inputs.scope == 'all' && '["clean","alpha4","alpha9","rc1","rc2"]' || inputs.scope == 'upgrades' && '["alpha4","alpha9","rc1","rc2"]' || '["clean"]') }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch the approved draft asset
+        env:
+          ASSET_ID: ${{ inputs.asset_id }}
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          ASSET_READ_TOKEN: ${{ secrets.REPLAYX_QA_ASSET_READ_TOKEN || github.token }}
+        run: |
+          if ($env:ASSET_ID -notmatch '^[1-9][0-9]{0,19}$' -or $env:ARCHIVE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'An asset ID and SHA-256 are required.'
+          }
+          $archive = Join-Path $env:RUNNER_TEMP 'replayx-qa-input.zip'
+          $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:ASSET_ID"
+          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 1073741824 -H "Authorization: Bearer $env:ASSET_READ_TOKEN" -H 'Accept: application/octet-stream' -o $archive $url
+          if ($LASTEXITCODE -ne 0) { throw 'Draft asset download failed. Verify the asset ID and draft read access.' }
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $env:ARCHIVE_SHA256) {
+            throw 'Downloaded archive SHA-256 did not match the approved archive.'
+          }
+      - name: Install, validate and uninstall
+        env:
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          ./scripts/installer-qa/check.ps1 -Archive (Join-Path $env:RUNNER_TEMP 'replayx-qa-input.zip') -ArchiveSha256 $env:ARCHIVE_SHA256 -CandidateVersion $env:CANDIDATE_VERSION -Scenario $env:SCENARIO -Output (Join-Path $env:RUNNER_TEMP 'replayx-qa')
+      - name: Retain qualification logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: installer-qa-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/replayx-qa/logs/
+          if-no-files-found: ignore
+          retention-days: 7

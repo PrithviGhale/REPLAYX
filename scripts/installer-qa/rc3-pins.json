@@ -1,0 +1,94 @@
+{
+  "members": [
+    {
+      "name": "Candidate-setup.exe",
+      "sha256": "A8F1003174FD382AD6B51437CF27F85DF44A927AB870575AFBD0D65AB022C49B",
+      "version": "0.4.0-rc.3",
+      "bytes": 60455017
+    },
+    {
+      "name": "Alpha4-setup.exe",
+      "sha256": "F1E218D14EB3EB0E4B9F1D4445DDA3462A1D74506A7324F443A61C5E0B7DA206",
+      "version": "0.3.1-alpha.4",
+      "bytes": 61134250
+    },
+    {
+      "name": "Alpha9-setup.exe",
+      "sha256": "AB3CED4497129A193EDE572D195074F2D8C889535E40EFF2ACE6496806507BA2",
+      "version": "0.3.1-alpha.9",
+      "bytes": 61411826
+    },
+    {
+      "name": "RC1-setup.exe",
+      "sha256": "378F74626641E94F237099E2D52D59162B8EF5D9D8F6F9172B7F01B73B602F4F",
+      "version": "0.4.0-rc.1",
+      "bytes": 60438922
+    },
+    {
+      "name": "RC2-setup.exe",
+      "sha256": "BDA05FA9A77CB96F65EB6B480C56D222CB473C887EB8B62D25E2881AC80D1107",
+      "version": "0.4.0-rc.2",
+      "bytes": 60463582
+    },
+    {
+      "name": "Generated-sample.mkv",
+      "sha256": "828164C3840F2DB2F2E1F4E79D2A595F54EF89AEE4F4CFB653F219084A386BA0",
+      "version": null,
+      "bytes": 258802
+    }
+  ],
+  "rc3_app_sha256": "D3E5CB6236EEB35B258ECED8C0605623C2C2FBAF8FB7B7927E3AE2BC24A21F30",
+  "rc3_worker_sha256": "749BF5E4C2DE831F6A8616E4B405C950E0E765E0C78A47037FF78F513845138C",
+  "runtime": [
+    {
+      "name": "media/avcodec-63.dll",
+      "sha256": "2B115E2A1E75D5214063FD0DF6ADADE6A42DC6566C06906036C091A5A8706373",
+      "bytes": 91910656
+    },
+    {
+      "name": "media/avdevice-63.dll",
+      "sha256": "1E802CC1CBF95C59A4D36D2E485A7C16E7EACCFC36F4410715429A23F1560046",
+      "bytes": 5008384
+    },
+    {
+      "name": "media/avfilter-12.dll",
+      "sha256": "B58DBC672B1088A74282D9928C92469C4F611F81AA87FF2B3E15ECEF38E59A05",
+      "bytes": 31876096
+    },
+    {
+      "name": "media/avformat-63.dll",
+      "sha256": "58CD92108D37F2851DD8A7EF21657FF3AF6E3B13FA0331407F0965813916002D",
+      "bytes": 19888128
+    },
+    {
+      "name": "media/avutil-61.dll",
+      "sha256": "25A724CB0A4A5BE85102545408D4B0E6072CFAC04EFFC89D6A4C947B7D3E38CC",
+      "bytes": 3025408
+    },
+    {
+      "name": "media/ffmpeg.exe",
+      "sha256": "E00855913B0A2C6E0AA8AFE7CD38E5FE3E728EA8F6D8BDE45D1D9213E7725B8D",
+      "bytes": 551424
+    },
+    {
+      "name": "media/ffplay.exe",
+      "sha256": "89D88A69B7C64DF719F14069085EACBF3DAD4C4193852B1CDB2A11ACB8D34F66",
+      "bytes": 19210240
+    },
+    {
+      "name": "media/ffprobe.exe",
+      "sha256": "1233AA90586FB619471A26D61277B9609FC1148311C41598D48F26D6343F570F",
+      "bytes": 269824
+    },
+    {
+      "name": "media/swresample-7.dll",
+      "sha256": "64D9A6A7F6976A8A606FFC4C2618B3862FB14EB1EAD578D8D4EE4A9D3BA2B405",
+      "bytes": 747008
+    },
+    {
+      "name": "media/swscale-10.dll",
+      "sha256": "B295C6810CF176950103204924DDBB51C1E93F05AA2D764A828A3D003E350796",
+      "bytes": 2343936
+    }
+  ]
+}
