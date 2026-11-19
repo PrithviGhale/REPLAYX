@@ -4,10 +4,15 @@ param(
     [Parameter(Mandatory)][ValidateSet('0.4.0-rc.3','0.4.0')][string]$CandidateVersion,
     [ValidateSet('clean','alpha4','alpha9','rc1','rc2','alpha9-updater')][string]$Scenario = 'clean',
     [Parameter(Mandatory)][string]$Output,
-    [switch]$IntegrityOnly
+    [switch]$IntegrityOnly,
+    [switch]$AllowUnsigned040
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../release-authenticode.ps1')
+if ($AllowUnsigned040 -and $CandidateVersion -cne '0.4.0') {
+    throw 'The unsigned exception applies only to the approved 0.4.0 release.'
+}
 if (!$IntegrityOnly) {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or !$env:RUNNER_TEMP) {
         throw 'Installation requires a disposable GitHub-hosted runner. Use -IntegrityOnly locally.'
@@ -28,7 +33,7 @@ $pins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'rc3-pins.json') -Raw 
 $phase = 'archive integrity'
 $expectInstallerRestart = $Scenario -eq 'alpha9-updater'
 if ($expectInstallerRestart -and $CandidateVersion -ne '0.4.0') {
-    throw 'The updater-mode scenario requires the signed stable installer.'
+    throw 'The updater-mode scenario requires the Tauri-signed stable installer.'
 }
 
 function Assert-Hash([string]$Path, [string]$Expected) {
@@ -70,13 +75,6 @@ function Get-Payload {
         }
     } finally { $zip.Dispose() }
     return $destination
-}
-
-function Assert-Signed([string]$Path) {
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
-        throw "Expected a valid timestamped Authenticode signature on $Path. Got $($signature.Status)."
-    }
 }
 
 function Invoke-CheckedExe([string]$Path, [string[]]$Arguments, [string]$Name, [int]$TimeoutSeconds) {
@@ -196,7 +194,7 @@ try {
     $checks[$phase] = 'PASS'
     if ($CandidateVersion -eq '0.4.0') {
         $phase = 'stable signatures'
-        Assert-Signed $candidate
+        Assert-ReleaseAuthenticode -Path $candidate -Version $CandidateVersion -Role Installer -AllowUnsigned040:$AllowUnsigned040
         $feed = Get-Content -LiteralPath (Join-Path $payload 'latest.json') -Raw | ConvertFrom-Json
         $platform = $feed.platforms.'windows-x86_64'
         if ($feed.version -ne $CandidateVersion -or $platform.url -cne "https://github.com/PrithviGhale/REPLAYX/releases/download/v$CandidateVersion/REPLAYX.exe") {
@@ -207,6 +205,7 @@ try {
         & node (Join-Path $PSScriptRoot '../verify-update-signature.mjs') $candidate $sig --version $CandidateVersion
         if ($LASTEXITCODE -ne 0) { throw 'Stable updater signature verification failed.' }
         $checks[$phase] = 'PASS - final installer and version-bound manifest'
+        $evidence.windows_authenticode = if ($AllowUnsigned040) { '0.4.0 unsigned exception; pinned installer bytes' } else { 'valid timestamped Windows signature' }
     }
     if ($IntegrityOnly) { return }
 
@@ -298,8 +297,8 @@ try {
         Assert-Hash $app $pins.rc3_app_sha256
         Assert-Hash $worker $pins.rc3_worker_sha256
     } else {
-        Assert-Signed $app
-        Assert-Signed $worker
+        Assert-ReleaseAuthenticode -Path $app -Version $CandidateVersion -Role App -AllowUnsigned040:$AllowUnsigned040
+        Assert-ReleaseAuthenticode -Path $worker -Version $CandidateVersion -Role Worker -AllowUnsigned040:$AllowUnsigned040
     }
     foreach ($media in $pins.runtime) { Assert-Hash (Join-Path $installDir $media.name) $media.sha256 }
     Invoke-CheckedExe (Join-Path $installDir 'media/ffmpeg.exe') @('-v','error','-xerror','-nostdin','-progress','pipe:1','-i',('"' + $savedClip + '"'),'-map','0','-f','null','NUL') 'installed FFmpeg full decode' 45

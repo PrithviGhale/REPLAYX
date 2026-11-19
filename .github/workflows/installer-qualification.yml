@@ -17,6 +17,10 @@ on:
         type: choice
         options: ['0.4.0-rc.3', '0.4.0']
         default: '0.4.0-rc.3'
+      allow_unsigned_040:
+        description: Allow only the exact approved unsigned 0.4.0 installer and installed files
+        type: boolean
+        default: false
       scope:
         description: Choose an individual scenario or a group
         type: choice
@@ -72,9 +76,11 @@ jobs:
         env:
           ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          ALLOW_UNSIGNED_040: ${{ inputs.allow_unsigned_040 }}
           SCENARIO: ${{ matrix.scenario }}
         run: |
-          ./scripts/installer-qa/check.ps1 -Archive (Join-Path $env:RUNNER_TEMP 'replayx-qa-input.zip') -ArchiveSha256 $env:ARCHIVE_SHA256 -CandidateVersion $env:CANDIDATE_VERSION -Scenario $env:SCENARIO -Output (Join-Path $env:RUNNER_TEMP 'replayx-qa')
+          $allowUnsigned = $env:ALLOW_UNSIGNED_040 -eq 'true'
+          ./scripts/installer-qa/check.ps1 -AllowUnsigned040:$allowUnsigned -Archive (Join-Path $env:RUNNER_TEMP 'replayx-qa-input.zip') -ArchiveSha256 $env:ARCHIVE_SHA256 -CandidateVersion $env:CANDIDATE_VERSION -Scenario $env:SCENARIO -Output (Join-Path $env:RUNNER_TEMP 'replayx-qa')
       - name: Retain qualification logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

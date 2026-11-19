@@ -51,6 +51,16 @@ With an existing certificate, replace `-SigningScriptPath` with `-CertificateThu
 
 After approval, upload the separate QA ZIP to an unpublished QA draft and dispatch [the installer qualification](../engineering/INSTALLER_QUALIFICATION.md) with `candidate_version=0.4.0`. Run clean first, then all four upgrades and the optional `alpha9-updater` scope. That optional case exercises Tauri's passive NSIS updater arguments and checks that setup starts the new application on its own. Production discovery, downloading and restart as one flow still require an approved staging or published-release check. Windows Server also leaves interactive Windows 11 Home setup, WebView2 controls and graceful quit outside the verified scope.
 
+### One-time unsigned 0.4.0 exception
+
+Use the verified 0.4.0 installer pinned in the release policy. Sign its exact bytes with the existing Tauri key and verify the detached signature before staging. Invoke the asset staging script with `-AllowUnsigned040` and dispatch the matrix with `allow_unsigned_040=true`. The exception verifies the unsigned status and exact hashes of setup, the app and worker. It applies only to 0.4.0. Keep the GitHub release in draft until final approval and disclose the Windows signing status and SHA-256 checksums.
+
+### SignPath Foundation for 0.4.1
+
+After approval, connect the project to GitHub as a trusted build system and use the approved project, artifact configuration and release signing policy. Give the protected signing runner its SignPath API token through the approved secrets channel. Use the official GitHub integration to submit artifacts produced by the versioned workflow, using their GitHub artifact IDs.
+
+Sign the NSIS-stamped app and the native worker before packaging. Rebundle the signed files without rewriting the app's NSIS marker, and verify that extraction returns the same signed executables. Submit the final NSIS installer for Authenticode signing and timestamping, then create the Tauri signature over those final bytes. Verify trust and timestamps on all three executables and qualify the exact final installer. Leave the 0.4.0 exception off. The SignPath policy and support for this artifact sequence still require confirmation with the provider. [Trusted GitHub builds](https://docs.signpath.io/trusted-build-systems/github) ? [SignPath Foundation terms](https://signpath.org/terms)
+
 ## FFmpeg and licences
 
 The installer ships an LGPL FFmpeg build pinned in `tools/ffmpeg-lock.json` (immutable release tag and SHA-256). Its licences (and those of the LGPL/MPL libraries built into it) require the corresponding source with every public release. Build the source package and attach it to the release:
@@ -71,7 +81,7 @@ Then pack `SOURCE-README.txt`, the two archives, `deps/` and `licenses/` into on
 Installed copies of REPLAYX update themselves from GitHub Releases (Settings → Updates). Three things make that work, and all three are checked by the release workflow:
 
 1. **The signing key.** Updates are signed with a dedicated Tauri updater key (minisign, Ed25519). The **public** half is in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) and is compiled into the app. The **private** half and its password never enter the repository, a log or a release:
-   - On the maintainer's PC they live in `%USERPROFILE%\.replayx-signing\` (`replayx-updater.key`, `password.txt`), readable only by that Windows account.
+   - On the maintainer's PC they live in `%USERPROFILE%\.replayx-signing` (`replayx-updater.key`, `password.txt`), readable only by that Windows account.
    - **Back both up somewhere safe and offline** (a password manager, an encrypted USB stick). If the key is lost, installed copies can no longer be updated in place: users would have to install a build with a new key by hand. If it leaks, anyone could sign an "update".
    - If you authorize the prerelease CI signer, supply the existing key and password through protected GitHub Actions secrets. The command reads the file without displaying its contents.
      ```powershell

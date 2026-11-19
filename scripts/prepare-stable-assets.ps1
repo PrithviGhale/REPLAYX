@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$BundleDir,
     [Parameter(Mandatory)][string]$BaselineDir,
     [Parameter(Mandatory)][string]$FfmpegSource,
-    [Parameter(Mandatory)][string]$Output
+    [Parameter(Mandatory)][string]$Output,
+    [switch]$AllowUnsigned040
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -31,7 +32,7 @@ $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
 if ($sourceHash -ne '41EC89FFCEF1F690E58C5DE25008021E167C50F4768DB94FE5C741ECB9DAA090') {
     throw 'Use the verified corresponding-source archive for the 0.4.0 runtime pin.'
 }
-& (Join-Path $PSScriptRoot 'updater-manifest.ps1') -Repository 'PrithviGhale/REPLAYX' -Tag 'v0.4.0' -BundleDir $bundle -RequireSignature
+& (Join-Path $PSScriptRoot 'updater-manifest.ps1') -Repository 'PrithviGhale/REPLAYX' -Tag 'v0.4.0' -BundleDir $bundle -RequireSignature -AllowUnsigned040:$AllowUnsigned040
 if ((Get-FileHash -LiteralPath $setup).Hash -ne $sha) { throw 'Installer bytes changed during metadata generation.' }
 
 $out = (New-Item -ItemType Directory -Path $Output).FullName
@@ -47,7 +48,7 @@ if ((Get-FileHash -LiteralPath $publicSetup).Hash -ne $sha -or (Get-FileHash -Li
 @("$($sha.ToLowerInvariant())  REPLAYX.exe", "$($sourceHash.ToLowerInvariant())  FFmpeg-source.tar") |
     Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $archive = Join-Path $out 'REPLAYX-installer-qa-0.4.0.zip'
 $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
 try {
@@ -58,6 +59,6 @@ try {
     }
 } finally { $zip.Dispose() }
 $archiveHash = (Get-FileHash -LiteralPath $archive).Hash
-& (Join-Path $PSScriptRoot 'installer-qa/check.ps1') -Archive $archive -ArchiveSha256 $archiveHash -CandidateVersion '0.4.0' -Scenario 'clean' -Output (Join-Path $out 'offline-integrity') -IntegrityOnly
+& (Join-Path $PSScriptRoot 'installer-qa/check.ps1') -Archive $archive -ArchiveSha256 $archiveHash -CandidateVersion '0.4.0' -Scenario 'clean' -Output (Join-Path $out 'offline-integrity') -IntegrityOnly -AllowUnsigned040:$AllowUnsigned040
 [ordered]@{version = $version; installer_sha256 = $sha; ffmpeg_source_sha256 = $sourceHash; qa_zip_sha256 = $archiveHash} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'verified-digests.json') -Encoding utf8

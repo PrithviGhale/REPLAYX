@@ -9,12 +9,16 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$')][string]$Repository,
     [Parameter(Mandatory)][string]$Tag,
     [string]$BundleDir,
-    [switch]$RequireSignature
+    [switch]$RequireSignature,
+    [switch]$AllowUnsigned040
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $dir = if ($BundleDir) { $BundleDir } else { Join-Path $root 'src-tauri/target/release/bundle/nsis' }
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
+if ($AllowUnsigned040 -and ($version -cne '0.4.0' -or $Repository -cne 'PrithviGhale/REPLAYX')) {
+    throw 'The unsigned exception applies only to PrithviGhale/REPLAYX 0.4.0.'
+}
 if ("v$version" -ne $Tag) { throw "Tag $Tag does not match package version $version" }
 $installers = @(Get-ChildItem -LiteralPath $dir -File -Filter "*_${version}_x64-setup.exe")
 if ($installers.Count -ne 1) { throw "Expected one installer for version $version in $dir. Found $($installers.Count)." }
@@ -25,17 +29,15 @@ if ($installer.VersionInfo.ProductName -ne 'REPLAYX' -or $installer.VersionInfo.
 $sig = "$($installer.FullName).sig"
 $manifestPath = Join-Path $dir 'latest.json'
 if (!(Test-Path -LiteralPath $sig -PathType Leaf)) {
-    if ($RequireSignature -or (Test-Path -LiteralPath $manifestPath)) {
+    if ($RequireSignature -or $AllowUnsigned040 -or (Test-Path -LiteralPath $manifestPath)) {
         throw 'Update signature is missing. Generate release metadata from a fresh signed bundle.'
     }
     Write-Host 'No update signature. latest.json was not written.'
     exit 0
 }
 if ($version -notmatch '-') {
-    $authenticode = Get-AuthenticodeSignature -LiteralPath $installer.FullName
-    if ($authenticode.Status -ne 'Valid' -or !$authenticode.TimeStamperCertificate) {
-        throw 'A stable updater manifest requires a trusted, timestamped Windows signature on the installer.'
-    }
+    . (Join-Path $PSScriptRoot 'release-authenticode.ps1')
+    Assert-ReleaseAuthenticode -Path $installer.FullName -Version $version -Role Installer -AllowUnsigned040:$AllowUnsigned040
 }
 $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
 $signature = (Get-Content -LiteralPath $sig -Raw).Trim()
@@ -52,14 +54,14 @@ $notes = $null
 $releaseNotes = Join-Path $root "docs/release-notes/$Tag.md"
 if (Test-Path $releaseNotes) {
     $take = $false
-    $lines = foreach ($line in Get-Content $releaseNotes) {
+    $lines = foreach ($line in Get-Content -LiteralPath $releaseNotes -Encoding utf8) {
         if ($line -match '^## ') { $take = $line -match "^## (What's New|Improvements and Fixes)\s*$"; if ($take) { $line; '' }; continue }
         if ($take -and $line.Trim()) { $line }
     }
     if ($lines) { $notes = ($lines -join "`n").Trim() }
 }
 if (!$notes) {
-    $section = (Get-Content (Join-Path $root 'CHANGELOG.md') -Raw) -split '(?m)^## ' | Where-Object { $_ -like "$version*" } | Select-Object -First 1
+    $section = (Get-Content -LiteralPath (Join-Path $root 'CHANGELOG.md') -Raw -Encoding utf8) -split '(?m)^## ' | Where-Object { $_ -like "$version*" } | Select-Object -First 1
     $notes = if ($section) { ($section -replace "^$([regex]::Escape($version))[^\n]*\n", '').Trim() } else { "REPLAYX $version" }
 }
 [ordered]@{
