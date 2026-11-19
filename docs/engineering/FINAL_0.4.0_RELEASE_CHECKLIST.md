@@ -43,7 +43,7 @@ The cloud-qualified rc.3 installer SHA-256 is `C57F3023D532FD5664FF022369097354A
 
 ## Real-device AAC result
 
-The approved 18-second capture ran on November 19, 2026. The isolated diagnostic attached recording and Instant Replay to the same FFmpeg capture session without opening the installed app profile. The built-in 2560 ? 1600, 60 Hz Intel display was captured through Desktop Duplication, with hardware H.264 Quick Sync scaling and encoding at 1920 ? 1080, 60 FPS. Windows routed system audio through its default FxSound playback endpoint. No microphone was opened.
+The approved 18-second capture ran on November 19, 2026. The isolated diagnostic attached recording and Instant Replay to the same FFmpeg capture session without opening the installed app profile. The built-in 2560 × 1600, 60 Hz Intel display was captured through Desktop Duplication, with hardware H.264 Quick Sync scaling and encoding at 1920 × 1080, 60 FPS. Windows routed system audio through its default FxSound playback endpoint. No microphone was opened.
 
 Both files independently decoded all 1,080 video frames and both AAC streams. Video intervals were 16?17 ms with keyframes every two seconds. On each track, all AAC packet intervals were 21?22 ms across the entire clip, including segment joins. The largest decoded audio timestamp gap was 0.667 ms, within Matroska rounding. The prior recurring 16/17/33/34 ms audio packet pattern was absent. The engine reported zero audio gaps, discontinuities, and recovery sessions.
 
