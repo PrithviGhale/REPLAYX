@@ -301,6 +301,10 @@ try {
         Assert-ReleaseAuthenticode -Path $worker -Version $CandidateVersion -Role Worker -AllowUnsigned040:$AllowUnsigned040
     }
     foreach ($media in $pins.runtime) { Assert-Hash (Join-Path $installDir $media.name) $media.sha256 }
+    if ($CandidateVersion -eq '0.4.0') {
+        $license = Join-Path $PSScriptRoot '../../tools/ffmpeg-lgpl-v3.txt'
+        Assert-Hash (Join-Path $installDir 'media/LICENSE.txt') (Get-FileHash -LiteralPath $license -Algorithm SHA256).Hash
+    }
     Invoke-CheckedExe (Join-Path $installDir 'media/ffmpeg.exe') @('-v','error','-xerror','-nostdin','-progress','pipe:1','-i',('"' + $savedClip + '"'),'-map','0','-f','null','NUL') 'installed FFmpeg full decode' 45
     $checks[$phase] = 'PASS'
 

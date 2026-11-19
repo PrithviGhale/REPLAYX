@@ -2067,7 +2067,7 @@ mod tests {
     fn helpers_run_in_the_background_and_keep_their_output() {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::{
-            Foundation::HANDLE,
+            Foundation::{E_INVALIDARG, HANDLE},
             System::Threading::{
                 GetPriorityClass, GetProcessInformation, ProcessMemoryPriority,
                 ProcessPowerThrottling, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
@@ -2087,31 +2087,43 @@ mod tests {
             ..Default::default()
         };
         let mut memory = MEMORY_PRIORITY_INFORMATION::default();
-        unsafe {
-            assert_eq!(GetPriorityClass(h), BELOW_NORMAL_PRIORITY_CLASS);
-            GetProcessInformation(
-                h,
-                ProcessPowerThrottling,
-                &mut eco as *mut _ as *mut std::ffi::c_void,
-                std::mem::size_of_val(&eco) as u32,
+        let (priority, eco_result, memory_result) = unsafe {
+            (
+                GetPriorityClass(h),
+                GetProcessInformation(
+                    h,
+                    ProcessPowerThrottling,
+                    &mut eco as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of_val(&eco) as u32,
+                ),
+                GetProcessInformation(
+                    h,
+                    ProcessMemoryPriority,
+                    &mut memory as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of_val(&memory) as u32,
+                ),
             )
-            .unwrap();
-            GetProcessInformation(
-                h,
-                ProcessMemoryPriority,
-                &mut memory as *mut _ as *mut std::ffi::c_void,
-                std::mem::size_of_val(&memory) as u32,
-            )
-            .unwrap();
-        }
+        };
         let _ = child.kill();
         let _ = child.wait();
-        assert_eq!(
-            eco.ControlMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
-            1
-        );
-        assert_eq!(eco.StateMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 1);
+        assert_eq!(priority, BELOW_NORMAL_PRIORITY_CLASS);
+        memory_result.expect("read background process memory priority");
         assert_eq!(memory.MemoryPriority, MEMORY_PRIORITY_LOW);
+        match eco_result {
+            Ok(()) => {
+                assert_eq!(
+                    eco.ControlMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                    1
+                );
+                assert_eq!(eco.StateMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 1);
+            }
+            Err(error) if error.code() == E_INVALIDARG => {
+                // Some Windows builds reject the ProcessPowerThrottling query.
+                // EcoQoS is best effort. Keep the other assertions on those builds.
+                eprintln!("Windows does not expose the process power throttling query");
+            }
+            Err(error) => panic!("read background process power throttling: {error}"),
+        }
         // Output and exit status still come back, as with Command::output.
         let out = helper("cmd")
             .args(["/c", "echo replayx& exit 3"])

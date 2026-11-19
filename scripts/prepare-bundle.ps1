@@ -20,6 +20,8 @@ New-Item -ItemType Directory -Force $mediaDir | Out-Null
 Copy-Item -Path (Join-Path $ffmpeg.Directory.FullName '*') -Destination $mediaDir -Force
 $packageRoot = $ffmpeg.Directory.Parent.FullName
 Get-ChildItem -LiteralPath $packageRoot -File | Copy-Item -Destination $mediaDir -Force
+# Carry the full FFmpeg license in fresh builds and in the NSIS uninstall manifest.
+Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg-lgpl-v3.txt') -Destination (Join-Path $mediaDir 'LICENSE.txt') -Force
 Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $mediaDir -Force
 Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg-lock.json') -Destination $mediaDir -Force
 & $ffmpeg.FullName -version 2>&1 | Out-File (Join-Path $mediaDir 'BUILD-CONFIGURATION.txt') -Encoding utf8
