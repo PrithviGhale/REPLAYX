@@ -2,9 +2,9 @@
   "members": [
     {
       "name": "Candidate-setup.exe",
-      "sha256": "A8F1003174FD382AD6B51437CF27F85DF44A927AB870575AFBD0D65AB022C49B",
+      "sha256": "C57F3023D532FD5664FF022369097354A5A23C3318AC83AF862C30BB38BAAAF1",
       "version": "0.4.0-rc.3",
-      "bytes": 60455017
+      "bytes": 60447754
     },
     {
       "name": "Alpha4-setup.exe",

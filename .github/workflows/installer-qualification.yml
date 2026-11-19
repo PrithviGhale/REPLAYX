@@ -18,9 +18,9 @@ on:
         options: ['0.4.0-rc.3', '0.4.0']
         default: '0.4.0-rc.3'
       scope:
-        description: Qualify the clean install, four upgrades, or all five scenarios
+        description: Choose an individual scenario or a group
         type: choice
-        options: [clean, upgrades, all]
+        options: [clean, upgrades, all, alpha4, alpha9, rc1, rc2]
         default: clean
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON(inputs.scope == 'all' && '["clean","alpha4","alpha9","rc1","rc2"]' || inputs.scope == 'upgrades' && '["alpha4","alpha9","rc1","rc2"]' || '["clean"]') }}
+        scenario: ${{ fromJSON(inputs.scope == 'all' && '["clean","alpha4","alpha9","rc1","rc2"]' || inputs.scope == 'upgrades' && '["alpha4","alpha9","rc1","rc2"]' || format('["{0}"]', inputs.scope)) }}
     defaults:
       run:
         shell: pwsh

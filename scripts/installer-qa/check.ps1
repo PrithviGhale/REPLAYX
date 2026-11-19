@@ -218,12 +218,19 @@ try {
     }
     $checks[$phase] = 'PASS'
 
+    $legacyPrograms = @('replayx-cli.exe','replayx-gameproxy.exe','replayx-dda-profile.exe','replayx-wgc-profile.exe')
+    $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -eq 'alpha9') { $legacyPrograms }
     $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha9 = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
     if ($Scenario -ne 'clean') {
         $phase = 'baseline install'
         $baseline = $baselines[$Scenario]
         Invoke-CheckedExe (Join-Path $payload $baseline) @('/S') $phase 120
         Assert-Installed ($pins.members | Where-Object name -EQ $baseline).version
+        foreach ($legacy in $expectedLegacyPrograms) {
+            if (!(Test-Path -LiteralPath (Join-Path $installDir $legacy) -PathType Leaf)) {
+                throw "Expected the archived baseline to install $legacy."
+            }
+        }
         $checks[$phase] = 'PASS'
     }
 
@@ -233,7 +240,8 @@ try {
     $fixturePin = $pins.members | Where-Object name -EQ 'Generated-sample.mkv'
     Copy-Item -LiteralPath (Join-Path $payload $fixturePin.name) -Destination $savedClip
     $settings = [ordered]@{
-        output_dir = $clips; replay_seconds = 75; replay_hotkey = 'Control+Alt+F10'
+        output_dir = $clips; replay_hotkey = 'Control+Alt+F10'
+        replay_seconds = if ($Scenario -eq 'alpha4') { 180 } else { 75 }
         close_to_tray = $false; check_updates = $false; tour_done = $true; launch_at_startup = $false
         updates = @{ auto_check = $false; auto_download = $false; auto_install = $false }
     }
@@ -253,6 +261,11 @@ try {
     $phase = if ($Scenario -eq 'clean') { 'clean install' } else { 'upgrade install' }
     Invoke-CheckedExe $candidate @('/S') $phase 120
     Assert-Installed $CandidateVersion
+    $evidence.legacy_programs_before_upgrade = @($expectedLegacyPrograms | Where-Object { $_ })
+    $evidence.legacy_programs_after_upgrade = @($legacyPrograms | Where-Object {
+        Test-Path -LiteralPath (Join-Path $installDir $_) -PathType Leaf
+    })
+    if ($evidence.legacy_programs_after_upgrade.Count) { throw 'The installer left obsolete REPLAYX diagnostic executables.' }
     if ($Scenario -eq 'clean') {
         New-Item -ItemType Directory -Path $data -Force | Out-Null
         $settings | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $settingsPath -Encoding utf8
@@ -298,10 +311,11 @@ try {
     $evidence.install_files_remaining = @(if ($installationPresent) {
         Get-ChildItem -LiteralPath $installDir -Recurse -Force | Select-Object -ExpandProperty FullName
     })
+    Assert-Fixture
+    $checks['settings and recording after uninstall'] = 'PASS'
     if ($registration.Count -or $installationPresent -or $shortcuts.Count) {
         throw 'Uninstall left application registration, files, or shortcuts after the cleanup timeout.'
     }
-    Assert-Fixture
     $checks[$phase] = 'PASS'
 } catch {
     $checks[$phase] = "FAIL - $($_.Exception.Message)"
