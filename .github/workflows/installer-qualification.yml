@@ -45,15 +45,26 @@ jobs:
         env:
           ASSET_ID: ${{ inputs.asset_id }}
           ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
-          ASSET_READ_TOKEN: ${{ secrets.REPLAYX_QA_ASSET_READ_TOKEN || github.token }}
+          ASSET_READ_TOKEN: ${{ github.token }}
+          SIGNED_ASSET_URL: ${{ secrets.REPLAYX_QA_SIGNED_ASSET_URL }}
         run: |
           if ($env:ASSET_ID -notmatch '^[1-9][0-9]{0,19}$' -or $env:ARCHIVE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
             throw 'An asset ID and SHA-256 are required.'
           }
           $archive = Join-Path $env:RUNNER_TEMP 'replayx-qa-input.zip'
-          $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:ASSET_ID"
-          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 1073741824 -H "Authorization: Bearer $env:ASSET_READ_TOKEN" -H 'Accept: application/octet-stream' -o $archive $url
-          if ($LASTEXITCODE -ne 0) { throw 'Draft asset download failed. Verify the asset ID and draft read access.' }
+          if ($env:SIGNED_ASSET_URL) {
+            $asset = $null
+            if (![Uri]::TryCreate($env:SIGNED_ASSET_URL, [UriKind]::Absolute, [ref]$asset) -or
+                $asset.Scheme -cne 'https' -or
+                $asset.Host -notin 'release-assets.githubusercontent.com', 'objects.githubusercontent.com') {
+              throw 'Expected a short-lived GitHub release asset URL.'
+            }
+            curl.exe --disable --fail --silent --show-error --proto '=https' --max-time 120 --max-filesize 1073741824 -o $archive $asset.AbsoluteUri
+          } else {
+            $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:ASSET_ID"
+            curl.exe --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 1073741824 -H "Authorization: Bearer $env:ASSET_READ_TOKEN" -H 'Accept: application/octet-stream' -o $archive $url
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft asset download failed. Verify the asset ID and draft read access or refresh the short-lived URL.' }
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $env:ARCHIVE_SHA256) {
             throw 'Downloaded archive SHA-256 did not match the approved archive.'
           }
