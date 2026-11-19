@@ -1,0 +1,9268 @@
+[
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -11.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -12.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 3.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -3.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 12.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "size": 26
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -14.5,
+          "y1": -5.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 5.5,
+          "y1": 14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -14.5,
+          "x1": -5.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 5.5,
+          "x1": 14.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -15.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 4.5,
+          "y1": 15.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": -4.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 15.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -17.5,
+          "y1": -6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 6.5,
+          "y1": 17.5
+        },
+        {
+          "kind": "rect",
+          "x0": -17.5,
+          "x1": -6.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 17.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -19.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": 4.5,
+          "y1": 19.5
+        },
+        {
+          "kind": "rect",
+          "x0": -19.5,
+          "x1": -4.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 19.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 43
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -22.0,
+          "y1": -8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 8.0,
+          "y1": 22.0
+        },
+        {
+          "kind": "rect",
+          "x0": -22.0,
+          "x1": -8.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 8.0,
+          "x1": 22.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -24.0,
+          "y1": -6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 6.0,
+          "y1": 24.0
+        },
+        {
+          "kind": "rect",
+          "x0": -24.0,
+          "x1": -6.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 24.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 50
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -11.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [],
+      "size": 24
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 8
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 4.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 11
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 4.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -5.5,
+          "x1": 5.5,
+          "y0": -5.5,
+          "y1": 5.5
+        }
+      ],
+      "size": 15
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 4.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -6.0,
+          "x1": 6.0,
+          "y0": -6.0,
+          "y1": 6.0
+        }
+      ],
+      "size": 14
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 4.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [],
+      "size": 6
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 4.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -11.0,
+          "y1": -5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 5.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -5.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 5.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -12.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 4.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -4.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 12.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "size": 26
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "cross-dot",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -14.5,
+          "y1": -6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 6.5,
+          "y1": 14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -14.5,
+          "x1": -6.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 14.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -15.5,
+          "y1": -5.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 5.5,
+          "y1": 15.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": -5.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 5.5,
+          "x1": 15.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "cross-dot",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -17.5,
+          "y1": -8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 8.5,
+          "y1": 17.5
+        },
+        {
+          "kind": "rect",
+          "x0": -17.5,
+          "x1": -8.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 8.5,
+          "x1": 17.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -19.5,
+          "y1": -6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": 6.5,
+          "y1": 19.5
+        },
+        {
+          "kind": "rect",
+          "x0": -19.5,
+          "x1": -6.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 19.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 43
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "cross-dot",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -22.0,
+          "y1": -10.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 10.0,
+          "y1": 22.0
+        },
+        {
+          "kind": "rect",
+          "x0": -22.0,
+          "x1": -10.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 10.0,
+          "x1": 22.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -24.0,
+          "y1": -8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 8.0,
+          "y1": 24.0
+        },
+        {
+          "kind": "rect",
+          "x0": -24.0,
+          "x1": -8.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": 8.0,
+          "x1": 24.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 50
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "cross-dot",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -11.0,
+          "y1": -5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 5.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -5.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 5.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [],
+      "size": 24
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "cross-dot",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -6.5,
+          "y1": -2.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 2.5,
+          "y1": 6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -6.5,
+          "x1": -2.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 2.5,
+          "x1": 6.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -7.5,
+          "y1": -1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 1.5,
+          "y1": 7.5
+        },
+        {
+          "kind": "rect",
+          "x0": -7.5,
+          "x1": -1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 1.5,
+          "x1": 7.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 19
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 2.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "precision",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -8.5,
+          "y1": -3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 3.5,
+          "y1": 8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -8.5,
+          "x1": -3.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 3.5,
+          "x1": 8.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -9.5,
+          "y1": -2.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 2.5,
+          "y1": 9.5
+        },
+        {
+          "kind": "rect",
+          "x0": -9.5,
+          "x1": -2.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 2.5,
+          "x1": 9.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 23
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 2.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "precision",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -9.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 3.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": -3.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 9.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -11.0,
+          "y1": -1.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 1.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -1.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 1.0,
+          "x1": 11.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 24
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 2.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "precision",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -12.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 12.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -14.0,
+          "y1": -2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 2.0,
+          "y1": 14.0
+        },
+        {
+          "kind": "rect",
+          "x0": -14.0,
+          "x1": -2.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 2.0,
+          "x1": 14.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 30
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 2.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "precision",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -6.5,
+          "y1": -2.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 2.5,
+          "y1": 6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -6.5,
+          "x1": -2.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 2.5,
+          "x1": 6.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [],
+      "size": 17
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 2.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "precision",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 8.5,
+          "r_outer": 9.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 7.5,
+          "r_outer": 10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 25
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 0.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 9.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "circle",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 10.5,
+          "r_outer": 11.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 9.5,
+          "r_outer": 12.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 29
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 0.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 9.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "circle",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 13.0,
+          "r_outer": 15.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 11.0,
+          "r_outer": 17.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 36
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 0.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 9.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "circle",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 17.0,
+          "r_outer": 19.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 15.0,
+          "r_outer": 21.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 44
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 0.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 9.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "circle",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 8.5,
+          "r_outer": 9.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [],
+      "size": 23
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 0.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 9.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "circle",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 3.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -3.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 12.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "size": 26
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "t",
+      "rotation": 0.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 5.5,
+          "y1": 14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -14.5,
+          "x1": -5.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 5.5,
+          "x1": 14.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 4.5,
+          "y1": 15.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": -4.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 15.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "t",
+      "rotation": 0.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 6.5,
+          "y1": 17.5
+        },
+        {
+          "kind": "rect",
+          "x0": -17.5,
+          "x1": -6.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 17.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": 4.5,
+          "y1": 19.5
+        },
+        {
+          "kind": "rect",
+          "x0": -19.5,
+          "x1": -4.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 19.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 43
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "t",
+      "rotation": 0.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 8.0,
+          "y1": 22.0
+        },
+        {
+          "kind": "rect",
+          "x0": -22.0,
+          "x1": -8.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 8.0,
+          "x1": 22.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 6.0,
+          "y1": 24.0
+        },
+        {
+          "kind": "rect",
+          "x0": -24.0,
+          "x1": -6.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 24.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 50
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "t",
+      "rotation": 0.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 11.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [],
+      "size": 24
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "t",
+      "rotation": 0.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -3.5,
+          "y1": -1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 1.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": -1.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 1.5,
+          "x1": 3.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -4.5,
+          "y1": -0.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 0.5,
+          "y1": 4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -4.5,
+          "x1": -0.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 0.5,
+          "x1": 4.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 13
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 2.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "micro",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -4.5,
+          "y1": -1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 1.5,
+          "y1": 4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -4.5,
+          "x1": -1.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 1.5,
+          "x1": 4.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -5.5,
+          "y1": -0.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 0.5,
+          "y1": 5.5
+        },
+        {
+          "kind": "rect",
+          "x0": -5.5,
+          "x1": -0.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 0.5,
+          "x1": 5.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 15
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 2.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "micro",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -5.0,
+          "y1": -2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 2.0,
+          "y1": 5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -5.0,
+          "x1": -2.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 2.0,
+          "x1": 5.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -7.0,
+          "y1": 0.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 0.0,
+          "y1": 7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -7.0,
+          "x1": 0.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 0.0,
+          "x1": 7.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 16
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 2.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "micro",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -6.0,
+          "y1": -2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 2.0,
+          "y1": 6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -6.0,
+          "x1": -2.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 2.0,
+          "x1": 6.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -8.0,
+          "y1": 0.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 0.0,
+          "y1": 8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -8.0,
+          "x1": 0.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 0.0,
+          "x1": 8.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 18
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 2.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "micro",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -3.5,
+          "y1": -1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 1.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": -1.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 1.5,
+          "x1": 3.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [],
+      "size": 11
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 2.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "micro",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -11.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 3.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -3.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 11.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -12.0,
+          "y1": -2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 2.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -2.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 2.0,
+          "x1": 12.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 26
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 3.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "bold",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 4.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -14.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 4.5,
+          "y1": 14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -14.5,
+          "x1": -4.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 14.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -15.5,
+          "y1": -3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": 3.5,
+          "y1": 15.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": -3.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": 3.5,
+          "x1": 15.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 3.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "bold",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 4.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -17.0,
+          "y1": -5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 5.0,
+          "y1": 17.0
+        },
+        {
+          "kind": "rect",
+          "x0": -17.0,
+          "x1": -5.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 5.0,
+          "x1": 17.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -5.0,
+          "x1": 5.0,
+          "y0": -19.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -5.0,
+          "x1": 5.0,
+          "y0": 3.0,
+          "y1": 19.0
+        },
+        {
+          "kind": "rect",
+          "x0": -19.0,
+          "x1": -3.0,
+          "y0": -5.0,
+          "y1": 5.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 19.0,
+          "y0": -5.0,
+          "y1": 5.0
+        }
+      ],
+      "size": 40
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 3.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "bold",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 4.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -22.0,
+          "y1": -6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 6.0,
+          "y1": 22.0
+        },
+        {
+          "kind": "rect",
+          "x0": -22.0,
+          "x1": -6.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 22.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -6.0,
+          "x1": 6.0,
+          "y0": -24.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -6.0,
+          "x1": 6.0,
+          "y0": 4.0,
+          "y1": 24.0
+        },
+        {
+          "kind": "rect",
+          "x0": -24.0,
+          "x1": -4.0,
+          "y0": -6.0,
+          "y1": 6.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 24.0,
+          "y0": -6.0,
+          "y1": 6.0
+        }
+      ],
+      "size": 50
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 3.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "bold",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 4.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -11.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 3.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -3.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 3.0,
+          "x1": 11.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [],
+      "size": 24
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 3.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "bold",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 4.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -15.0,
+          "y1": -9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 9.0,
+          "y1": 15.0
+        },
+        {
+          "kind": "rect",
+          "x0": -15.0,
+          "x1": -9.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 9.0,
+          "x1": 15.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -16.0,
+          "y1": -8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 8.0,
+          "y1": 16.0
+        },
+        {
+          "kind": "rect",
+          "x0": -16.0,
+          "x1": -8.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 8.0,
+          "x1": 16.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "size": 34
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 9.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "wide",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -19.5,
+          "y1": -11.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 11.5,
+          "y1": 19.5
+        },
+        {
+          "kind": "rect",
+          "x0": -19.5,
+          "x1": -11.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 11.5,
+          "x1": 19.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -20.5,
+          "y1": -10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 10.5,
+          "y1": 20.5
+        },
+        {
+          "kind": "rect",
+          "x0": -20.5,
+          "x1": -10.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 10.5,
+          "x1": 20.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 45
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 9.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "wide",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -23.5,
+          "y1": -14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 14.5,
+          "y1": 23.5
+        },
+        {
+          "kind": "rect",
+          "x0": -23.5,
+          "x1": -14.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 14.5,
+          "x1": 23.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -25.5,
+          "y1": -12.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": 12.5,
+          "y1": 25.5
+        },
+        {
+          "kind": "rect",
+          "x0": -25.5,
+          "x1": -12.5,
+          "y0": -3.5,
+          "y1": 3.5
+        },
+        {
+          "kind": "rect",
+          "x0": 12.5,
+          "x1": 25.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 55
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 9.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "wide",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -30.0,
+          "y1": -18.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 18.0,
+          "y1": 30.0
+        },
+        {
+          "kind": "rect",
+          "x0": -30.0,
+          "x1": -18.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": 18.0,
+          "x1": 30.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -32.0,
+          "y1": -16.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 16.0,
+          "y1": 32.0
+        },
+        {
+          "kind": "rect",
+          "x0": -32.0,
+          "x1": -16.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": 16.0,
+          "x1": 32.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 66
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 9.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "wide",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -15.0,
+          "y1": -9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 9.0,
+          "y1": 15.0
+        },
+        {
+          "kind": "rect",
+          "x0": -15.0,
+          "x1": -9.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 9.0,
+          "x1": 15.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [],
+      "size": 32
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 9.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "wide",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -34.5,
+          "y1": -6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 6.5,
+          "y1": 34.5
+        },
+        {
+          "kind": "rect",
+          "x0": -34.5,
+          "x1": -6.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 34.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -35.5,
+          "y1": -5.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 5.5,
+          "y1": 35.5
+        },
+        {
+          "kind": "rect",
+          "x0": -35.5,
+          "x1": -5.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 5.5,
+          "x1": 35.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 75
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 6.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 28.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "sniper",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -43.5,
+          "y1": -8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 8.5,
+          "y1": 43.5
+        },
+        {
+          "kind": "rect",
+          "x0": -43.5,
+          "x1": -8.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 8.5,
+          "x1": 43.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -44.5,
+          "y1": -7.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 7.5,
+          "y1": 44.5
+        },
+        {
+          "kind": "rect",
+          "x0": -44.5,
+          "x1": -7.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 7.5,
+          "x1": 44.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "size": 93
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 6.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 28.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "sniper",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -51.0,
+          "y1": -9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 9.0,
+          "y1": 51.0
+        },
+        {
+          "kind": "rect",
+          "x0": -51.0,
+          "x1": -9.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 9.0,
+          "x1": 51.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -53.0,
+          "y1": -7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 7.0,
+          "y1": 53.0
+        },
+        {
+          "kind": "rect",
+          "x0": -53.0,
+          "x1": -7.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 7.0,
+          "x1": 53.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 108
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 6.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 28.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "sniper",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -68.0,
+          "y1": -12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 12.0,
+          "y1": 68.0
+        },
+        {
+          "kind": "rect",
+          "x0": -68.0,
+          "x1": -12.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 12.0,
+          "x1": 68.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -70.0,
+          "y1": -10.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 10.0,
+          "y1": 70.0
+        },
+        {
+          "kind": "rect",
+          "x0": -70.0,
+          "x1": -10.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 10.0,
+          "x1": 70.0,
+          "y0": -3.0,
+          "y1": 3.0
+        }
+      ],
+      "size": 142
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 6.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 28.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "sniper",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -34.5,
+          "y1": -6.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 6.5,
+          "y1": 34.5
+        },
+        {
+          "kind": "rect",
+          "x0": -34.5,
+          "x1": -6.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 6.5,
+          "x1": 34.5,
+          "y0": -0.5,
+          "y1": 0.5
+        }
+      ],
+      "outline": [],
+      "size": 73
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 6.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 28.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "sniper",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              7.071000099182129,
+              -8.484999656677246
+            ],
+            [
+              2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              8.484999656677246,
+              -7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              2.121000051498413
+            ],
+            [
+              -8.484999656677246,
+              7.071000099182129
+            ],
+            [
+              -7.071000099182129,
+              8.484999656677246
+            ],
+            [
+              -2.121000051498413,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -8.484999656677246,
+              -7.071000099182129
+            ],
+            [
+              -3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              -2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              -7.071000099182129,
+              -8.484999656677246
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.121000051498413,
+              3.5350000858306885
+            ],
+            [
+              7.071000099182129,
+              8.484999656677246
+            ],
+            [
+              8.484999656677246,
+              7.071000099182129
+            ],
+            [
+              3.5350000858306885,
+              2.121000051498413
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              7.071000099182129,
+              -9.89900016784668
+            ],
+            [
+              0.7070000171661377,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -0.7070000171661377
+            ],
+            [
+              9.89900016784668,
+              -7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              0.7070000171661377
+            ],
+            [
+              -9.89900016784668,
+              7.071000099182129
+            ],
+            [
+              -7.071000099182129,
+              9.89900016784668
+            ],
+            [
+              -0.7070000171661377,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -9.89900016784668,
+              -7.071000099182129
+            ],
+            [
+              -3.5350000858306885,
+              -0.7070000171661377
+            ],
+            [
+              -0.7070000171661377,
+              -3.5350000858306885
+            ],
+            [
+              -7.071000099182129,
+              -9.89900016784668
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.7070000171661377,
+              3.5350000858306885
+            ],
+            [
+              7.071000099182129,
+              9.89900016784668
+            ],
+            [
+              9.89900016784668,
+              7.071000099182129
+            ],
+            [
+              3.5350000858306885,
+              0.7070000171661377
+            ]
+          ]
+        }
+      ],
+      "size": 22
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              9.192000389099121,
+              -11.314000129699707
+            ],
+            [
+              2.828000068664551,
+              -4.949999809265137
+            ],
+            [
+              4.949999809265137,
+              -2.828000068664551
+            ],
+            [
+              11.314000129699707,
+              -9.192000389099121
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -4.949999809265137,
+              2.828000068664551
+            ],
+            [
+              -11.314000129699707,
+              9.192000389099121
+            ],
+            [
+              -9.192000389099121,
+              11.314000129699707
+            ],
+            [
+              -2.828000068664551,
+              4.949999809265137
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -11.314000129699707,
+              -9.192000389099121
+            ],
+            [
+              -4.949999809265137,
+              -2.828000068664551
+            ],
+            [
+              -2.828000068664551,
+              -4.949999809265137
+            ],
+            [
+              -9.192000389099121,
+              -11.314000129699707
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.828000068664551,
+              4.949999809265137
+            ],
+            [
+              9.192000389099121,
+              11.314000129699707
+            ],
+            [
+              11.314000129699707,
+              9.192000389099121
+            ],
+            [
+              4.949999809265137,
+              2.828000068664551
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              9.192000389099121,
+              -12.727999687194824
+            ],
+            [
+              1.4140000343322754,
+              -4.949999809265137
+            ],
+            [
+              4.949999809265137,
+              -1.4140000343322754
+            ],
+            [
+              12.727999687194824,
+              -9.192000389099121
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -4.949999809265137,
+              1.4140000343322754
+            ],
+            [
+              -12.727999687194824,
+              9.192000389099121
+            ],
+            [
+              -9.192000389099121,
+              12.727999687194824
+            ],
+            [
+              -1.4140000343322754,
+              4.949999809265137
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -12.727999687194824,
+              -9.192000389099121
+            ],
+            [
+              -4.949999809265137,
+              -1.4140000343322754
+            ],
+            [
+              -1.4140000343322754,
+              -4.949999809265137
+            ],
+            [
+              -9.192000389099121,
+              -12.727999687194824
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              1.4140000343322754,
+              4.949999809265137
+            ],
+            [
+              9.192000389099121,
+              12.727999687194824
+            ],
+            [
+              12.727999687194824,
+              9.192000389099121
+            ],
+            [
+              4.949999809265137,
+              1.4140000343322754
+            ]
+          ]
+        }
+      ],
+      "size": 29
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              11.312999725341797,
+              -13.4350004196167
+            ],
+            [
+              3.5350000858306885,
+              -5.6570000648498535
+            ],
+            [
+              5.6570000648498535,
+              -3.5350000858306885
+            ],
+            [
+              13.4350004196167,
+              -11.312999725341797
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.6570000648498535,
+              3.5350000858306885
+            ],
+            [
+              -13.4350004196167,
+              11.312999725341797
+            ],
+            [
+              -11.312999725341797,
+              13.4350004196167
+            ],
+            [
+              -3.5350000858306885,
+              5.6570000648498535
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -13.4350004196167,
+              -11.312999725341797
+            ],
+            [
+              -5.6570000648498535,
+              -3.5350000858306885
+            ],
+            [
+              -3.5350000858306885,
+              -5.6570000648498535
+            ],
+            [
+              -11.312999725341797,
+              -13.4350004196167
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              3.5350000858306885,
+              5.6570000648498535
+            ],
+            [
+              11.312999725341797,
+              13.4350004196167
+            ],
+            [
+              13.4350004196167,
+              11.312999725341797
+            ],
+            [
+              5.6570000648498535,
+              3.5350000858306885
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              11.314000129699707,
+              -16.263999938964844
+            ],
+            [
+              0.7070000171661377,
+              -5.6570000648498535
+            ],
+            [
+              5.6570000648498535,
+              -0.7070000171661377
+            ],
+            [
+              16.263999938964844,
+              -11.314000129699707
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.6570000648498535,
+              0.7070000171661377
+            ],
+            [
+              -16.263999938964844,
+              11.314000129699707
+            ],
+            [
+              -11.314000129699707,
+              16.263999938964844
+            ],
+            [
+              -0.7070000171661377,
+              5.6570000648498535
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -16.263999938964844,
+              -11.314000129699707
+            ],
+            [
+              -5.6570000648498535,
+              -0.7070000171661377
+            ],
+            [
+              -0.7070000171661377,
+              -5.6570000648498535
+            ],
+            [
+              -11.314000129699707,
+              -16.263999938964844
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.7070000171661377,
+              5.6570000648498535
+            ],
+            [
+              11.314000129699707,
+              16.263999938964844
+            ],
+            [
+              16.263999938964844,
+              11.314000129699707
+            ],
+            [
+              5.6570000648498535,
+              0.7070000171661377
+            ]
+          ]
+        }
+      ],
+      "size": 37
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              14.142000198364258,
+              -16.969999313354492
+            ],
+            [
+              4.243000030517578,
+              -7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              -4.243000030517578
+            ],
+            [
+              16.969999313354492,
+              -14.142000198364258
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.071000099182129,
+              4.243000030517578
+            ],
+            [
+              -16.969999313354492,
+              14.142000198364258
+            ],
+            [
+              -14.142000198364258,
+              16.969999313354492
+            ],
+            [
+              -4.243000030517578,
+              7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -16.969999313354492,
+              -14.142000198364258
+            ],
+            [
+              -7.071000099182129,
+              -4.243000030517578
+            ],
+            [
+              -4.243000030517578,
+              -7.071000099182129
+            ],
+            [
+              -14.142000198364258,
+              -16.969999313354492
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              4.243000030517578,
+              7.071000099182129
+            ],
+            [
+              14.142000198364258,
+              16.969999313354492
+            ],
+            [
+              16.969999313354492,
+              14.142000198364258
+            ],
+            [
+              7.071000099182129,
+              4.243000030517578
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              14.142999649047852,
+              -19.798999786376953
+            ],
+            [
+              1.4149999618530273,
+              -7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              -1.4149999618530273
+            ],
+            [
+              19.798999786376953,
+              -14.142999649047852
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.071000099182129,
+              1.4149999618530273
+            ],
+            [
+              -19.798999786376953,
+              14.142999649047852
+            ],
+            [
+              -14.142999649047852,
+              19.798999786376953
+            ],
+            [
+              -1.4149999618530273,
+              7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -19.798999786376953,
+              -14.142999649047852
+            ],
+            [
+              -7.071000099182129,
+              -1.4149999618530273
+            ],
+            [
+              -1.4149999618530273,
+              -7.071000099182129
+            ],
+            [
+              -14.142999649047852,
+              -19.798999786376953
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              1.4149999618530273,
+              7.071000099182129
+            ],
+            [
+              14.142999649047852,
+              19.798999786376953
+            ],
+            [
+              19.798999786376953,
+              14.142999649047852
+            ],
+            [
+              7.071000099182129,
+              1.4149999618530273
+            ]
+          ]
+        }
+      ],
+      "size": 42
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              7.071000099182129,
+              -8.484999656677246
+            ],
+            [
+              2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              8.484999656677246,
+              -7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              2.121000051498413
+            ],
+            [
+              -8.484999656677246,
+              7.071000099182129
+            ],
+            [
+              -7.071000099182129,
+              8.484999656677246
+            ],
+            [
+              -2.121000051498413,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -8.484999656677246,
+              -7.071000099182129
+            ],
+            [
+              -3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              -2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              -7.071000099182129,
+              -8.484999656677246
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.121000051498413,
+              3.5350000858306885
+            ],
+            [
+              7.071000099182129,
+              8.484999656677246
+            ],
+            [
+              8.484999656677246,
+              7.071000099182129
+            ],
+            [
+              3.5350000858306885,
+              2.121000051498413
+            ]
+          ]
+        }
+      ],
+      "outline": [],
+      "size": 20
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              6.363999843597412,
+              -7.7779998779296875
+            ],
+            [
+              2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              7.7779998779296875,
+              -6.363999843597412
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              2.121000051498413
+            ],
+            [
+              -7.7779998779296875,
+              6.363999843597412
+            ],
+            [
+              -6.363999843597412,
+              7.7779998779296875
+            ],
+            [
+              -2.121000051498413,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.7779998779296875,
+              -6.363999843597412
+            ],
+            [
+              -3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              -2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              -6.363999843597412,
+              -7.7779998779296875
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.121000051498413,
+              3.5350000858306885
+            ],
+            [
+              6.363999843597412,
+              7.7779998779296875
+            ],
+            [
+              7.7779998779296875,
+              6.363999843597412
+            ],
+            [
+              3.5350000858306885,
+              2.121000051498413
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              0.0
+            ],
+            [
+              0.0,
+              1.4140000343322754
+            ],
+            [
+              1.4140000343322754,
+              0.0
+            ],
+            [
+              0.0,
+              -1.4140000343322754
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              6.363999843597412,
+              -9.192000389099121
+            ],
+            [
+              0.7070000171661377,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -0.7070000171661377
+            ],
+            [
+              9.192000389099121,
+              -6.363999843597412
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              0.7070000171661377
+            ],
+            [
+              -9.192000389099121,
+              6.363999843597412
+            ],
+            [
+              -6.363999843597412,
+              9.192000389099121
+            ],
+            [
+              -0.7070000171661377,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -9.192000389099121,
+              -6.363999843597412
+            ],
+            [
+              -3.5350000858306885,
+              -0.7070000171661377
+            ],
+            [
+              -0.7070000171661377,
+              -3.5350000858306885
+            ],
+            [
+              -6.363999843597412,
+              -9.192000389099121
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.7070000171661377,
+              3.5350000858306885
+            ],
+            [
+              6.363999843597412,
+              9.192000389099121
+            ],
+            [
+              9.192000389099121,
+              6.363999843597412
+            ],
+            [
+              3.5350000858306885,
+              0.7070000171661377
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.828000068664551,
+              0.0
+            ],
+            [
+              0.0,
+              2.828000068664551
+            ],
+            [
+              2.828000068664551,
+              0.0
+            ],
+            [
+              0.0,
+              -2.828000068664551
+            ]
+          ]
+        }
+      ],
+      "size": 22
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x-dot",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              8.484999656677246,
+              -10.607000350952148
+            ],
+            [
+              2.828000068664551,
+              -4.949999809265137
+            ],
+            [
+              4.949999809265137,
+              -2.828000068664551
+            ],
+            [
+              10.607000350952148,
+              -8.484999656677246
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -4.949999809265137,
+              2.828000068664551
+            ],
+            [
+              -10.607000350952148,
+              8.484999656677246
+            ],
+            [
+              -8.484999656677246,
+              10.607000350952148
+            ],
+            [
+              -2.828000068664551,
+              4.949999809265137
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -10.607000350952148,
+              -8.484999656677246
+            ],
+            [
+              -4.949999809265137,
+              -2.828000068664551
+            ],
+            [
+              -2.828000068664551,
+              -4.949999809265137
+            ],
+            [
+              -8.484999656677246,
+              -10.607000350952148
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.828000068664551,
+              4.949999809265137
+            ],
+            [
+              8.484999656677246,
+              10.607000350952148
+            ],
+            [
+              10.607000350952148,
+              8.484999656677246
+            ],
+            [
+              4.949999809265137,
+              2.828000068664551
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.121999979019165,
+              0.0
+            ],
+            [
+              0.0,
+              2.121999979019165
+            ],
+            [
+              2.121999979019165,
+              0.0
+            ],
+            [
+              0.0,
+              -2.121999979019165
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              8.484999656677246,
+              -12.020999908447266
+            ],
+            [
+              1.4140000343322754,
+              -4.949999809265137
+            ],
+            [
+              4.949999809265137,
+              -1.4140000343322754
+            ],
+            [
+              12.020999908447266,
+              -8.484999656677246
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -4.949999809265137,
+              1.4140000343322754
+            ],
+            [
+              -12.020999908447266,
+              8.484999656677246
+            ],
+            [
+              -8.484999656677246,
+              12.020999908447266
+            ],
+            [
+              -1.4140000343322754,
+              4.949999809265137
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -12.020999908447266,
+              -8.484999656677246
+            ],
+            [
+              -4.949999809265137,
+              -1.4140000343322754
+            ],
+            [
+              -1.4140000343322754,
+              -4.949999809265137
+            ],
+            [
+              -8.484999656677246,
+              -12.020999908447266
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              1.4140000343322754,
+              4.949999809265137
+            ],
+            [
+              8.484999656677246,
+              12.020999908447266
+            ],
+            [
+              12.020999908447266,
+              8.484999656677246
+            ],
+            [
+              4.949999809265137,
+              1.4140000343322754
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5360000133514404,
+              0.0
+            ],
+            [
+              0.0,
+              3.5360000133514404
+            ],
+            [
+              3.5360000133514404,
+              0.0
+            ],
+            [
+              0.0,
+              -3.5360000133514404
+            ]
+          ]
+        }
+      ],
+      "size": 29
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x-dot",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              9.89900016784668,
+              -12.020999908447266
+            ],
+            [
+              3.5350000858306885,
+              -5.6570000648498535
+            ],
+            [
+              5.6570000648498535,
+              -3.5350000858306885
+            ],
+            [
+              12.020999908447266,
+              -9.89900016784668
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.6570000648498535,
+              3.5350000858306885
+            ],
+            [
+              -12.020999908447266,
+              9.89900016784668
+            ],
+            [
+              -9.89900016784668,
+              12.020999908447266
+            ],
+            [
+              -3.5350000858306885,
+              5.6570000648498535
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -12.020999908447266,
+              -9.89900016784668
+            ],
+            [
+              -5.6570000648498535,
+              -3.5350000858306885
+            ],
+            [
+              -3.5350000858306885,
+              -5.6570000648498535
+            ],
+            [
+              -9.89900016784668,
+              -12.020999908447266
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              3.5350000858306885,
+              5.6570000648498535
+            ],
+            [
+              9.89900016784668,
+              12.020999908447266
+            ],
+            [
+              12.020999908447266,
+              9.89900016784668
+            ],
+            [
+              5.6570000648498535,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.121999979019165,
+              0.0
+            ],
+            [
+              0.0,
+              2.121999979019165
+            ],
+            [
+              2.121999979019165,
+              0.0
+            ],
+            [
+              0.0,
+              -2.121999979019165
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              9.89900016784668,
+              -14.848999977111816
+            ],
+            [
+              0.7070000171661377,
+              -5.6570000648498535
+            ],
+            [
+              5.6570000648498535,
+              -0.7070000171661377
+            ],
+            [
+              14.848999977111816,
+              -9.89900016784668
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.6570000648498535,
+              0.7070000171661377
+            ],
+            [
+              -14.848999977111816,
+              9.89900016784668
+            ],
+            [
+              -9.89900016784668,
+              14.848999977111816
+            ],
+            [
+              -0.7070000171661377,
+              5.6570000648498535
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -14.848999977111816,
+              -9.89900016784668
+            ],
+            [
+              -5.6570000648498535,
+              -0.7070000171661377
+            ],
+            [
+              -0.7070000171661377,
+              -5.6570000648498535
+            ],
+            [
+              -9.89900016784668,
+              -14.848999977111816
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.7070000171661377,
+              5.6570000648498535
+            ],
+            [
+              9.89900016784668,
+              14.848999977111816
+            ],
+            [
+              14.848999977111816,
+              9.89900016784668
+            ],
+            [
+              5.6570000648498535,
+              0.7070000171661377
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -4.949999809265137,
+              0.0
+            ],
+            [
+              0.0,
+              4.949999809265137
+            ],
+            [
+              4.949999809265137,
+              0.0
+            ],
+            [
+              0.0,
+              -4.949999809265137
+            ]
+          ]
+        }
+      ],
+      "size": 33
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x-dot",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              12.727999687194824,
+              -15.555999755859375
+            ],
+            [
+              4.243000030517578,
+              -7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              -4.243000030517578
+            ],
+            [
+              15.555999755859375,
+              -12.727999687194824
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.071000099182129,
+              4.243000030517578
+            ],
+            [
+              -15.555999755859375,
+              12.727999687194824
+            ],
+            [
+              -12.727999687194824,
+              15.555999755859375
+            ],
+            [
+              -4.243000030517578,
+              7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -15.555999755859375,
+              -12.727999687194824
+            ],
+            [
+              -7.071000099182129,
+              -4.243000030517578
+            ],
+            [
+              -4.243000030517578,
+              -7.071000099182129
+            ],
+            [
+              -12.727999687194824,
+              -15.555999755859375
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              4.243000030517578,
+              7.071000099182129
+            ],
+            [
+              12.727999687194824,
+              15.555999755859375
+            ],
+            [
+              15.555999755859375,
+              12.727999687194824
+            ],
+            [
+              7.071000099182129,
+              4.243000030517578
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.828000068664551,
+              0.0
+            ],
+            [
+              0.0,
+              2.828000068664551
+            ],
+            [
+              2.828000068664551,
+              0.0
+            ],
+            [
+              0.0,
+              -2.828000068664551
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              12.727999687194824,
+              -18.384000778198242
+            ],
+            [
+              1.4149999618530273,
+              -7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              -1.4149999618530273
+            ],
+            [
+              18.384000778198242,
+              -12.727999687194824
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.071000099182129,
+              1.4149999618530273
+            ],
+            [
+              -18.384000778198242,
+              12.727999687194824
+            ],
+            [
+              -12.727999687194824,
+              18.384000778198242
+            ],
+            [
+              -1.4149999618530273,
+              7.071000099182129
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -18.384000778198242,
+              -12.727999687194824
+            ],
+            [
+              -7.071000099182129,
+              -1.4149999618530273
+            ],
+            [
+              -1.4149999618530273,
+              -7.071000099182129
+            ],
+            [
+              -12.727999687194824,
+              -18.384000778198242
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              1.4149999618530273,
+              7.071000099182129
+            ],
+            [
+              12.727999687194824,
+              18.384000778198242
+            ],
+            [
+              18.384000778198242,
+              12.727999687194824
+            ],
+            [
+              7.071000099182129,
+              1.4149999618530273
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.656000137329102,
+              0.0
+            ],
+            [
+              0.0,
+              5.656000137329102
+            ],
+            [
+              5.656000137329102,
+              0.0
+            ],
+            [
+              0.0,
+              -5.656000137329102
+            ]
+          ]
+        }
+      ],
+      "size": 40
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x-dot",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              6.363999843597412,
+              -7.7779998779296875
+            ],
+            [
+              2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              7.7779998779296875,
+              -6.363999843597412
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5350000858306885,
+              2.121000051498413
+            ],
+            [
+              -7.7779998779296875,
+              6.363999843597412
+            ],
+            [
+              -6.363999843597412,
+              7.7779998779296875
+            ],
+            [
+              -2.121000051498413,
+              3.5350000858306885
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -7.7779998779296875,
+              -6.363999843597412
+            ],
+            [
+              -3.5350000858306885,
+              -2.121000051498413
+            ],
+            [
+              -2.121000051498413,
+              -3.5350000858306885
+            ],
+            [
+              -6.363999843597412,
+              -7.7779998779296875
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              2.121000051498413,
+              3.5350000858306885
+            ],
+            [
+              6.363999843597412,
+              7.7779998779296875
+            ],
+            [
+              7.7779998779296875,
+              6.363999843597412
+            ],
+            [
+              3.5350000858306885,
+              2.121000051498413
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              0.0
+            ],
+            [
+              0.0,
+              1.4140000343322754
+            ],
+            [
+              1.4140000343322754,
+              0.0
+            ],
+            [
+              0.0,
+              -1.4140000343322754
+            ]
+          ]
+        }
+      ],
+      "outline": [],
+      "size": 18
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "x-dot",
+      "rotation": 45.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -10.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 4.5,
+          "y1": 10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -10.5,
+          "x1": -4.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 10.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "ring",
+          "r_inner": 13.5,
+          "r_outer": 14.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -11.5,
+          "y1": -3.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 3.5,
+          "y1": 11.5
+        },
+        {
+          "kind": "rect",
+          "x0": -11.5,
+          "x1": -3.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 3.5,
+          "x1": 11.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "ring",
+          "r_inner": 12.5,
+          "r_outer": 15.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 14.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "scope",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -13.5,
+          "y1": -5.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 5.5,
+          "y1": 13.5
+        },
+        {
+          "kind": "rect",
+          "x0": -13.5,
+          "x1": -5.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 5.5,
+          "x1": 13.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "ring",
+          "r_inner": 17.5,
+          "r_outer": 18.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -14.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 4.5,
+          "y1": 14.5
+        },
+        {
+          "kind": "rect",
+          "x0": -14.5,
+          "x1": -4.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 14.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "ring",
+          "r_inner": 16.5,
+          "r_outer": 19.5
+        }
+      ],
+      "size": 43
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 14.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "scope",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -15.0,
+          "y1": -6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 6.0,
+          "y1": 15.0
+        },
+        {
+          "kind": "rect",
+          "x0": -15.0,
+          "x1": -6.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 15.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 20.0,
+          "r_outer": 22.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -17.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 4.0,
+          "y1": 17.0
+        },
+        {
+          "kind": "rect",
+          "x0": -17.0,
+          "x1": -4.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 4.0,
+          "x1": 17.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 18.0,
+          "r_outer": 24.0
+        }
+      ],
+      "size": 50
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 14.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "scope",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -20.0,
+          "y1": -8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 8.0,
+          "y1": 20.0
+        },
+        {
+          "kind": "rect",
+          "x0": -20.0,
+          "x1": -8.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": 8.0,
+          "x1": 20.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 27.0,
+          "r_outer": 29.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": -22.0,
+          "y1": -6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -3.0,
+          "x1": 3.0,
+          "y0": 6.0,
+          "y1": 22.0
+        },
+        {
+          "kind": "rect",
+          "x0": -22.0,
+          "x1": -6.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 22.0,
+          "y0": -3.0,
+          "y1": 3.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 25.0,
+          "r_outer": 31.0
+        }
+      ],
+      "size": 64
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 14.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "scope",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": -10.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -0.5,
+          "x1": 0.5,
+          "y0": 4.5,
+          "y1": 10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -10.5,
+          "x1": -4.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 10.5,
+          "y0": -0.5,
+          "y1": 0.5
+        },
+        {
+          "kind": "ring",
+          "r_inner": 13.5,
+          "r_outer": 14.5
+        }
+      ],
+      "outline": [],
+      "size": 33
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 14.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 6.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "scope",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 1.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "disc",
+          "r": 3.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "disc",
+          "r": 4.0
+        }
+      ],
+      "size": 10
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 6.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "round-dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "disc",
+          "r": 4.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "disc",
+          "r": 5.5
+        }
+      ],
+      "size": 15
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 6.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "round-dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "disc",
+          "r": 4.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "disc",
+          "r": 6.5
+        }
+      ],
+      "size": 17
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 6.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "round-dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "disc",
+          "r": 6.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "disc",
+          "r": 8.0
+        }
+      ],
+      "size": 18
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 6.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "round-dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "disc",
+          "r": 3.0
+        }
+      ],
+      "outline": [],
+      "size": 8
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 6.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "round-dot",
+      "rotation": 0.0,
+      "shape": "dot",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": -9.0,
+          "y1": -7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": 7.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": -7.0,
+          "y0": -7.0,
+          "y1": 7.0
+        },
+        {
+          "kind": "rect",
+          "x0": 7.0,
+          "x1": 9.0,
+          "y0": -7.0,
+          "y1": 7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -10.0,
+          "x1": 10.0,
+          "y0": -10.0,
+          "y1": -6.0
+        },
+        {
+          "kind": "rect",
+          "x0": -10.0,
+          "x1": 10.0,
+          "y0": 6.0,
+          "y1": 10.0
+        },
+        {
+          "kind": "rect",
+          "x0": -10.0,
+          "x1": -6.0,
+          "y0": -8.0,
+          "y1": 8.0
+        },
+        {
+          "kind": "rect",
+          "x0": 6.0,
+          "x1": 10.0,
+          "y0": -8.0,
+          "y1": 8.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "size": 22
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "box",
+      "rotation": 0.0,
+      "shape": "square",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -11.5,
+          "x1": 11.5,
+          "y0": -11.5,
+          "y1": -8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -11.5,
+          "x1": 11.5,
+          "y0": 8.5,
+          "y1": 11.5
+        },
+        {
+          "kind": "rect",
+          "x0": -11.5,
+          "x1": -8.5,
+          "y0": -8.5,
+          "y1": 8.5
+        },
+        {
+          "kind": "rect",
+          "x0": 8.5,
+          "x1": 11.5,
+          "y0": -8.5,
+          "y1": 8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -12.5,
+          "x1": 12.5,
+          "y0": -12.5,
+          "y1": -7.5
+        },
+        {
+          "kind": "rect",
+          "x0": -12.5,
+          "x1": 12.5,
+          "y0": 7.5,
+          "y1": 12.5
+        },
+        {
+          "kind": "rect",
+          "x0": -12.5,
+          "x1": -7.5,
+          "y0": -9.5,
+          "y1": 9.5
+        },
+        {
+          "kind": "rect",
+          "x0": 7.5,
+          "x1": 12.5,
+          "y0": -9.5,
+          "y1": 9.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "size": 29
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "box",
+      "rotation": 0.0,
+      "shape": "square",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -13.5,
+          "x1": 13.5,
+          "y0": -13.5,
+          "y1": -10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -13.5,
+          "x1": 13.5,
+          "y0": 10.5,
+          "y1": 13.5
+        },
+        {
+          "kind": "rect",
+          "x0": -13.5,
+          "x1": -10.5,
+          "y0": -10.5,
+          "y1": 10.5
+        },
+        {
+          "kind": "rect",
+          "x0": 10.5,
+          "x1": 13.5,
+          "y0": -10.5,
+          "y1": 10.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": 15.5,
+          "y0": -15.5,
+          "y1": -8.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": 15.5,
+          "y0": 8.5,
+          "y1": 15.5
+        },
+        {
+          "kind": "rect",
+          "x0": -15.5,
+          "x1": -8.5,
+          "y0": -12.5,
+          "y1": 12.5
+        },
+        {
+          "kind": "rect",
+          "x0": 8.5,
+          "x1": 15.5,
+          "y0": -12.5,
+          "y1": 12.5
+        },
+        {
+          "kind": "rect",
+          "x0": -3.5,
+          "x1": 3.5,
+          "y0": -3.5,
+          "y1": 3.5
+        }
+      ],
+      "size": 35
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "box",
+      "rotation": 0.0,
+      "shape": "square",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -18.0,
+          "x1": 18.0,
+          "y0": -18.0,
+          "y1": -14.0
+        },
+        {
+          "kind": "rect",
+          "x0": -18.0,
+          "x1": 18.0,
+          "y0": 14.0,
+          "y1": 18.0
+        },
+        {
+          "kind": "rect",
+          "x0": -18.0,
+          "x1": -14.0,
+          "y0": -14.0,
+          "y1": 14.0
+        },
+        {
+          "kind": "rect",
+          "x0": 14.0,
+          "x1": 18.0,
+          "y0": -14.0,
+          "y1": 14.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -2.0,
+          "y1": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -20.0,
+          "x1": 20.0,
+          "y0": -20.0,
+          "y1": -12.0
+        },
+        {
+          "kind": "rect",
+          "x0": -20.0,
+          "x1": 20.0,
+          "y0": 12.0,
+          "y1": 20.0
+        },
+        {
+          "kind": "rect",
+          "x0": -20.0,
+          "x1": -12.0,
+          "y0": -16.0,
+          "y1": 16.0
+        },
+        {
+          "kind": "rect",
+          "x0": 12.0,
+          "x1": 20.0,
+          "y0": -16.0,
+          "y1": 16.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -4.0,
+          "y1": 4.0
+        }
+      ],
+      "size": 42
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "box",
+      "rotation": 0.0,
+      "shape": "square",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": -9.0,
+          "y1": -7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": 7.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": -7.0,
+          "y0": -7.0,
+          "y1": 7.0
+        },
+        {
+          "kind": "rect",
+          "x0": 7.0,
+          "x1": 9.0,
+          "y0": -7.0,
+          "y1": 7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -1.0,
+          "y1": 1.0
+        }
+      ],
+      "outline": [],
+      "size": 20
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 4.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "box",
+      "rotation": 0.0,
+      "shape": "square",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              0.0
+            ],
+            [
+              -7.071000099182129,
+              5.6570000648498535
+            ],
+            [
+              -5.6570000648498535,
+              7.071000099182129
+            ],
+            [
+              0.0,
+              1.4140000343322754
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.0,
+              1.4140000343322754
+            ],
+            [
+              5.6570000648498535,
+              7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              5.6570000648498535
+            ],
+            [
+              1.4140000343322754,
+              0.0
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              -1.4140000343322754
+            ],
+            [
+              -8.484999656677246,
+              5.6570000648498535
+            ],
+            [
+              -5.6570000648498535,
+              8.484999656677246
+            ],
+            [
+              1.4140000343322754,
+              1.4140000343322754
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              1.4140000343322754
+            ],
+            [
+              5.6570000648498535,
+              8.484999656677246
+            ],
+            [
+              8.484999656677246,
+              5.6570000648498535
+            ],
+            [
+              1.4140000343322754,
+              -1.4140000343322754
+            ]
+          ]
+        }
+      ],
+      "size": 20
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "chevron",
+      "rotation": 0.0,
+      "shape": "chevron",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.7680000066757202,
+              -0.3540000021457672
+            ],
+            [
+              -8.83899974822998,
+              6.7170000076293945
+            ],
+            [
+              -6.7170000076293945,
+              8.83899974822998
+            ],
+            [
+              0.3540000021457672,
+              1.7680000066757202
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -0.3540000021457672,
+              1.7680000066757202
+            ],
+            [
+              6.7170000076293945,
+              8.83899974822998
+            ],
+            [
+              8.83899974822998,
+              6.7170000076293945
+            ],
+            [
+              1.7680000066757202,
+              -0.3540000021457672
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.7680000066757202,
+              -1.7680000066757202
+            ],
+            [
+              -10.253000259399414,
+              6.7170000076293945
+            ],
+            [
+              -6.7170000076293945,
+              10.253000259399414
+            ],
+            [
+              1.7680000066757202,
+              1.7680000066757202
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.7680000066757202,
+              1.7680000066757202
+            ],
+            [
+              6.7170000076293945,
+              10.253000259399414
+            ],
+            [
+              10.253000259399414,
+              6.7170000076293945
+            ],
+            [
+              1.7680000066757202,
+              -1.7680000066757202
+            ]
+          ]
+        }
+      ],
+      "size": 25
+    },
+    "scale": 1.25,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "chevron",
+      "rotation": 0.0,
+      "shape": "chevron",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.4749999046325684,
+              0.3529999852180481
+            ],
+            [
+              -10.960000038146973,
+              8.838000297546387
+            ],
+            [
+              -8.838000297546387,
+              10.960000038146973
+            ],
+            [
+              -0.3529999852180481,
+              2.4749999046325684
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.3529999852180481,
+              2.4749999046325684
+            ],
+            [
+              8.838000297546387,
+              10.960000038146973
+            ],
+            [
+              10.960000038146973,
+              8.838000297546387
+            ],
+            [
+              2.4749999046325684,
+              0.3529999852180481
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.4749999046325684,
+              -2.4749999046325684
+            ],
+            [
+              -13.788999557495117,
+              8.83899974822998
+            ],
+            [
+              -8.83899974822998,
+              13.788999557495117
+            ],
+            [
+              2.4749999046325684,
+              2.4749999046325684
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.4749999046325684,
+              2.4749999046325684
+            ],
+            [
+              8.83899974822998,
+              13.788999557495117
+            ],
+            [
+              13.788999557495117,
+              8.83899974822998
+            ],
+            [
+              2.4749999046325684,
+              -2.4749999046325684
+            ]
+          ]
+        }
+      ],
+      "size": 31
+    },
+    "scale": 1.5,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "chevron",
+      "rotation": 0.0,
+      "shape": "chevron",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.828000068664551,
+              0.0
+            ],
+            [
+              -14.142000198364258,
+              11.314000129699707
+            ],
+            [
+              -11.314000129699707,
+              14.142000198364258
+            ],
+            [
+              0.0,
+              2.828000068664551
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.0,
+              2.828000068664551
+            ],
+            [
+              11.314000129699707,
+              14.142000198364258
+            ],
+            [
+              14.142000198364258,
+              11.314000129699707
+            ],
+            [
+              2.828000068664551,
+              0.0
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.828000068664551,
+              -2.828000068664551
+            ],
+            [
+              -16.969999313354492,
+              11.314000129699707
+            ],
+            [
+              -11.314000129699707,
+              16.969999313354492
+            ],
+            [
+              2.828000068664551,
+              2.828000068664551
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.828000068664551,
+              2.828000068664551
+            ],
+            [
+              11.314000129699707,
+              16.969999313354492
+            ],
+            [
+              16.969999313354492,
+              11.314000129699707
+            ],
+            [
+              2.828000068664551,
+              -2.828000068664551
+            ]
+          ]
+        }
+      ],
+      "size": 36
+    },
+    "scale": 2.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "chevron",
+      "rotation": 0.0,
+      "shape": "chevron",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -1.4140000343322754,
+              0.0
+            ],
+            [
+              -7.071000099182129,
+              5.6570000648498535
+            ],
+            [
+              -5.6570000648498535,
+              7.071000099182129
+            ],
+            [
+              0.0,
+              1.4140000343322754
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              0.0,
+              1.4140000343322754
+            ],
+            [
+              5.6570000648498535,
+              7.071000099182129
+            ],
+            [
+              7.071000099182129,
+              5.6570000648498535
+            ],
+            [
+              1.4140000343322754,
+              0.0
+            ]
+          ]
+        }
+      ],
+      "outline": [],
+      "size": 18
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 1.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 8.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "chevron",
+      "rotation": 0.0,
+      "shape": "chevron",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -5.0,
+          "x1": 5.0,
+          "y0": -70.0,
+          "y1": -30.0
+        },
+        {
+          "kind": "rect",
+          "x0": -5.0,
+          "x1": 5.0,
+          "y0": 30.0,
+          "y1": 70.0
+        },
+        {
+          "kind": "rect",
+          "x0": -70.0,
+          "x1": -30.0,
+          "y0": -5.0,
+          "y1": 5.0
+        },
+        {
+          "kind": "rect",
+          "x0": 30.0,
+          "x1": 70.0,
+          "y0": -5.0,
+          "y1": 5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -6.0,
+          "x1": 6.0,
+          "y0": -6.0,
+          "y1": 6.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": -74.0,
+          "y1": -26.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": 26.0,
+          "y1": 74.0
+        },
+        {
+          "kind": "rect",
+          "x0": -74.0,
+          "x1": -26.0,
+          "y0": -9.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": 26.0,
+          "x1": 74.0,
+          "y0": -9.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -10.0,
+          "x1": 10.0,
+          "y0": -10.0,
+          "y1": 10.0
+        }
+      ],
+      "size": 150
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 12.0,
+      "enabled": false,
+      "gap": 30.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 40.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 4.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 10.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": -123.0,
+          "y1": -53.0
+        },
+        {
+          "kind": "rect",
+          "x0": -9.0,
+          "x1": 9.0,
+          "y0": 53.0,
+          "y1": 123.0
+        },
+        {
+          "kind": "rect",
+          "x0": -123.0,
+          "x1": -53.0,
+          "y0": -9.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": 53.0,
+          "x1": 123.0,
+          "y0": -9.0,
+          "y1": 9.0
+        },
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": 11.0,
+          "y0": -11.0,
+          "y1": 11.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -16.0,
+          "x1": 16.0,
+          "y0": -130.0,
+          "y1": -46.0
+        },
+        {
+          "kind": "rect",
+          "x0": -16.0,
+          "x1": 16.0,
+          "y0": 46.0,
+          "y1": 130.0
+        },
+        {
+          "kind": "rect",
+          "x0": -130.0,
+          "x1": -46.0,
+          "y0": -16.0,
+          "y1": 16.0
+        },
+        {
+          "kind": "rect",
+          "x0": 46.0,
+          "x1": 130.0,
+          "y0": -16.0,
+          "y1": 16.0
+        },
+        {
+          "kind": "rect",
+          "x0": -18.0,
+          "x1": 18.0,
+          "y0": -18.0,
+          "y1": 18.0
+        }
+      ],
+      "size": 262
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 12.0,
+      "enabled": false,
+      "gap": 30.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 40.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 4.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 10.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -11.5,
+          "y1": -4.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": 4.5,
+          "y1": 11.5
+        },
+        {
+          "kind": "rect",
+          "x0": -11.5,
+          "x1": -4.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": 4.5,
+          "x1": 11.5,
+          "y0": -1.5,
+          "y1": 1.5
+        },
+        {
+          "kind": "rect",
+          "x0": -1.5,
+          "x1": 1.5,
+          "y0": -1.5,
+          "y1": 1.5
+        }
+      ],
+      "outline": [],
+      "size": 27
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 3.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -19.5,
+          "y1": -7.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": 7.5,
+          "y1": 19.5
+        },
+        {
+          "kind": "rect",
+          "x0": -19.5,
+          "x1": -7.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": 7.5,
+          "x1": 19.5,
+          "y0": -2.5,
+          "y1": 2.5
+        },
+        {
+          "kind": "rect",
+          "x0": -2.5,
+          "x1": 2.5,
+          "y0": -2.5,
+          "y1": 2.5
+        }
+      ],
+      "outline": [],
+      "size": 43
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": false,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "cross",
+      "thickness": 3.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 24.0,
+          "r_outer": 26.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 23.0,
+          "r_outer": 27.0
+        }
+      ],
+      "size": 56
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 20.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "ring",
+          "r_inner": 42.0,
+          "r_outer": 46.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "ring",
+          "r_inner": 40.0,
+          "r_outer": 48.0
+        }
+      ],
+      "size": 98
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 5.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 20.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 0.0,
+      "shape": "circle",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.865999937057495,
+              2.9639999866485596
+            ],
+            [
+              -6.366000175476074,
+              9.026000022888184
+            ],
+            [
+              -4.633999824523926,
+              10.026000022888184
+            ],
+            [
+              -1.1339999437332153,
+              3.9639999866485596
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -10.026000022888184,
+              -4.633999824523926
+            ],
+            [
+              -3.9639999866485596,
+              -1.1339999437332153
+            ],
+            [
+              -2.9639999866485596,
+              -2.865999937057495
+            ],
+            [
+              -9.026000022888184,
+              -6.366000175476074
+            ]
+          ]
+        },
+        {
+          "kind": "ring",
+          "r_inner": 8.0,
+          "r_outer": 10.0
+        },
+        {
+          "kind": "disc",
+          "r": 2.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.2320001125335693,
+              1.5980000495910645
+            ],
+            [
+              -7.73199987411499,
+              9.392000198364258
+            ],
+            [
+              -4.26800012588501,
+              11.392000198364258
+            ],
+            [
+              0.23199999332427979,
+              3.5980000495910645
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -11.392000198364258,
+              -4.26800012588501
+            ],
+            [
+              -3.5980000495910645,
+              0.23199999332427979
+            ],
+            [
+              -1.5980000495910645,
+              -3.2320001125335693
+            ],
+            [
+              -9.392000198364258,
+              -7.73199987411499
+            ]
+          ]
+        },
+        {
+          "kind": "ring",
+          "r_inner": 7.0,
+          "r_outer": 11.0
+        },
+        {
+          "kind": "disc",
+          "r": 3.0
+        }
+      ],
+      "size": 26
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": false,
+      "arm_top": false,
+      "circle": true,
+      "circle_radius": 9.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 3.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 30.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.23199987411499,
+              5.061999797821045
+            ],
+            [
+              -11.232000350952148,
+              15.454000473022461
+            ],
+            [
+              -7.76800012588501,
+              17.45400047302246
+            ],
+            [
+              -1.7680000066757202,
+              7.061999797821045
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -17.45400047302246,
+              -7.76800012588501
+            ],
+            [
+              -7.061999797821045,
+              -1.7680000066757202
+            ],
+            [
+              -5.061999797821045,
+              -5.23199987411499
+            ],
+            [
+              -15.454000473022461,
+              -11.232000350952148
+            ]
+          ]
+        },
+        {
+          "kind": "ring",
+          "r_inner": 14.0,
+          "r_outer": 18.0
+        },
+        {
+          "kind": "disc",
+          "r": 3.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -5.964000225067139,
+              2.3299999237060547
+            ],
+            [
+              -13.96399974822998,
+              16.187000274658203
+            ],
+            [
+              -7.035999774932861,
+              20.187000274658203
+            ],
+            [
+              0.9639999866485596,
+              6.329999923706055
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -20.187000274658203,
+              -7.035999774932861
+            ],
+            [
+              -6.329999923706055,
+              0.9639999866485596
+            ],
+            [
+              -2.3299999237060547,
+              -5.964000225067139
+            ],
+            [
+              -16.187000274658203,
+              -13.96399974822998
+            ]
+          ]
+        },
+        {
+          "kind": "ring",
+          "r_inner": 12.0,
+          "r_outer": 20.0
+        },
+        {
+          "kind": "disc",
+          "r": 5.0
+        }
+      ],
+      "size": 44
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": false,
+      "arm_top": false,
+      "circle": true,
+      "circle_radius": 9.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": true,
+      "dot_round": true,
+      "dot_size": 3.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 30.0,
+      "shape": "cross",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -11.0,
+          "x1": -4.0,
+          "y0": -1.0,
+          "y1": 1.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": -11.0,
+          "y1": -4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -1.0,
+          "x1": 1.0,
+          "y0": 4.0,
+          "y1": 11.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 11.0,
+          "r_outer": 13.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -12.0,
+          "x1": -3.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -12.0,
+          "y1": -3.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 3.0,
+          "y1": 12.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 10.0,
+          "r_outer": 14.0
+        }
+      ],
+      "size": 30
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 90.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "rect",
+          "x0": -19.0,
+          "x1": -7.0,
+          "y0": -2.0,
+          "y1": 2.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": -19.0,
+          "y1": -7.0
+        },
+        {
+          "kind": "rect",
+          "x0": -2.0,
+          "x1": 2.0,
+          "y0": 7.0,
+          "y1": 19.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 19.0,
+          "r_outer": 23.0
+        }
+      ],
+      "outline": [
+        {
+          "kind": "rect",
+          "x0": -21.0,
+          "x1": -5.0,
+          "y0": -4.0,
+          "y1": 4.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": -21.0,
+          "y1": -5.0
+        },
+        {
+          "kind": "rect",
+          "x0": -4.0,
+          "x1": 4.0,
+          "y0": 5.0,
+          "y1": 21.0
+        },
+        {
+          "kind": "ring",
+          "r_inner": 17.0,
+          "r_outer": 25.0
+        }
+      ],
+      "size": 52
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": true,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 90.0,
+      "shape": "t",
+      "thickness": 2.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.121999979019165,
+              -15.555999755859375
+            ],
+            [
+              15.555999755859375,
+              2.121999979019165
+            ],
+            [
+              17.67799949645996,
+              0.0
+            ],
+            [
+              0.0,
+              -17.67799949645996
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -17.67799949645996,
+              0.0
+            ],
+            [
+              0.0,
+              17.67799949645996
+            ],
+            [
+              2.121999979019165,
+              15.555999755859375
+            ],
+            [
+              -15.555999755859375,
+              -2.121999979019165
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.121999979019165,
+              -15.557000160217285
+            ],
+            [
+              -15.557000160217285,
+              -2.121999979019165
+            ],
+            [
+              -13.4350004196167,
+              0.0
+            ],
+            [
+              0.0,
+              -13.4350004196167
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              13.4350004196167,
+              0.0
+            ],
+            [
+              0.0,
+              13.4350004196167
+            ],
+            [
+              2.121999979019165,
+              15.557000160217285
+            ],
+            [
+              15.557000160217285,
+              2.121999979019165
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5360000133514404,
+              -15.555999755859375
+            ],
+            [
+              15.555999755859375,
+              3.5360000133514404
+            ],
+            [
+              19.091999053955078,
+              0.0
+            ],
+            [
+              0.0,
+              -19.091999053955078
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -19.091999053955078,
+              0.0
+            ],
+            [
+              0.0,
+              19.091999053955078
+            ],
+            [
+              3.5360000133514404,
+              15.555999755859375
+            ],
+            [
+              -15.555999755859375,
+              -3.5360000133514404
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -2.121999979019165,
+              -16.97100067138672
+            ],
+            [
+              -16.97100067138672,
+              -2.121999979019165
+            ],
+            [
+              -13.4350004196167,
+              1.4140000343322754
+            ],
+            [
+              1.4140000343322754,
+              -13.4350004196167
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              13.4350004196167,
+              -1.4140000343322754
+            ],
+            [
+              -1.4140000343322754,
+              13.4350004196167
+            ],
+            [
+              2.121999979019165,
+              16.97100067138672
+            ],
+            [
+              16.97100067138672,
+              2.121999979019165
+            ]
+          ]
+        }
+      ],
+      "size": 43
+    },
+    "scale": 1.0,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 45.0,
+      "shape": "square",
+      "thickness": 3.0,
+      "visibility": "game"
+    }
+  },
+  {
+    "geometry": {
+      "fill": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5360000133514404,
+              -26.8700008392334
+            ],
+            [
+              26.8700008392334,
+              3.5360000133514404
+            ],
+            [
+              30.4060001373291,
+              0.0
+            ],
+            [
+              0.0,
+              -30.4060001373291
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -30.4060001373291,
+              0.0
+            ],
+            [
+              0.0,
+              30.4060001373291
+            ],
+            [
+              3.5360000133514404,
+              26.8700008392334
+            ],
+            [
+              -26.8700008392334,
+              -3.5360000133514404
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5360000133514404,
+              -26.8700008392334
+            ],
+            [
+              -26.8700008392334,
+              -3.5360000133514404
+            ],
+            [
+              -23.333999633789062,
+              0.0
+            ],
+            [
+              0.0,
+              -23.333999633789062
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              23.333999633789062,
+              0.0
+            ],
+            [
+              0.0,
+              23.333999633789062
+            ],
+            [
+              3.5360000133514404,
+              26.8700008392334
+            ],
+            [
+              26.8700008392334,
+              3.5360000133514404
+            ]
+          ]
+        }
+      ],
+      "outline": [
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -6.363999843597412,
+              -26.8700008392334
+            ],
+            [
+              26.8700008392334,
+              6.363999843597412
+            ],
+            [
+              33.23400115966797,
+              0.0
+            ],
+            [
+              0.0,
+              -33.23400115966797
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -33.23400115966797,
+              0.0
+            ],
+            [
+              0.0,
+              33.23400115966797
+            ],
+            [
+              6.363999843597412,
+              26.8700008392334
+            ],
+            [
+              -26.8700008392334,
+              -6.363999843597412
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              -3.5360000133514404,
+              -29.698999404907227
+            ],
+            [
+              -29.698999404907227,
+              -3.5360000133514404
+            ],
+            [
+              -23.334999084472656,
+              2.828000068664551
+            ],
+            [
+              2.828000068664551,
+              -23.334999084472656
+            ]
+          ]
+        },
+        {
+          "kind": "quad",
+          "points": [
+            [
+              23.334999084472656,
+              -2.828000068664551
+            ],
+            [
+              -2.828000068664551,
+              23.334999084472656
+            ],
+            [
+              3.5360000133514404,
+              29.698999404907227
+            ],
+            [
+              29.698999404907227,
+              3.5360000133514404
+            ]
+          ]
+        }
+      ],
+      "size": 71
+    },
+    "scale": 1.75,
+    "settings": {
+      "arm_bottom": true,
+      "arm_left": true,
+      "arm_right": true,
+      "arm_top": true,
+      "circle": false,
+      "circle_radius": 12.0,
+      "color": "#00FF88",
+      "display": 0,
+      "dot": false,
+      "dot_round": false,
+      "dot_size": 2.0,
+      "enabled": false,
+      "gap": 4.0,
+      "hotkey": "Control+Shift+F6",
+      "length": 7.0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "opacity": 1.0,
+      "outline": true,
+      "outline_color": "#000000",
+      "outline_thickness": 1.0,
+      "preset": "classic",
+      "rotation": 45.0,
+      "shape": "square",
+      "thickness": 3.0,
+      "visibility": "game"
+    }
+  }
+]

@@ -25,6 +25,98 @@ pub fn helper(exe: impl AsRef<std::ffi::OsStr>) -> Command {
     c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     c
 }
+/// Runs a helper to completion with its output captured, like
+/// `Command::output`, with the settings of `background_process`.
+pub trait BackgroundOutput {
+    /// Low memory priority and EcoQoS: for work nothing waits for (the
+    /// per-segment probe during play, thumbnails).
+    fn background_output(&mut self) -> std::io::Result<std::process::Output>;
+    /// Low memory priority only: for work someone waits for (a save, its
+    /// checks, an export). EcoQoS made saves about 1 s slower (ready after
+    /// 1.5-2.1 s instead of 0.5-0.9 s) with no measurable FPS benefit.
+    fn low_memory_output(&mut self) -> std::io::Result<std::process::Output>;
+}
+fn run_captured(c: &mut Command, eco: bool) -> std::io::Result<std::process::Output> {
+    let child = c
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    background_process(&child, eco);
+    child.wait_with_output()
+}
+impl BackgroundOutput for Command {
+    fn background_output(&mut self) -> std::io::Result<std::process::Output> {
+        run_captured(self, true)
+    }
+    fn low_memory_output(&mut self) -> std::io::Result<std::process::Output> {
+        run_captured(self, false)
+    }
+}
+/// Make a helper process yield to the game beyond below-normal CPU
+/// priority, with documented per-process settings Windows applies on every
+/// PC:
+/// - Low memory priority (always): the pages it touches (a 230 MB clip that
+///   is copied) are the first to leave memory, never the game's.
+/// - `eco`: EcoQoS (power throttling of execution speed). Windows prefers
+///   efficient cores and low clocks for it, so on hybrid CPUs (Intel 12th
+///   gen and later) it stays off the performance cores. Slower, so only for
+///   work nothing waits for.
+///
+/// Best effort: a refusal (older Windows) leaves below-normal priority.
+/// Never used for the capture itself, which must keep its pace.
+pub fn background_process(child: &std::process::Child, eco: bool) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::{
+        Foundation::HANDLE,
+        System::Threading::{
+            ProcessMemoryPriority, SetProcessInformation, MEMORY_PRIORITY_INFORMATION,
+            MEMORY_PRIORITY_LOW,
+        },
+    };
+    let process = HANDLE(child.as_raw_handle());
+    if eco {
+        eco_process(child);
+    }
+    let memory = MEMORY_PRIORITY_INFORMATION {
+        MemoryPriority: MEMORY_PRIORITY_LOW,
+    };
+    unsafe {
+        let _ = SetProcessInformation(
+            process,
+            ProcessMemoryPriority,
+            &memory as *const _ as *const std::ffi::c_void,
+            std::mem::size_of_val(&memory) as u32,
+        );
+    }
+}
+/// EcoQoS (power throttling of execution speed) for a child process: Windows
+/// prefers efficient cores and low clocks for it. Best effort.
+pub fn eco_process(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::{
+        Foundation::HANDLE,
+        System::Threading::{
+            ProcessPowerThrottling, SetProcessInformation,
+            PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            PROCESS_POWER_THROTTLING_STATE,
+        },
+    };
+    let process = HANDLE(child.as_raw_handle());
+    let throttle = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+    };
+    unsafe {
+        let _ = SetProcessInformation(
+            process,
+            ProcessPowerThrottling,
+            &throttle as *const _ as *const std::ffi::c_void,
+            std::mem::size_of_val(&throttle) as u32,
+        );
+    }
+}
 #[derive(Clone)]
 pub struct Media {
     pub ffmpeg: PathBuf,
@@ -132,7 +224,7 @@ impl Media {
                 "json",
             ])
             .arg(path)
-            .output()?;
+            .low_memory_output()?;
         if !out.status.success() {
             bail!("ffprobe could not read the output")
         }
@@ -165,7 +257,13 @@ impl Media {
             audio_titles: streams
                 .iter()
                 .filter(|s| s["codec_type"] == "audio")
-                .map(|s| s["tags"]["title"].as_str().unwrap_or("").to_owned())
+                .map(|s| {
+                    s["tags"]["title"]
+                        .as_str()
+                        .or_else(|| s["tags"]["handler_name"].as_str())
+                        .unwrap_or("")
+                        .to_owned()
+                })
                 .collect(),
             fps: video["avg_frame_rate"]
                 .as_str()
@@ -193,7 +291,7 @@ impl Media {
             .args(["-v", "error", "-xerror", "-i"])
             .arg(path)
             .args(["-map", "0:v", "-map", "0:a?", "-f", "null", "-"])
-            .output()?;
+            .low_memory_output()?;
         if !out.status.success() {
             bail!(
                 "Saved media failed a complete decode check: {}",
@@ -439,13 +537,47 @@ impl Media {
         let parent = segments[0].path.parent().context("No snapshot directory")?;
         let list = parent.join("concat.txt");
         // Snapshot names are generated locally; user-controlled paths never enter concat syntax.
-        let spans: Vec<f64> = segments.iter().map(|s| s.end - s.start).collect();
-        fs::write(
-            &list,
-            concat_list(segments, &concat_durations(&spans, &starts))?,
-        )?;
+        let spans = concat_source_spans(segments);
+        let durations = concat_durations(&spans, &starts);
+        fs::write(&list, concat_list(segments, &durations)?)?;
+        let mp4 = destination.extension().is_some_and(|e| e == "mp4");
+        let audio_end = if mp4 && expected_audio > 0 {
+            let last = segments.len() - 1;
+            // The concat demuxer adds the preceding declared durations, then
+            // subtracts the final file's container start time. Match that clock
+            // before FFmpeg shifts negative timestamps out of the final MP4.
+            let end = durations[..last].iter().sum::<f64>()
+                + self.native_video_end(&segments[last].path)?
+                - starts[last];
+            if !end.is_finite() || end <= 0. {
+                bail!("Invalid native video end timestamp; source segments retained")
+            }
+            Some(end)
+        } else {
+            None
+        };
+        // Native AAC is 48 kHz. Drop whole audio packets that would extend
+        // beyond video. Allow one millisecond for the Matroska time base.
+        // Encoded video, earlier audio, and track alignment stay untouched.
+        let audio_trim = audio_end.map(|end| {
+            format!(
+                "noise=amount=0:drop=gt(pts*tb+max(duration*tb\\,1024/48000)\\,{:.6})",
+                end + 0.001
+            )
+        });
         mark("Remuxing");
-        let part = destination.with_extension("partial.mkv");
+        let part = destination.with_extension(if mp4 { "partial.mp4" } else { "partial.mkv" });
+        let track_names = if mp4 {
+            self.probe(&segments[0].path)?.audio_titles
+        } else {
+            Vec::new()
+        };
+        let track_metadata: Vec<String> = track_names
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| !name.is_empty())
+            .flat_map(|(n, name)| [format!("-metadata:s:a:{n}"), format!("handler_name={name}")])
+            .collect();
         let output = helper(&self.ffmpeg)
             .args([
                 "-hide_banner",
@@ -464,12 +596,23 @@ impl Media {
             .arg(&list)
             .args(["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"])
             .args(
+                audio_trim
+                    .iter()
+                    .flat_map(|filter| ["-bsf:a", filter.as_str()]),
+            )
+            .args(if mp4 {
+                vec!["-movflags", "+faststart+use_metadata_tags"]
+            } else {
+                Vec::new()
+            })
+            .args(&track_metadata)
+            .args(
                 tags.iter()
                     .flat_map(|(k, v)| ["-metadata".to_string(), format!("{k}={v}")]),
             )
             .arg("-n")
             .arg(&part)
-            .output()?;
+            .low_memory_output()?;
         if !output.status.success() {
             bail!(
                 "Replay remux failed: {}",
@@ -482,18 +625,55 @@ impl Media {
         } else {
             self.verify_playable(&part, expected_audio)?
         };
-        let expected: f64 = segments.iter().map(|s| s.end - s.start).sum();
+        let expected = audio_end.unwrap_or_else(|| segments.iter().map(|s| s.end - s.start).sum());
         if (verified.duration - expected).abs() > 0.75 + (segments.len() as f64 * 0.05) {
             bail!(
                 "Replay duration failed verification: expected about {expected:.2}s, got {:.2}s",
                 verified.duration
             )
         }
-        fs::rename(&part, destination)?;
+        if mp4 {
+            publish_native_mp4(&part, destination)?;
+        } else {
+            fs::rename(&part, destination)?;
+        }
         mark("Ready");
         verified.save_timings = timings;
         Ok(verified)
     }
+    /// Only the final segment is read. Container duration can be set by audio
+    /// and CSV duration can be estimated, so neither is the video boundary.
+    pub(crate) fn native_video_end(&self, path: &Path) -> Result<f64> {
+        let out = helper(&self.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "packet=pts_time,duration_time",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(path)
+            .low_memory_output()?;
+        if !out.status.success() {
+            bail!("Could not read the final native video packet; source segments retained")
+        }
+        let data = String::from_utf8(out.stdout)?;
+        let mut end = None::<f64>;
+        for line in data.lines().filter(|line| !line.trim().is_empty()) {
+            let mut fields = line.split(',');
+            let pts: f64 = fields.next().context("Missing video timestamp")?.parse()?;
+            let duration: f64 = fields.next().context("Missing video duration")?.parse()?;
+            if !(pts.is_finite() && duration.is_finite() && duration > 0.) {
+                bail!("Invalid native video packet timestamp or duration")
+            }
+            end = Some(end.map_or(pts + duration, |previous| previous.max(pts + duration)));
+        }
+        end.context("No video packets in the final native segment; source segments retained")
+    }
+
     /// Minimal per-segment facts for concatenation, probed in parallel.
     pub fn segment_infos(&self, segments: &[Segment]) -> Result<Vec<SegmentInfo>> {
         let next = std::sync::atomic::AtomicUsize::new(0);
@@ -519,26 +699,32 @@ impl Media {
     }
     /// Same probe as a below-normal-priority process, for background use
     /// while capture runs.
+    /// The background probe of each new segment while capturing (every 2 s
+    /// for as long as a game runs): EcoQoS too, as nothing waits for it.
     pub fn segment_info_low_priority(&self, path: &Path) -> Result<SegmentInfo> {
-        self.segment_info_with(path, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        self.segment_info_with(path, true)
     }
+    /// At save time a clip waits for it: below normal and low memory
+    /// priority only.
     fn segment_info(&self, path: &Path) -> Result<SegmentInfo> {
-        self.segment_info_with(path, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        self.segment_info_with(path, false)
     }
-    fn segment_info_with(&self, path: &Path, flags: u32) -> Result<SegmentInfo> {
-        let mut c = Command::new(&self.ffprobe);
-        c.creation_flags(flags);
-        let out = c
-            .args([
-                "-v",
-                "error",
-                "-show_entries",
-                "format=start_time:stream=codec_type,codec_name,width,height",
-                "-of",
-                "json",
-            ])
-            .arg(path)
-            .output()?;
+    fn segment_info_with(&self, path: &Path, eco: bool) -> Result<SegmentInfo> {
+        let mut c = helper(&self.ffprobe);
+        c.args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=start_time:stream=codec_type,codec_name,width,height",
+            "-of",
+            "json",
+        ])
+        .arg(path);
+        let out = if eco {
+            c.background_output()?
+        } else {
+            c.low_memory_output()?
+        };
         if !out.status.success() {
             bail!("A replay segment could not be read: {}", path.display())
         }
@@ -571,7 +757,7 @@ impl Media {
     /// The remux has already read every packet. Validate stream layout, duration
     /// and decode both ends before publication. Full decode remains available
     /// for recovery, export and offline acceptance tests, not every live save.
-    fn verify_playable(&self, path: &Path, expected_audio: usize) -> Result<Probe> {
+    pub(crate) fn verify_playable(&self, path: &Path, expected_audio: usize) -> Result<Probe> {
         let p = self.probe(path)?;
         if p.audio_tracks != expected_audio || p.width == 0 || p.height == 0 {
             bail!("Saved clip has an unexpected stream layout")
@@ -592,7 +778,7 @@ impl Media {
                 .args([
                     "-t", "1", "-map", "0:v", "-map", "0:a?", "-threads", "1", "-f", "null", "-",
                 ])
-                .output()?;
+                .low_memory_output()?;
             if !out.status.success() {
                 bail!(
                     "Saved clip failed playback validation: {}",
@@ -640,7 +826,7 @@ impl Media {
                 "mjpeg",
                 "-",
             ])
-            .output()?;
+            .background_output()?;
         if !out.status.success() || out.stdout.len() < 100 {
             bail!(
                 "Thumbnail failed: {}",
@@ -663,7 +849,7 @@ impl Media {
                 &[][..]
             })
             .arg(&part)
-            .output()?;
+            .low_memory_output()?;
         if !r.status.success() {
             bail!("MP4 remux failed; keep the MKV source")
         }
@@ -940,6 +1126,11 @@ pub struct Tuning {
     pub nvenc_lookahead: Option<u32>,
     /// Profiling control only; production keeps spatial AQ enabled.
     pub nvenc_aq: bool,
+    /// Experiment (`capture_eco=1`, off by default): EcoQoS for the capture
+    /// FFmpeg process, so on hybrid CPUs its ~8% of one core runs on the
+    /// efficient cores instead of beside a CPU-bound game's threads. To be
+    /// kept only if it measurably helps without uneven capture timing.
+    pub capture_eco: bool,
     /// Experimental capture API for the display path: false = Desktop
     /// Duplication (ddagrab, production), true = Windows Graphics Capture
     /// (FFmpeg gfxcapture). Development/benchmark only.
@@ -959,6 +1150,22 @@ pub struct Tuning {
     /// a scaled-frame transfer (Windows copies every full-size frame across
     /// adapters onto the game's GPU). Unmeasured on NVIDIA-driven displays.
     pub wgc_gpu: bool,
+    /// Measurement switch (`wgc_adaptive=0`): never switch a WGC session to
+    /// 2x, to compare its cost with 1x in a real game. On by default.
+    pub wgc_adaptive: bool,
+    /// Experiment (`wgc_early_drop=1`, off by default): at 1x, WGC still
+    /// delivers about 80 frames/s for 60 (its update floor sits under one
+    /// slot), and the surplus was dropped only after the Intel GPU had
+    /// converted every frame (VPP). This keeps the frame nearest each slot
+    /// with the `fps` filter first, as the 2x path does.
+    ///
+    /// NOT a default candidate: on irregular deliveries (80/s with 3 ms
+    /// jitter and a 1 s gap) the `fps` filter repeated 244 frames where the
+    /// output's CFR step, which moves a spare capture into a neighbouring
+    /// empty slot, repeated 60; and its repeats never reach FFmpeg's
+    /// duplicate counter, which the 2x starvation switch relies on. Alone it
+    /// gave no FPS gain in CS2; the gain came from `vpp_scale_mode=1` (SFC).
+    pub wgc_early_drop: bool,
     /// WGC minimum update interval in microseconds at 1x. Updates land on
     /// display refreshes, and only when the content changed: with a 16 ms
     /// floor a ~228 FPS game on a 240 Hz panel slipped to 20.8 ms gaps and
@@ -993,11 +1200,14 @@ impl Default for Tuning {
             video_queue: None,
             nvenc_lookahead: Some(20),
             nvenc_aq: true,
+            capture_eco: false,
             wgc: false,
             wgc_window: None,
             wgc_border: false,
             wgc_oversample: 1,
             wgc_gpu: false,
+            wgc_adaptive: true,
+            wgc_early_drop: false,
             wgc_floor_us: Some(12_500),
             wgc_scale: true,
         }
@@ -1012,7 +1222,9 @@ fn parse_tuning(spec: &str) -> Tuning {
         for (k, v) in spec.split(',').filter_map(|kv| kv.split_once('=')) {
             match k.trim() {
                 "qsv_low_power" => t.qsv_low_power = v.parse::<u8>().ok().map(|v| v == 1),
-                "vpp_scale_mode" => t.vpp_scale_mode = v.parse().ok(),
+                // FFmpeg's vpp_qsv scale_mode: 0 auto, 1 low_power (SFC),
+                // 2 hq, 3 compute, 4 vd, 5 ve. Anything else is ignored.
+                "vpp_scale_mode" => t.vpp_scale_mode = v.parse().ok().filter(|m| *m <= 5),
                 "draw_mouse" => t.draw_mouse = v != "0",
                 "qsv_async_depth" => t.qsv_async_depth = v.parse().ok(),
                 "cpu_priority" => t.cpu_priority = v != "0",
@@ -1027,6 +1239,7 @@ fn parse_tuning(spec: &str) -> Tuning {
                 "video_queue" => t.video_queue = v.parse().ok(),
                 "nvenc_lookahead" => t.nvenc_lookahead = v.parse().ok(),
                 "nvenc_aq" => t.nvenc_aq = v != "0",
+                "capture_eco" => t.capture_eco = v != "0",
                 "capture_api" => t.wgc = v.trim() == "wgc",
                 // Executable names only: no characters that end the filter option.
                 "wgc_window"
@@ -1038,6 +1251,8 @@ fn parse_tuning(spec: &str) -> Tuning {
                 }
                 "wgc_border" => t.wgc_border = v != "0",
                 "wgc_gpu" => t.wgc_gpu = v != "0",
+                "wgc_adaptive" => t.wgc_adaptive = v != "0",
+                "wgc_early_drop" => t.wgc_early_drop = v != "0",
                 "wgc_scale" => t.wgc_scale = v != "0",
                 "wgc_floor_us" => {
                     t.wgc_floor_us = v
@@ -1069,7 +1284,13 @@ pub fn converts_bt709(scaler: Scaler) -> bool {
     !matches!(scaler, Scaler::D3d11 | Scaler::Cuda | Scaler::WgcGpu)
 }
 pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
-    let t = tuning();
+    video_filter_with(plan, scaler, &tuning())
+}
+/// `video_filter` for given tuning. `vpp_scale_mode` (`wgc-sfc` uses 1, the
+/// fixed-function scaler) only changes how Quick Sync's VPP converts each
+/// frame; which frames are kept, their timestamps and the drop/duplicate
+/// counters are decided by `frame_timing` and the CFR output, not here.
+pub fn video_filter_with(plan: &VideoPlan, scaler: Scaler, t: &Tuning) -> String {
     let vpp_mode = t
         .vpp_scale_mode
         .map(|m| format!(":scale_mode={m}"))
@@ -1101,6 +1322,17 @@ pub fn video_filter(plan: &VideoPlan, scaler: Scaler) -> String {
     }
 }
 
+/// How captured frames are fitted to the output frame rate. Several
+/// captures per output slot (2x, or WGC's surplus with `early_drop`): keep
+/// the one nearest each slot right away, before any GPU conversion.
+/// Otherwise re-time them onto the grid and let the output keep one per slot.
+pub fn frame_timing(fps: u32, oversample: u32, early_drop: bool) -> String {
+    if oversample > 1 || early_drop {
+        format!("fps={fps}:round=near")
+    } else {
+        regrid_filter(fps)
+    }
+}
 /// Quantize acquisition time without pushing a burst into future slots.
 /// CFR selects/drops colliding frames and repeats missing slots. The previous
 /// max(previous+slot, timestamp) accumulated phase error after stalls/bursts,
@@ -1161,12 +1393,7 @@ pub fn video_input(
         } else {
             t.oversample
         };
-        let timing = if oversample > 1 {
-            // Several captures per output slot: keep the one nearest each slot.
-            format!("fps={}:round=near", s.fps)
-        } else {
-            regrid_filter(s.fps)
-        };
+        let timing = frame_timing(s.fps, oversample, wgc && t.wgc_early_drop);
         if wgc && scaler == Scaler::WgcGpu {
             // The source lives in the filter graph so it can use a device on
             // the encoder's GPU (a lavfi input cannot be given one).
@@ -1356,7 +1583,9 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
         ffmpeg_encoder,
         "-r",
         &s.fps.to_string(),
-        "-enc_time_base",
+        // Apply the frame grid only to video. An unscoped time base
+        // quantizes AAC packet timestamps to frame boundaries.
+        "-enc_time_base:v",
         &format!("1:{}", s.fps),
     ]);
     match rate.cq {
@@ -1490,6 +1719,19 @@ pub fn encoding_args(c: &mut Command, s: &Settings, encoder: &str, size: (u32, u
     ]);
 }
 
+/// Windows MoveFile (without REPLACE_EXISTING) publishes native MP4 atomically
+/// without overwriting a clip created after filename reservation.
+fn publish_native_mp4(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    unsafe {windows::Win32::Storage::FileSystem::MoveFileW(windows::core::PCWSTR(source.as_ptr()),windows::core::PCWSTR(destination.as_ptr()))}.context("MP4 publication failed; an existing clip was not overwritten and source segments were retained")?;
+    Ok(())
+}
 /// Container-level tag, matched case-insensitively (Matroska may uppercase).
 fn format_tag(json: &serde_json::Value, key: &str) -> Option<String> {
     json["format"]["tags"]
@@ -1523,6 +1765,39 @@ pub fn concat_list(segments: &[Segment], durations: &[f64]) -> Result<String> {
     Ok(out)
 }
 
+/// Adjacent files from the SAME capture session share a source clock. The CSV
+/// end includes an estimated final packet duration; in VFR it can overlap or
+/// undershoot the next keyframe. Anchor joins to the next actual segment start.
+/// Never infer continuity across a missing file, a restart or a different session.
+pub fn concat_source_spans(segments: &[Segment]) -> Vec<f64> {
+    segments
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let own = s.end - s.start;
+            let Some(next) = segments.get(i + 1) else {
+                return own;
+            };
+            let a = s.origin.as_ref().unwrap_or(&s.path);
+            let b = next.origin.as_ref().unwrap_or(&next.path);
+            let number = |p: &Path| {
+                p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.strip_prefix("segment-"))
+                    .and_then(|s| s.parse::<u64>().ok())
+            };
+            let adjacent = number(a)
+                .zip(number(b))
+                .is_some_and(|(a, b)| a.checked_add(1) == Some(b));
+            if adjacent && a.parent() == b.parent() && next.start > s.start {
+                next.start - s.start
+            } else {
+                own
+            }
+        })
+        .collect()
+}
+
 /// Concat-list durations that keep segment seams gapless. The concat demuxer
 /// shifts each file by its own container start time, so a segment whose start
 /// is not zero (the first segment of a session starts after AAC priming) must
@@ -1539,6 +1814,312 @@ pub fn concat_durations(spans: &[f64], starts: &[f64]) -> Vec<f64> {
 mod tests {
     use super::*;
     use crate::geometry::{plan, CaptureRect};
+
+    #[test]
+    fn video_time_base_preserves_aac_packet_timing_on_both_tracks() {
+        let Ok(media) = Media::discover() else { return };
+        let root = tempfile::tempdir().unwrap();
+        let clip = root.path().join("audio-clock.mkv");
+        let mut ffmpeg = command(&media.ffmpeg);
+        ffmpeg.args([
+            "-v",
+            "error",
+            "-xerror",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:r=60:d=3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=f=440:r=48000:d=3",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-map",
+            "1:a",
+            "-c:a",
+            "aac",
+        ]);
+        encoding_args(
+            &mut ffmpeg,
+            &Settings::default(),
+            "libopenh264",
+            (320, 180),
+            true,
+        );
+        let output = ffmpeg
+            .args(["-threads:v", "2"])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let output = command(&media.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-show_packets",
+                "-show_entries",
+                "packet=stream_index,pts_time",
+                "-of",
+                "json",
+            ])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let packets = report["packets"].as_array().unwrap();
+        for (stream, expected, cadence) in [
+            (0, 180, 1. / 60.),
+            // The AAC encoder emits one priming packet before 141 payload packets.
+            (1, 142, 1024. / 48000.),
+            (2, 142, 1024. / 48000.),
+        ] {
+            let pts: Vec<f64> = packets
+                .iter()
+                .filter(|packet| packet["stream_index"] == stream)
+                .map(|packet| packet["pts_time"].as_str().unwrap().parse().unwrap())
+                .collect();
+            assert_eq!(pts.len(), expected, "stream {stream}");
+            for pair in pts.windows(2) {
+                let delta = pair[1] - pair[0];
+                assert!(
+                    (delta - cadence).abs() <= 0.001,
+                    "stream {stream}: {delta} s"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_mp4_keeps_all_video_and_trims_only_the_unpaired_audio_tail() {
+        let Ok(media) = Media::discover() else { return };
+        let root = tempfile::tempdir().unwrap();
+        let mut segments = Vec::new();
+        for (index, (start, video, audio)) in
+            [(0., 2., 1.96), (2., 1.5, 1.846)].into_iter().enumerate()
+        {
+            let path = root.path().join(format!("segment-{index:08}.mkv"));
+            let output = command(&media.ffmpeg)
+                .args(["-v", "error", "-f", "lavfi", "-i"])
+                .arg(format!("testsrc2=s=160x90:r=60:d={video}"))
+                .args(["-f", "lavfi", "-i"])
+                .arg(format!("sine=f=440:r=48000:d={audio}"))
+                .args(["-f", "lavfi", "-i"])
+                .arg(format!("sine=f=880:r=48000:d={audio}"))
+                .args([
+                    "-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "mpeg4", "-g", "120",
+                    "-bf", "0", "-c:a", "aac",
+                ])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let info = media.probe(&path).unwrap();
+            segments.push(Segment {
+                path,
+                start,
+                end: start + video,
+                bytes: info.bytes,
+                origin: None,
+                start_time: Some(info.start_time),
+            });
+        }
+        let before = root.path().join("before.mkv");
+        let after = root.path().join("after.mp4");
+        media.concat(&segments, &before, 2).unwrap();
+        media.concat(&segments, &after, 2).unwrap();
+        let hashes = |path: &Path| {
+            let output = command(&media.ffprobe)
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "packet=data_hash",
+                    "-show_data_hash",
+                    "SHA256",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .filter(|line| line.starts_with("SHA256:"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let original = hashes(&before);
+        assert_eq!(original.len(), 210);
+        assert_eq!(hashes(&after), original);
+        let output = command(&media.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=start_time,duration",
+                "-of",
+                "json",
+            ])
+            .arg(&after)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let streams = report["streams"].as_array().unwrap();
+        let end = |track: &serde_json::Value| {
+            track["start_time"]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap()
+                + track["duration"].as_str().unwrap().parse::<f64>().unwrap()
+        };
+        assert_eq!(streams.len(), 3);
+        for audio in &streams[1..] {
+            let delta = end(audio) - end(&streams[0]);
+            assert!(
+                (-0.040..=0.002).contains(&delta),
+                "A/V end delta: {delta:+.6} s"
+            );
+        }
+    }
+
+    #[test]
+    fn variable_packet_duration_cannot_move_adjacent_segment_start() {
+        let segment = |n: u32, start: f64, end: f64, session: &str| Segment {
+            path: PathBuf::from(format!("snapshot/{n:08}.mkv")),
+            origin: Some(PathBuf::from(format!("{session}/segment-{n:08}.mkv"))),
+            start,
+            end,
+            bytes: 100,
+            start_time: Some(0.),
+        };
+        let mut s = vec![
+            segment(0, 0., 2.016, "capture"),
+            segment(1, 2.004, 4.020, "capture"),
+            segment(2, 4.008, 6., "capture"),
+        ];
+        assert_eq!(concat_source_spans(&s), vec![2.004, 2.004, 1.992]);
+        s[1].origin = Some(PathBuf::from("other/segment-00000001.mkv"));
+        assert_eq!(concat_source_spans(&s)[0], 2.016);
+        s[1].origin = Some(PathBuf::from("capture/segment-00000003.mkv"));
+        assert_eq!(concat_source_spans(&s)[0], 2.016);
+    }
+    #[test]
+    fn sfc_changes_only_the_quick_sync_conversion() {
+        // wgc-sfc (vpp_scale_mode=1): every filter graph equals the default
+        // one except for `:scale_mode=1` inside vpp_qsv. Frame selection
+        // (frame_timing) does not depend on it at all.
+        let rect = CaptureRect {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1600,
+        };
+        let sfc = parse_tuning("vpp_scale_mode=1");
+        assert_eq!(sfc.vpp_scale_mode, Some(1));
+        assert_eq!(parse_tuning("vpp_scale_mode=9").vpp_scale_mode, None);
+        assert_eq!(parse_tuning("vpp_scale_mode=x").vpp_scale_mode, None);
+        let base = Tuning::default();
+        for mode in ["stretch", "fit", "crop", "native"] {
+            let p = plan(rect, 1920, 1080, mode).unwrap();
+            for scaler in [
+                Scaler::D3d11,
+                Scaler::WgcGpu,
+                Scaler::Cuda,
+                Scaler::QsvZeroCopy,
+                Scaler::QsvHybrid,
+                Scaler::Cpu,
+            ] {
+                let a = video_filter_with(&p, scaler, &base);
+                let b = video_filter_with(&p, scaler, &sfc);
+                if matches!(scaler, Scaler::QsvZeroCopy | Scaler::QsvHybrid) {
+                    assert_eq!(b.replacen(":scale_mode=1", "", 1), a, "{scaler:?} {mode}");
+                    assert!(b.contains("vpp_qsv=") && b.contains(":scale_mode=1"));
+                } else {
+                    assert_eq!(a, b, "{scaler:?} {mode}");
+                }
+            }
+        }
+        // frame_timing takes no tuning besides early drop (off for wgc-sfc):
+        // the re-timing that feeds the CFR output stays as today.
+        assert_eq!(frame_timing(60, 1, false), regrid_filter(60));
+    }
+
+    #[test]
+    fn helpers_run_in_the_background_and_keep_their_output() {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::{
+            Foundation::HANDLE,
+            System::Threading::{
+                GetPriorityClass, GetProcessInformation, ProcessMemoryPriority,
+                ProcessPowerThrottling, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
+                PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+            },
+        };
+        // What the save, probe and thumbnail helpers get: below normal, EcoQoS
+        // and low memory priority, read back from Windows.
+        let mut child = helper("cmd")
+            .args(["/c", "ping -n 3 127.0.0.1 >nul"])
+            .spawn()
+            .unwrap();
+        background_process(&child, true);
+        let h = HANDLE(child.as_raw_handle());
+        let mut eco = PROCESS_POWER_THROTTLING_STATE {
+            Version: 1,
+            ..Default::default()
+        };
+        let mut memory = MEMORY_PRIORITY_INFORMATION::default();
+        unsafe {
+            assert_eq!(GetPriorityClass(h), BELOW_NORMAL_PRIORITY_CLASS);
+            GetProcessInformation(
+                h,
+                ProcessPowerThrottling,
+                &mut eco as *mut _ as *mut std::ffi::c_void,
+                std::mem::size_of_val(&eco) as u32,
+            )
+            .unwrap();
+            GetProcessInformation(
+                h,
+                ProcessMemoryPriority,
+                &mut memory as *mut _ as *mut std::ffi::c_void,
+                std::mem::size_of_val(&memory) as u32,
+            )
+            .unwrap();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(
+            eco.ControlMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            1
+        );
+        assert_eq!(eco.StateMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 1);
+        assert_eq!(memory.MemoryPriority, MEMORY_PRIORITY_LOW);
+        // Output and exit status still come back, as with Command::output.
+        let out = helper("cmd")
+            .args(["/c", "echo replayx& exit 3"])
+            .background_output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "replayx");
+    }
 
     fn args_for(encoder: &str) -> Vec<String> {
         let mut c = Command::new("ffmpeg");
@@ -1818,6 +2399,16 @@ mod tests {
         let t = parse_tuning("capture_api=wgc,wgc_window=replayx-gameproxy.exe,wgc_border=0");
         assert!(t.wgc && !t.wgc_border);
         assert!(parse_tuning("wgc_border=1").wgc_border);
+        // Experiments stay opt-in: the capture keeps its normal scheduling.
+        assert!(!d.capture_eco);
+        assert!(parse_tuning("capture_eco=1").capture_eco);
+        assert!(d.wgc_adaptive && !parse_tuning("wgc_adaptive=0").wgc_adaptive);
+        assert!(!d.wgc_early_drop && parse_tuning("wgc_early_drop=1").wgc_early_drop);
+        // Early drop selects frames before conversion; the default re-times.
+        assert_eq!(frame_timing(60, 1, true), "fps=60:round=near");
+        assert_eq!(frame_timing(60, 2, false), "fps=60:round=near");
+        assert_eq!(frame_timing(60, 1, false), regrid_filter(60));
+        assert_eq!(parse_tuning("wgc_floor_us=15000").wgc_floor_us, Some(15000));
         assert_eq!(t.wgc_window.as_deref(), Some("replayx-gameproxy.exe"));
         // Characters that would end or extend the filter option are refused.
         for bad in ["a:b", "x'y", "a[b]", "a;b", r"a\b"] {
@@ -2123,5 +2714,24 @@ mod tests {
             ..Default::default()
         };
         assert!(bad.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_publication_tests {
+    use super::*;
+    #[test]
+    fn publishing_native_mp4_never_replaces_an_existing_clip() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("new.partial.mp4");
+        let existing = dir.path().join("saved.mp4");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&existing, b"original").unwrap();
+        assert!(publish_native_mp4(&source, &existing).is_err());
+        assert_eq!(fs::read(&existing).unwrap(), b"original");
+        assert!(source.exists());
+        let ready = dir.path().join("ready.mp4");
+        publish_native_mp4(&source, &ready).unwrap();
+        assert_eq!(fs::read(ready).unwrap(), b"new");
     }
 }

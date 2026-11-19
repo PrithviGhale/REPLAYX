@@ -1,5 +1,97 @@
 # Changelog
 
+
+## 0.4.0
+
+- Added Crosshair Studio with presets, persistent edits, and capture exclusion on supported displays and games.
+- Improved FFmpeg audio timing across recording and replay segments and kept completed footage recoverable after a failed Stop.
+- Added experimental Native V2 hardware recording for compatible setups. FFmpeg remains the default and handles fallback.
+- Removed retired diagnostic executables during an installer upgrade while preserving saved recordings and settings.
+
+See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) for compatibility and the measured results.
+
+## 0.4.0-rc.3
+
+- Kept FFmpeg audio on its sample clock, correcting recurring AAC timing gaps without changing the video frame grid.
+- Cleared the saving state after a failed recording stop and retained completed clips for recovery. A second Stop cannot take ownership of the same recording.
+- Saved pending Crosshair Studio edits when leaving the page and kept overlapping saves in edit order.
+- Staged the Native worker before desktop source checks and installer builds, including on clean CI checkouts.
+- Kept FFmpeg as default and Native V2 experimental. No engine tuning or frame-selection changes.
+
+## 0.4.0-rc.2
+
+### Fixed
+
+- Native reports the hardware encoder startup stage and adapter. If Media Foundation exposes another matching encoder on the same adapter, startup can try that entry once before the existing FFmpeg fallback.
+- Crosshair Studio keeps its window hidden when Windows cannot confirm capture exclusion. Unchanged overlay settings avoid a periodic allocation.
+
+### Setup
+
+- Branded uninstaller header. The Windows wizard keeps native controls, the existing per-user upgrade path and the desktop shortcut option.
+- Prepared read-only clean-install and upgrade test kits and added timestamp checks to the signing build.
+
+### Known limitations
+
+- The NVIDIA Media Foundation activation failure remains reproducible on the tested Intel-driven hybrid layout. FFmpeg NVENC passed a generated hardware probe. Radeon hardware and matched gameplay performance still need qualification.
+
+## 0.4.0-rc.1
+
+### Added
+
+- Crosshair Studio with a live preview, built-in styles, display alignment controls and a visibility hotkey.
+- Experimental Native V2 recording with same-adapter H.264, phase-locked 1080p60 capture and MP4 saves on compatible configurations.
+- Branded Windows setup artwork for the per-user installer.
+
+### Fixed
+
+- Diagnostic replay saves can wait briefly for the first finished segment after an FFmpeg restart.
+- Native startup checks that the display adapter still matches the preflight result. A mismatch uses the existing FFmpeg startup fallback.
+- The offline benchmark rejects restarted recording phases and validates MKV audio using decoded timestamps.
+
+### Compatibility
+
+- FFmpeg remains the existing default. Automatic uses FFmpeg's hardware probes during this candidate.
+- Native is opt-in. Radeon native encoding, matched gameplay performance and installer upgrades are undergoing validation.
+
+
+## Unreleased — Crosshair Studio V1 (`feature/crosshair-studio-v1`)
+
+- **Crosshair Studio** (Tools → Crosshair Studio), off until turned on:
+  - 16 original styles. Shapes: cross, T, circle, dot, box and chevron.
+  - Per-line on/off for a cross, rotation 0–90° (turned lines are
+    anti-aliased), a square or round center dot, and a ring that works with
+    any shape.
+  - Color, length, thickness, gap, opacity, outline and position.
+  - A live preview from the same geometry as the on-screen crosshair (shared
+    test fixture).
+  - In-game only (default; hidden 1.5 s after the game leaves the front) or
+    Always on.
+  - A show/hide shortcut (Ctrl+Shift+F6), registered only while the crosshair
+    is on.
+  - A choice of display.
+  - The page finds recognized games already running behind other windows
+    (started before REPLAYX), and warns when a game was in exclusive full
+    screen.
+  - The crosshair goes back on top if a game puts itself above it while in
+    front. The z-order is read once a second, without messaging any window.
+- **Native overlay** (`crosshair_overlay.rs`):
+  - A small layered Win32 window on its own thread: click-through, never
+    activated, no taskbar or Alt+Tab entry, topmost, per-monitor DPI aware,
+    and excluded from capture.
+  - The bitmap is drawn once per change, with no render loop. The thread
+    waits in `GetMessageW`, and turning the crosshair off destroys the window.
+- **Settings:** `Settings::crosshair` is read leniently, so a damaged entry
+  never costs other settings. Values are clamped to the slider limits, and
+  the shortcut is kept distinct.
+- **Verified:**
+  - Not in clips with Desktop Duplication or Windows Graphics Capture
+    (`replayx-cli crosshair-capture-test`).
+  - 0.00 ms CPU in REPLAYX while shown (`replayx-cli crosshair-bench`).
+  - In a borderless full-screen GPU workload, presentation was unchanged and
+    average FPS stayed within run-to-run variation.
+  - End to end in the real app.
+  - Details: [docs/engineering/CROSSHAIR_STUDIO_V1.md](docs/engineering/CROSSHAIR_STUDIO_V1.md).
+
 ## 0.3.1-alpha.9 - faster starts, clearer controls and signed updates
 
 Published November 13, 2026 as an alpha prerelease. Includes the unpublished Alpha.7 and Alpha.8 work. User-facing notes: [docs/release-notes/v0.3.1-alpha.9.md](docs/release-notes/v0.3.1-alpha.9.md).

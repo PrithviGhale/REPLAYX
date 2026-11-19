@@ -61,6 +61,8 @@ impl Default for AudioSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Experimental backend, opt-in only. Existing files remain on FFmpeg.
+    pub recording_engine: String,
     pub capture: String,
     pub display: u32,
     pub window_title: String,
@@ -131,6 +133,11 @@ pub struct Settings {
     pub capture_notices: bool,
     /// Update checks, downloads and installs (see `updates`).
     pub updates: crate::updates::UpdateSettings,
+    /// Crosshair Studio (off until the user turns it on). Read leniently: a
+    /// damaged crosshair entry falls back to the default and never makes the
+    /// rest of the settings unreadable.
+    #[serde(deserialize_with = "crate::crosshair::lenient")]
+    pub crosshair: crate::crosshair::CrosshairSettings,
     /// Settings file layout version (see `migrate`); absent in older files.
     #[serde(default)]
     pub settings_version: u32,
@@ -142,6 +149,7 @@ pub const SETTINGS_VERSION: u32 = 6;
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            recording_engine: "ffmpeg".into(),
             capture: "desktop-duplication".into(),
             display: 0,
             window_title: String::new(),
@@ -184,6 +192,7 @@ impl Default for Settings {
             voice_presets: Vec::new(),
             playtime: Default::default(),
             updates: Default::default(),
+            crosshair: Default::default(),
             capture_notices: true,
             settings_version: SETTINGS_VERSION,
         }
@@ -253,6 +262,9 @@ impl Settings {
         true
     }
     pub fn validate(&self) -> Result<()> {
+        if !["auto", "ffmpeg", "native"].contains(&self.recording_engine.as_str()) {
+            bail!("Unknown recording engine")
+        }
         if !crate::geometry::CANVAS_MODES.contains(&self.canvas_mode.as_str()) {
             bail!("Unknown canvas mode")
         }
@@ -381,6 +393,14 @@ impl Settings {
                 bail!("Hotkeys must be nonempty and distinct")
             }
         }
+        // The crosshair shortcut is optional ("" for none).
+        let cross = &self.crosshair.hotkey;
+        if !cross.is_empty() && keys.iter().any(|k| k.eq_ignore_ascii_case(cross)) {
+            bail!("The crosshair shortcut is already used by another REPLAYX shortcut")
+        }
+        if self.crosshair != self.crosshair.sanitized() {
+            bail!("Crosshair values are out of range")
+        }
         Ok(())
     }
     /// Windows-style separators in the clips folder. Older versions saved
@@ -420,8 +440,9 @@ impl Settings {
                 let keys = s.migrate_legacy_hotkeys();
                 let layout = s.migrate();
                 let paths = s.normalize_paths();
+                let crosshair = s.normalize_crosshair();
                 s.validate()?;
-                Ok((s, keys || layout || paths))
+                Ok((s, keys || layout || paths || crosshair))
             });
         let (s, migrated) = checked.map_err(|e| LoadError::Damaged(e, bytes))?;
         if migrated {
@@ -430,6 +451,33 @@ impl Settings {
             }
         }
         Ok(s)
+    }
+    /// Keep the crosshair inside its limits, and its shortcut distinct from
+    /// REPLAYX's other shortcuts (another free one, or none). True when
+    /// something changed.
+    pub fn normalize_crosshair(&mut self) -> bool {
+        let before = self.crosshair.clone();
+        self.crosshair = self.crosshair.sanitized();
+        let used = [
+            &self.replay_hotkey,
+            &self.recording_hotkey,
+            &self.mute_hotkey,
+            &self.pause_hotkey,
+            &self.window_hotkey,
+        ]
+        .map(|k| k.to_ascii_lowercase());
+        if used.contains(&self.crosshair.hotkey.to_ascii_lowercase()) {
+            self.crosshair.hotkey = [
+                crate::crosshair::DEFAULT_HOTKEY,
+                "Control+Shift+F5",
+                "Control+Alt+F6",
+            ]
+            .into_iter()
+            .find(|k| !used.contains(&k.to_ascii_lowercase()))
+            .unwrap_or_default()
+            .into();
+        }
+        self.crosshair != before
     }
     fn migrate_legacy_hotkeys(&mut self) -> bool {
         let current = [
@@ -1132,6 +1180,65 @@ mod tests {
         assert!(problem.is_none());
         assert_eq!(s.fps, Settings::default().fps);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+    #[test]
+    fn older_settings_get_a_switched_off_crosshair_and_keep_everything_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        // A file from before Crosshair Studio, with custom values.
+        let mut old = serde_json::to_value(Settings {
+            fps: 30,
+            replay_seconds: 900,
+            ..Default::default()
+        })
+        .unwrap();
+        old.as_object_mut().unwrap().remove("crosshair");
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let (s, problem) = Settings::load_or_recover(&path);
+        assert!(problem.is_none());
+        assert_eq!((s.fps, s.replay_seconds), (30, 900));
+        assert_eq!(s.crosshair, crate::crosshair::CrosshairSettings::default());
+        assert!(!s.crosshair.enabled);
+    }
+    #[test]
+    fn a_damaged_crosshair_never_costs_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut v = serde_json::to_value(Settings {
+            fps: 30,
+            ..Default::default()
+        })
+        .unwrap();
+        v["crosshair"] = serde_json::json!({ "enabled": true, "length": "huge", "color": 7 });
+        fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+        let (s, problem) = Settings::load_or_recover(&path);
+        assert!(problem.is_none(), "not treated as a damaged settings file");
+        assert_eq!(s.fps, 30);
+        assert_eq!(s.crosshair, crate::crosshair::CrosshairSettings::default());
+        // Out-of-range values are clamped when read.
+        v["crosshair"] = serde_json::json!({ "enabled": true, "gap": 500, "opacity": 0 });
+        fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+        let (s, _) = Settings::load_or_recover(&path);
+        assert!(s.crosshair.enabled);
+        assert_eq!(s.crosshair.gap, crate::crosshair::GAP.1);
+        assert_eq!(s.crosshair.opacity, crate::crosshair::OPACITY.0);
+    }
+    #[test]
+    fn the_crosshair_shortcut_never_collides_with_another() {
+        let mut s = Settings::default();
+        assert!(s.validate().is_ok());
+        assert!(!s.normalize_crosshair(), "defaults are already distinct");
+        s.window_hotkey = crate::crosshair::DEFAULT_HOTKEY.into();
+        assert!(s.validate().is_err());
+        assert!(s.normalize_crosshair());
+        assert_eq!(s.crosshair.hotkey, "Control+Shift+F5");
+        assert!(s.validate().is_ok());
+        // No shortcut at all is allowed.
+        s.crosshair.hotkey.clear();
+        assert!(s.validate().is_ok());
+        // Values outside the sliders are refused when saving.
+        s.crosshair.length = 999.0;
+        assert!(s.validate().is_err());
     }
     #[test]
     fn reject_bad_settings() {

@@ -85,7 +85,7 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const { toast } = useApp();
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
-    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
+    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, backend: x.recording_engine, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
     free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice, noticeId: x.notice_id ?? 0,
     // Compared as text: the status object is new on every poll.
     settingsProblem: x.settings_problem ? JSON.stringify(x.settings_problem) : '', hotkey: x.hotkey_error, recovery: x.recovery_sessions,
@@ -165,7 +165,7 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
           <dl className="facts">
             <div><dt><MonitorPlay size={14} />Display</dt><dd>{display ? `${display.device.replace('\\\\.\\', '')} · ${display.active_width}×${display.active_height} @ ${display.refresh_hz} Hz` : draft.capture === 'desktop-duplication' ? `Display ${draft.display + 1}` : 'GDI capture'}</dd></div>
             <div><dt>Output</dt><dd>{out} · {active && s.fps ? `${s.fps.toFixed(0)} / ${draft.fps}` : draft.fps} fps</dd></div>
-            <div><dt><Cpu size={14} />Encoder</dt><dd>{active && s.encoder ? encoderName(s.encoder) : `${encoderName(draft.encoder)} · chosen at start`}</dd></div>
+            <div><dt><Cpu size={14} />{s.backend === 'native' && active ? 'Native Engine ? Alpha' : 'Encoder'}</dt><dd>{active && s.encoder ? encoderName(s.encoder) : `${encoderName(draft.encoder)} · chosen at start`}</dd></div>
             <div><dt>Scaling</dt><dd>{active && s.scaling ? s.scaling : draft.gpu_scaling ? 'Fastest working GPU path' : 'CPU (GPU scaling off)'}</dd></div>
             <div><dt><HardDrive size={14} />Free space</dt><dd>{native ? bytes(s.free) : '—'}</dd></div>
             <div><dt>Buffer on disk</dt><dd>{bytes(s.bufferBytes)}</dd></div>

@@ -11,6 +11,7 @@
 //! written to --log (FPS, 1% and 0.1% lows).
 //!
 //! usage: replayx-gameproxy --seconds 30 --log out.json [--iters 200] [--cpu-us 0]
+//!        [--stall-log stalls.txt]
 //! Escape closes it early. No audio.
 use std::{
     ffi::c_void,
@@ -264,6 +265,19 @@ fn main() -> windows::core::Result<()> {
         .collect();
     let detail: u32 = arg("--detail", 0);
     let log: String = arg("--log", "gameproxy.json".to_string());
+    // --stall-log FILE: one line per frame longer than 200 ms, written at
+    // once ("qpc_seconds frame_ms"), so a tool watching it (a circular ETW
+    // trace) can stop right after a stall instead of after the whole run.
+    let stall_log: String = arg("--stall-log", String::new());
+    let mut stall_file = (!stall_log.is_empty())
+        .then(|| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&stall_log)
+                .ok()
+        })
+        .flatten();
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let instance = GetModuleHandleW(None)?;
@@ -557,6 +571,17 @@ fn main() -> windows::core::Result<()> {
             };
             let _ = swap.Present(0, present_flags);
             presents.push(start.elapsed().as_secs_f64());
+            if let (Some(f), [.., a, b]) = (&mut stall_file, presents.as_slice()) {
+                if b - a > 0.2 {
+                    use std::io::Write;
+                    let (mut qpc, mut freq) = (0i64, 0i64);
+                    let _ = windows::Win32::System::Performance::QueryPerformanceCounter(&mut qpc);
+                    let _ =
+                        windows::Win32::System::Performance::QueryPerformanceFrequency(&mut freq);
+                    let _ = writeln!(f, "{:.6} {:.1}", qpc as f64 / freq as f64, (b - a) * 1000.0);
+                    let _ = f.flush();
+                }
+            }
             if presents.len().is_multiple_of(32) {
                 if let Some(media) = &media {
                     let mut stats = DXGI_FRAME_STATISTICS_MEDIA::default();

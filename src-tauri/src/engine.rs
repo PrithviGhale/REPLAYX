@@ -1,3 +1,5 @@
+#[path = "engine_native.rs"]
+mod native_backend;
 use crate::{
     audio::{self, AudioFeed},
     buffer::{snapshot, Ring, Segment},
@@ -66,6 +68,8 @@ impl Status {
 }
 #[derive(Default, Clone, Serialize)]
 pub struct Status {
+    pub recording_engine: String,
+    pub engine_fallback: Option<String>,
     pub state: String,
     pub replay: bool,
     pub recording: bool,
@@ -184,6 +188,7 @@ struct PipelineRequest {
 }
 /// A started encoder, ready to be installed into the engine.
 struct Prepared {
+    engine_fallback: Option<String>,
     pipeline: Pipeline,
     encoder: String,
     scaling_detail: Option<String>,
@@ -243,6 +248,7 @@ struct Progress {
     lines: Mutex<Vec<String>>,
 }
 struct Pipeline {
+    native: Option<native_backend::Session>,
     child: Child,
     _job: crate::process_job::CaptureJob,
     discard_tail: bool,
@@ -320,6 +326,15 @@ pub struct Inner {
 }
 #[derive(Clone)]
 pub struct Engine(pub Arc<Mutex<Inner>>, Arc<Published>);
+#[derive(Debug)]
+struct ReplayNotReady;
+impl std::fmt::Display for ReplayNotReady {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("No finalized footage yet. Wait at least two seconds.")
+    }
+}
+impl std::error::Error for ReplayNotReady {}
+
 pub struct SaveJob {
     media: Media,
     segments: Vec<Segment>,
@@ -583,6 +598,22 @@ impl Engine {
         self.publish(&i);
         Ok(())
     }
+    /// Crosshair Studio changes apply at once, also during capture: the
+    /// crosshair is a separate window and never touches the recording.
+    /// Returns what was saved (values made safe).
+    pub fn set_crosshair(
+        &self,
+        c: crate::crosshair::CrosshairSettings,
+    ) -> Result<crate::crosshair::CrosshairSettings> {
+        let mut i = self.0.lock().unwrap();
+        let mut next = i.settings.clone();
+        next.crosshair = c.sanitized();
+        next.validate()?;
+        i.persist(&next)?;
+        i.settings = next;
+        self.publish(&i);
+        Ok(i.settings.crosshair.clone())
+    }
     /// Update preferences apply at once, also during capture.
     pub fn set_updates(&self, u: crate::updates::UpdateSettings) -> Result<()> {
         let mut i = self.0.lock().unwrap();
@@ -667,6 +698,9 @@ impl Engine {
     /// the encoder is started *without* holding the engine lock, so status,
     /// Stop and every other command stay responsive during startup.
     fn start(&self, recording: bool, synthetic: bool) -> Result<()> {
+        let synthetic = synthetic
+            || (crate::native_alpha_enabled()
+                && std::env::var_os("REPLAYX_ALPHA_SYNTHETIC").is_some_and(|v| v == "1"));
         let began = Instant::now();
         let request = {
             let mut i = self.0.lock().unwrap();
@@ -744,7 +778,16 @@ impl Engine {
                 i.install_pipeline(p);
                 i.status.replay = intent.replay;
                 if intent.recording {
-                    i.attach(true)
+                    let result = i.attach(true);
+                    let began = i
+                        .pipeline
+                        .as_ref()
+                        .filter(|p| p.native.is_some())
+                        .map(|p| p.started);
+                    if let (Some(began), Some(recording)) = (began, i.recording.as_mut()) {
+                        recording.started = began;
+                    }
+                    result
                 } else {
                     Ok(())
                 }
@@ -799,7 +842,7 @@ impl Engine {
         let requested = Instant::now();
         let stop_at = {
             let mut i = self.0.lock().unwrap();
-            if i.recording.is_none() {
+            if !i.status.recording || i.recording.is_none() {
                 bail!("No active recording")
             }
             let out = i
@@ -838,46 +881,86 @@ impl Engine {
             thread::sleep(Duration::from_millis(50));
         }
         let mut i = self.0.lock().unwrap();
-        if !finalized && i.recording.is_some() && i.pipeline.is_some() {
-            // Fallback: finalize the in-flight segment by stopping the encoder.
-            let restart = i.status.replay;
-            i.stop_clean()?;
-            if restart {
-                if let Err(e) = i.start_pipeline(false) {
-                    i.fail(format!(
-                        "Recording finalized, but replay restart failed: {e}"
-                    ));
+        self.finish_recording_stop(&mut i, requested, finalized)
+    }
+
+    fn finish_recording_stop(
+        &self,
+        i: &mut Inner,
+        requested: Instant,
+        finalized: bool,
+    ) -> Result<SaveJob> {
+        let result = (|| {
+            if let Some(pipeline) = &i.pipeline {
+                if i.recording.is_some() && (!finalized || !i.status.replay) {
+                    // Recording-only capture also stops when the requested
+                    // segment was already finalized. A replay needs a restart
+                    // only when the segment had to be finalized by stopping.
+                    let restart = i.status.replay;
+                    let synthetic = pipeline.synthetic;
+                    i.stop_clean()?;
+                    if restart {
+                        if let Err(e) = i.start_pipeline(synthetic) {
+                            i.fail(format!(
+                                "Recording finalized, but replay restart failed: {e}"
+                            ));
+                        }
+                    }
                 }
             }
-        }
-        let Some(mut rec) = i.recording.take() else {
+            let Some(mut rec) = i.recording.take() else {
+                bail!("The recording ended unexpectedly; recover its segments from Instant Replay")
+            };
+            if rec.segments.is_empty() {
+                let _ = fs::remove_dir(&rec.dir);
+                bail!("The recording has no finished footage yet. Record for at least two seconds.")
+            }
+            let expected = i.expected_audio();
+            i.fill_start_times(&mut rec.segments);
+            let (path, tags) = i.clip_path("Recording", rec.started, requested);
+            Ok(SaveJob {
+                media: i.media.clone(),
+                segments: rec.segments,
+                path,
+                expected_audio: expected,
+                dir: rec.dir,
+                requested,
+                tags,
+            })
+        })();
+        if result.is_err() {
+            // A failed handoff has no SaveJob to complete. Keep the retained
+            // files and allow Recover once a stopped encoder is detached.
             i.status.saving = i.status.saving.saturating_sub(1);
-            bail!("The recording ended unexpectedly; recover its segments from Instant Replay")
-        };
-        if rec.segments.is_empty() {
-            i.status.saving = i.status.saving.saturating_sub(1);
-            bail!("The recording has no finished footage yet. Record for at least two seconds.")
+            if i.pipeline.is_none() {
+                i.recording = None;
+                i.status.replay = false;
+            } else if let Some(rec) = &mut i.recording {
+                rec.stop_at = None;
+                i.status.recording = true;
+            }
+            i.refresh_session_count();
         }
-        let expected = i.expected_audio();
-        i.fill_start_times(&mut rec.segments);
-        let clip = i.clip_path("Recording", rec.started, requested);
-        let job = SaveJob {
-            media: i.media.clone(),
-            segments: rec.segments,
-            path: clip.0,
-            expected_audio: expected,
-            dir: rec.dir,
-            requested,
-            tags: clip.1,
-        };
-        if !i.status.replay && i.pipeline.is_some() {
-            // Recording only: capture is no longer needed. The recording holds
-            // its own links to every segment, so the replay buffer can go.
-            i.stop_clean()?;
-        }
-        self.publish(&i);
-        Ok(job)
+        self.publish(i);
+        result
     }
+    /// Diagnostic callers may wait briefly for a restarted encoder's first
+    /// completed segment. Only an empty live buffer is retried. Stop, storage
+    /// and encoder errors return immediately, and no engine lock spans a wait.
+    pub fn save_replay_when_ready(&self, timeout: Duration) -> Result<SaveJob> {
+        let began = Instant::now();
+        loop {
+            match self.save_replay() {
+                Err(error) if error.is::<ReplayNotReady>() && began.elapsed() < timeout => {
+                    thread::sleep(
+                        Duration::from_millis(50).min(timeout.saturating_sub(began.elapsed())),
+                    );
+                }
+                result => return result,
+            }
+        }
+    }
+
     pub fn save_replay(&self) -> Result<SaveJob> {
         let requested = Instant::now();
         let mut i = self.0.lock().unwrap();
@@ -893,7 +976,7 @@ impl Engine {
         i.fill_start_times(&mut segments);
         if segments.is_empty() {
             let _ = fs::remove_dir(&dir);
-            bail!("No finalized footage yet. Wait at least two seconds.")
+            return Err(ReplayNotReady.into());
         }
         i.status.saving += 1;
         self.publish(&i);
@@ -947,14 +1030,17 @@ impl Engine {
             i.status.pending_recording = false;
             i.status.recording
         };
-        if recording {
-            let job = self.stop_recording()?;
-            let result = job.run();
-            self.complete_save(&result);
-            result?;
-        }
-        self.stop_replay()?;
-        Ok(())
+        let saved = if recording {
+            self.stop_recording().and_then(|job| {
+                let result = job.run();
+                self.complete_save(&result);
+                result.map(|_| ())
+            })
+        } else {
+            Ok(())
+        };
+        // A failed recording save must not leave Instant Replay running.
+        saved.and(self.stop_replay())
     }
     pub fn set_mix(&self, index: usize, volume: f32, muted: bool) -> Result<()> {
         if !volume.is_finite() || !(0.0..=2.0).contains(&volume) {
@@ -1006,6 +1092,20 @@ impl Engine {
                 if !dir.is_dir() || !crate::model::owned_session(&base, &dir) {
                     continue;
                 }
+                // The buffer's worker command identifies the actual engine
+                // even if the user's Native preference fell back to FFmpeg.
+                let native = crate::model::regular_file(&dir.join("native-command.txt"));
+                let native_manifest = if native {
+                    manifest_tail(&dir.join("segments.csv"), 0).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let native_spans: std::collections::HashMap<_, _> = native_manifest
+                    .split_inclusive('\n')
+                    .filter(|line| line.ends_with('\n'))
+                    .filter_map(|line| segment_manifest_row(line).ok())
+                    .map(|(name, start, end)| (name, (start, end)))
+                    .collect();
                 let mut files: Vec<_> = fs::read_dir(&dir)?
                     .flatten()
                     .map(|e| e.path())
@@ -1028,8 +1128,12 @@ impl Engine {
                     }
                     if let Some(probe) = probed {
                         tracks = probe.audio_tracks;
-                        let start = end;
-                        end += probe.duration;
+                        let span = path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .and_then(|name| native_spans.get(name).copied());
+                        let start = span.map_or(end, |(start, _)| start);
+                        end = span.map_or(start + probe.duration, |(_, end)| end);
                         segments.push(Segment {
                             path,
                             start,
@@ -1053,7 +1157,7 @@ impl Engine {
                     .join("recovery")
                     .join(uuid::Uuid::new_v4().to_string());
                 let pinned = snapshot(&segments, &snapshot_dir)?;
-                let destination = i.clip_path_flat("Recovered");
+                let destination = i.clip_path_flat("Recovered", if native { "mp4" } else { "mkv" });
                 i.media.concat(&pinned, &destination, tracks)?;
                 fs::remove_dir_all(snapshot_dir)?;
                 // Remove only recovered media; unreadable/torn files remain for inspection.
@@ -1398,6 +1502,30 @@ fn wgc_missing_slots(
 /// capture-path probes, audio devices and the encoder process. Runs without
 /// the engine lock. Each stage is timed from the start request.
 fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
+    if req.settings.recording_engine == "native" {
+        match native_backend::prepare(&req) {
+            Ok(prepared) => return Ok(prepared),
+            Err(error) => {
+                if req.synthetic
+                    && std::env::var_os("REPLAYX_NATIVE_PHYSICAL_AUDIO").is_some_and(|v| v == "1")
+                {
+                    return Err(error.context(
+                        "Physical audio/native integration failed; synthetic fallback is refused",
+                    ));
+                }
+                let mut fallback = req.clone();
+                fallback.settings.recording_engine = "ffmpeg".into();
+                let mut prepared = prepare_ffmpeg(fallback).with_context(|| {
+                    format!("Native initialization failed ({error:#}); FFmpeg fallback also failed")
+                })?;
+                prepared.engine_fallback=Some(format!("Native Engine could not start: {error:#}. Using Existing FFmpeg Engine for this session; your settings were kept."));
+                return Ok(prepared);
+            }
+        }
+    }
+    prepare_ffmpeg(req)
+}
+fn prepare_ffmpeg(req: PipelineRequest) -> Result<Prepared> {
     // Experimental Windows Graphics Capture: when none of its capture paths
     // starts, record with Desktop Duplication instead and say why.
     let fallback = (!req.synthetic
@@ -1641,6 +1769,9 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
                 return Err(error.context("Could not protect encoder process with a Windows job"));
             }
         };
+        if crate::media::tuning().capture_eco {
+            crate::media::eco_process(&child);
+        }
         let cpu_raised =
             crate::media::tuning().cpu_priority && crate::process_job::raise_cpu_priority(&child);
         mark(
@@ -1662,10 +1793,78 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
         }
     };
     let progress = Arc::new(Progress::default());
+    let started = Instant::now();
+    let readers = progress_readers(&mut child, &progress, started, began);
+    let expected_audio = if source_count == 0 {
+        0
+    } else if s.separate_tracks {
+        source_count + 1
+    } else {
+        1
+    };
+    Ok(Prepared {
+        engine_fallback: None,
+        pipeline: Pipeline {
+            native: None,
+            child,
+            _job: job,
+            discard_tail: false,
+            feeds,
+            dir,
+            manifest_offset: 0,
+            progress,
+            started,
+            expected_audio,
+            readers,
+            geometry,
+            last_geometry_check: Instant::now(),
+            last_segment_ms: 0,
+            validated: false,
+            expected_size: plan.map(|p| (p.width, p.height)),
+            scaler,
+            synthetic,
+            began,
+            reported_first_frame: false,
+            wgc_adaptive: !synthetic
+                && s.capture == "desktop-duplication"
+                && capture_api == "wgc"
+                && media::wgc_rate_multiple(s, &media::tuning()) == 1
+                && media::tuning().wgc_adaptive,
+            dup_window: None,
+            starving_windows: 0,
+        },
+        encoder,
+        scaling_detail: path.detail,
+        capture_api: if synthetic || s.capture != "desktop-duplication" {
+            ""
+        } else {
+            capture_api
+        },
+        capture_filter: if synthetic {
+            "synthetic"
+        } else if s.capture != "desktop-duplication" {
+            "gdigrab"
+        } else if capture_api == "wgc" {
+            "gfxcapture"
+        } else {
+            "ddagrab"
+        },
+        capture_fallback,
+        plan,
+        expected_audio,
+        cache: path.cache,
+        timings,
+    })
+}
+fn progress_readers(
+    child: &mut Child,
+    progress: &Arc<Progress>,
+    started: Instant,
+    began: Instant,
+) -> Vec<thread::JoinHandle<()>> {
     let p = progress.clone();
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
-    let started = Instant::now();
     let out_thread = thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some((key, value)) = line.trim().split_once('=') {
@@ -1723,63 +1922,7 @@ fn prepare_pipeline(req: PipelineRequest) -> Result<Prepared> {
             lines.push(line);
         }
     });
-    let expected_audio = if source_count == 0 {
-        0
-    } else if s.separate_tracks {
-        source_count + 1
-    } else {
-        1
-    };
-    Ok(Prepared {
-        pipeline: Pipeline {
-            child,
-            _job: job,
-            discard_tail: false,
-            feeds,
-            dir,
-            manifest_offset: 0,
-            progress,
-            started,
-            expected_audio,
-            readers: vec![out_thread, err_thread],
-            geometry,
-            last_geometry_check: Instant::now(),
-            last_segment_ms: 0,
-            validated: false,
-            expected_size: plan.map(|p| (p.width, p.height)),
-            scaler,
-            synthetic,
-            began,
-            reported_first_frame: false,
-            wgc_adaptive: !synthetic
-                && s.capture == "desktop-duplication"
-                && capture_api == "wgc"
-                && media::wgc_rate_multiple(s, &media::tuning()) == 1,
-            dup_window: None,
-            starving_windows: 0,
-        },
-        encoder,
-        scaling_detail: path.detail,
-        capture_api: if synthetic || s.capture != "desktop-duplication" {
-            ""
-        } else {
-            capture_api
-        },
-        capture_filter: if synthetic {
-            "synthetic"
-        } else if s.capture != "desktop-duplication" {
-            "gdigrab"
-        } else if capture_api == "wgc" {
-            "gfxcapture"
-        } else {
-            "ddagrab"
-        },
-        capture_fallback,
-        plan,
-        expected_audio,
-        cache: path.cache,
-        timings,
-    })
+    vec![out_thread, err_thread]
 }
 fn quarantine(path: &Path) -> Result<()> {
     let dir = path
@@ -1851,6 +1994,9 @@ fn remove_empty_sessions(data: &Path) {
 /// Throw away a start that was cancelled or timed out before any footage.
 fn abandon(p: Prepared) {
     let mut pl = p.pipeline;
+    if let Some(mut native) = pl.native.take() {
+        let _ = native.stop();
+    }
     let _ = pl.child.kill();
     let _ = pl.child.wait();
     pl.feeds.clear();
@@ -1862,6 +2008,29 @@ fn abandon(p: Prepared) {
 /// Marks a buffer folder whose capture was stopped by the user: its footage
 /// was not asked for, so it is deleted rather than offered for recovery.
 const DISCARDED: &str = "discarded.marker";
+
+fn segment_manifest_row(raw: &str) -> Result<(&str, f64, f64)> {
+    let mut pieces = raw.trim().rsplitn(3, ',');
+    let end = pieces
+        .next()
+        .context("Missing segment end")?
+        .parse::<f64>()?;
+    let start = pieces
+        .next()
+        .context("Missing segment start")?
+        .parse::<f64>()?;
+    let filename = pieces
+        .next()
+        .context("Missing segment name")?
+        .trim_matches('"');
+    if !filename.starts_with("segment-") || filename.contains(['\\', '/']) {
+        bail!("Invalid segment manifest")
+    }
+    if !start.is_finite() || !end.is_finite() || end <= start || start < 0. {
+        bail!("Invalid segment timestamps")
+    }
+    Ok((filename, start, end))
+}
 /// Delete a cleanly stopped replay buffer: its segments (which the user did
 /// not save; recordings and saves hold their own hard links), manifest and
 /// settings copy. Unknown files and subfolders are left in place. The newest
@@ -1901,7 +2070,16 @@ fn try_discard(dir: &Path, ring: &[Segment]) -> bool {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             let ours = (name.starts_with("segment-") && name.ends_with(".mkv"))
                 || name == "segments.csv"
-                || name == "session.json";
+                || name == "session.json"
+                || [
+                    "native.stop",
+                    "native.json",
+                    "native.log",
+                    "origin.json",
+                    "native-clocks.json",
+                    "native-command.txt",
+                ]
+                .contains(&name);
             if !(ours && p.is_file() && fs::remove_file(&p).is_ok()) && name != DISCARDED {
                 left += 1;
             }
@@ -1936,10 +2114,10 @@ impl Inner {
         }
         self.ring_audio_tracks
     }
-    /// Legacy flat path, used for recovered sessions of unknown content.
-    fn clip_path_flat(&self, prefix: &str) -> PathBuf {
+    /// Flat path for explicitly recovered footage.
+    fn clip_path_flat(&self, prefix: &str, extension: &str) -> PathBuf {
         self.settings.output_dir.join(format!(
-            "{prefix}-{}-{}.mkv",
+            "{prefix}-{}-{}.{extension}",
             chrono::Local::now().format("%Y%m%d-%H%M%S"),
             &uuid::Uuid::new_v4().to_string()[..8]
         ))
@@ -1966,10 +2144,15 @@ impl Inner {
         let _ = fs::create_dir_all(&dir);
         self.reserved.retain(|p| !p.exists());
         let stem = format!("{label}_{stamp}");
-        let mut path = crate::library::unique_path(&dir, &stem, "mkv");
+        let extension = if self.status.recording_engine == "native" {
+            "mp4"
+        } else {
+            "mkv"
+        };
+        let mut path = crate::library::unique_path(&dir, &stem, extension);
         let mut n = 2;
         while self.reserved.contains(&path) {
-            path = crate::library::unique_path(&dir, &format!("{stem}_{n}"), "mkv");
+            path = crate::library::unique_path(&dir, &format!("{stem}_{n}"), extension);
             n += 1;
         }
         self.reserved.insert(path.clone());
@@ -1996,7 +2179,9 @@ impl Inner {
         // While idle, the game-detected notice and playtime tracking need to
         // know what is in front.
         let idle_watch = self.pipeline.is_none()
-            && (self.settings.game_notifications || self.settings.playtime.enabled);
+            && (self.settings.game_notifications
+                || self.settings.playtime.enabled
+                || (self.settings.crosshair.enabled && self.settings.crosshair.game_only()));
         if !(capturing || idle_watch) {
             // Nobody samples: never leave a stale game behind (it would keep
             // the overlay up after leaving the game).
@@ -2126,9 +2311,25 @@ impl Inner {
         Ok(())
     }
     fn install_pipeline(&mut self, p: Prepared) {
+        if self.status.engine_fallback.is_some()
+            && self.status.engine_fallback == self.status.notice
+        {
+            self.status.notice = None;
+        }
+        self.status.recording_engine = if p.pipeline.native.is_some() {
+            "native"
+        } else {
+            "ffmpeg"
+        }
+        .into();
+        self.status.engine_fallback = p.engine_fallback.clone();
+        if let Some(note) = p.engine_fallback.clone() {
+            self.status.set_notice(note);
+        }
+
         let synthetic = p.pipeline.synthetic;
         let scaler = p.pipeline.scaler;
-        if scaler == Scaler::Cpu && p.plan.is_some() {
+        if p.pipeline.native.is_none() && scaler == Scaler::Cpu && p.plan.is_some() {
             self.status.set_notice(
                 "Your graphics card can't resize the video for this screen, so the processor does it instead. This uses a little more CPU.".into(),
             );
@@ -2156,7 +2357,9 @@ impl Inner {
         self.status.frames = 0;
         self.status.elapsed = 0.;
         self.status.geometry = p.pipeline.geometry.clone();
-        self.status.scaling = if synthetic {
+        self.status.scaling = if p.pipeline.native.is_some() {
+            "Native GPU scaling (no CPU readback)".into()
+        } else if synthetic {
             "Synthetic test source".into()
         } else {
             scaler.label().into()
@@ -2220,20 +2423,7 @@ impl Inner {
             .filter(|s| s.ends_with('\n'))
             .collect();
         for raw in lines {
-            let line = raw.trim();
-            let pieces: Vec<_> = line.rsplitn(3, ',').collect();
-            if pieces.len() != 3 {
-                break;
-            }
-            let end = pieces[0].parse::<f64>()?;
-            let start = pieces[1].parse::<f64>()?;
-            if !start.is_finite() || !end.is_finite() || end <= start || start < 0. {
-                bail!("Invalid segment timestamps")
-            }
-            let filename = pieces[2].trim_matches('"');
-            if !filename.starts_with("segment-") || filename.contains(['\\', '/']) {
-                bail!("Invalid segment manifest")
-            };
+            let (filename, start, end) = segment_manifest_row(raw)?;
             let path = p.dir.join(filename);
             let bytes = fs::metadata(&path)?.len();
             if bytes == 0 {
@@ -2299,7 +2489,35 @@ impl Inner {
         Ok(())
     }
     fn stop_pipeline(&mut self) -> Result<()> {
+        let mut native_error = None;
         if let Some(p) = &mut self.pipeline {
+            if let Some(native) = &mut p.native {
+                if let Err(error) = native.stop() {
+                    self.status.error = Some(format!(
+                        "Native stop failed; completed segments preserved: {error:#}"
+                    ));
+                    native_error = Some(error);
+                }
+                if let Some(end) = native.end_hns {
+                    let until = Instant::now() + Duration::from_millis(750);
+                    let caught_up = || {
+                        p.feeds.iter().all(|f| {
+                            let origin = f.meter.timeline_origin_hns.load(Ordering::Acquire);
+                            let frames = (end.saturating_sub(origin) * 48_000).div_ceil(10_000_000);
+                            f.meter.written_bytes.load(Ordering::Relaxed) >= frames * 8
+                        })
+                    };
+                    while !caught_up() && Instant::now() < until {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    if !caught_up() {
+                        native_error=Some(anyhow::anyhow!("Audio did not reach the final native video timestamp; completed source segments preserved"));
+                    }
+                }
+                // Every real PCM source is owned by this pipeline. Close them only
+                // after their common clock reaches the last video frame, then mux EOF.
+                p.feeds.clear();
+            }
             if let Some(stdin) = &mut p.child.stdin {
                 let _ = stdin.write_all(b"q\n");
             }
@@ -2323,7 +2541,11 @@ impl Inner {
         }
         self.status.state = "Stopped".into();
         self.refresh_session_count();
-        collected
+        collected?;
+        if let Some(error) = native_error {
+            return Err(error);
+        }
+        Ok(())
     }
     fn fail(&mut self, error: String) {
         // A GPU path can pass its short probe yet fail in the full pipeline (for
@@ -2516,6 +2738,9 @@ impl Inner {
         if device_changed.is_some() && !p.synthetic {
             return self
                 .begin_recovery("Your sound device changed, so REPLAYX is reconnecting it.");
+        }
+        if let Some(native) = &mut p.native {
+            native.check()?;
         }
         if let Some(exit) = p.child.try_wait()? {
             let reason = p
@@ -3134,6 +3359,39 @@ mod tests {
         assert!(again.notice_id > second);
     }
     #[test]
+    fn crosshair_changes_save_at_once_and_keep_other_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let engine = isolated(
+            data.clone(),
+            Settings {
+                output_dir: root.path().join("clips"),
+                audio: Vec::new(),
+                fps: 30,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut c = crate::crosshair::CrosshairSettings {
+            enabled: true,
+            gap: 999.0,
+            color: "#ff00aa".into(),
+            ..Default::default()
+        };
+        let saved = engine.set_crosshair(c.clone()).unwrap();
+        assert_eq!(saved.gap, crate::crosshair::GAP.1, "made safe");
+        assert_eq!(saved.color, "#FF00AA");
+        let reloaded = Settings::load(&data.join("settings.json")).unwrap();
+        assert_eq!(reloaded.crosshair, saved, "persisted");
+        assert_eq!(reloaded.fps, 30, "nothing else changed");
+        // A shortcut another REPLAYX action uses is refused; nothing changes.
+        c.hotkey = engine.settings().replay_hotkey;
+        assert!(engine.set_crosshair(c).is_err());
+        assert_eq!(engine.settings().crosshair, saved);
+        // In-game only needs the game in front, also while idle.
+        assert!(engine.0.lock().unwrap().activity_due().is_some());
+    }
+    #[test]
     fn missing_encoder_is_error_and_preserves_hotkey_warning() {
         let root = tempfile::tempdir().unwrap();
         let engine = isolated(
@@ -3323,6 +3581,140 @@ mod tests {
         assert!(!s.recording && s.replay, "replay intent is kept");
         assert!(!i.status.pending_recording);
     }
+    #[test]
+    fn replay_readiness_wait_is_bounded_and_stop_cancels_it() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = isolated(
+            root.path().join("data"),
+            Settings {
+                output_dir: root.path().join("clips"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let began = Instant::now();
+        assert!(engine
+            .save_replay_when_ready(Duration::from_secs(4))
+            .is_err());
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "Replay off is not retryable"
+        );
+    }
+
+    #[test]
+    fn replay_readiness_wait_exits_when_capture_is_stopped() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        engine.start_synthetic(false).unwrap();
+        let waiting = engine.clone();
+        let (completed, result) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            completed
+                .send(waiting.save_replay_when_ready(Duration::from_secs(5)))
+                .unwrap();
+        });
+        thread::sleep(Duration::from_millis(50));
+        engine.stop_replay().unwrap();
+        // Teardown includes an FFmpeg drain and holds the engine lock. Time the
+        // cancellation once Stop releases the lock, independently of drain speed.
+        let error = result
+            .recv_timeout(Duration::from_secs(1))
+            .expect("An inactive replay must exit the readiness loop")
+            .err()
+            .unwrap();
+        worker.join().unwrap();
+        assert!(
+            error.to_string().contains("Instant Replay is off"),
+            "{error:#}"
+        );
+        assert_eq!(engine.status().saving, 0);
+    }
+
+    #[test]
+    fn replay_readiness_wait_does_not_retry_storage_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = isolated(
+            root.path().join("data"),
+            Settings {
+                output_dir: root.path().join("clips"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        engine.0.lock().unwrap().ring.add(Segment {
+            path: root.path().join("missing.mkv"),
+            start: 0.,
+            end: 2.,
+            bytes: 1,
+            origin: None,
+            start_time: None,
+        });
+        let began = Instant::now();
+        let error = engine
+            .save_replay_when_ready(Duration::from_secs(5))
+            .err()
+            .unwrap();
+        assert!(!error.is::<ReplayNotReady>());
+        assert!(began.elapsed() < Duration::from_secs(1));
+        assert_eq!(engine.status().saving, 0);
+    }
+
+    #[test]
+    fn restarted_replay_waits_for_real_finalized_media_and_saves_concurrently() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(10), || engine
+            .status()
+            .buffer_seconds
+            >= 2.));
+        engine.stop_replay().unwrap();
+        engine.start_synthetic(false).unwrap();
+        let before = Instant::now();
+        let error = engine
+            .save_replay_when_ready(Duration::from_millis(40))
+            .err()
+            .unwrap();
+        assert!(error.is::<ReplayNotReady>(), "{error:#}");
+        assert!(before.elapsed() < Duration::from_secs(1));
+        let a = engine.clone();
+        let b = engine.clone();
+        let first = thread::spawn(move || {
+            a.save_replay_when_ready(Duration::from_secs(5))
+                .unwrap()
+                .run()
+        });
+        let second = thread::spawn(move || {
+            b.save_replay_when_ready(Duration::from_secs(5))
+                .unwrap()
+                .run()
+        });
+        for worker in [first, second] {
+            let clip = worker.join().unwrap();
+            engine.complete_save(&clip);
+            let (path, probe) = clip.unwrap();
+            assert!(path.exists() && probe.duration >= 1.9);
+            let media = engine.0.lock().unwrap().media.clone();
+            media.verify(&path, probe.audio_tracks).unwrap();
+            println!(
+                "RESTART_REPLAY_VALIDATED duration={:.3}s bytes={} tracks={}",
+                probe.duration, probe.bytes, probe.audio_tracks
+            );
+        }
+        engine.stop_replay().unwrap();
+        let before = Instant::now();
+        assert!(engine
+            .save_replay_when_ready(Duration::from_secs(5))
+            .is_err());
+        assert!(before.elapsed() < Duration::from_secs(1));
+        assert_eq!(engine.status().saving, 0);
+    }
+
     #[test]
     fn interrupted_sessions_count_only_real_footage() {
         let root = tempfile::tempdir().unwrap();
@@ -3587,6 +3979,124 @@ mod tests {
         assert!(!buffer.exists(), "a stopped replay buffer is not kept");
         assert_eq!(s.recovery_sessions, 0);
         assert_eq!(session_dirs(&root.path().join("data"), "recordings"), 0);
+    }
+
+    #[test]
+    fn stop_failure_releases_the_save_slot_and_keeps_recoverable_footage() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        engine.start_synthetic(true).unwrap();
+        assert!(wait_until(Duration::from_secs(15), || engine
+            .0
+            .lock()
+            .unwrap()
+            .recording
+            .as_ref()
+            .is_some_and(|r| !r.segments.is_empty())));
+        let mut i = engine.0.lock().unwrap();
+        i.status.recording = false;
+        i.status.saving = 1;
+        let recording_dir = i.recording.as_ref().unwrap().dir.clone();
+        let pipeline = i.pipeline.as_mut().unwrap();
+        // Stop the writer before replacing this fixture's manifest so the
+        // final segment collection deterministically reports a malformed row.
+        pipeline.child.kill().unwrap();
+        pipeline.child.wait().unwrap();
+        fs::write(pipeline.dir.join("segments.csv"), b"malformed row\n").unwrap();
+        pipeline.manifest_offset = 0;
+        assert!(engine
+            .finish_recording_stop(&mut i, Instant::now(), false)
+            .is_err());
+        assert!(i.pipeline.is_none());
+        assert!(i.recording.is_none());
+        drop(i);
+        assert_eq!(engine.status().saving, 0);
+        assert!(!engine.status().recording);
+        assert!(recording_dir.is_dir(), "completed files must remain");
+        assert!(!engine.recover().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rapid_repeated_saves_never_stall_capture_or_collide() {
+        // Three saves pressed back to back while the encoder keeps writing
+        // packets, then one more: every clip is complete and separate, the
+        // hand-over (the only part under the engine lock) stays short, and
+        // capture never pauses or restarts.
+        let root = tempfile::tempdir().unwrap();
+        let Some(engine) = real(root.path()) else {
+            return;
+        };
+        let pid = |e: &Engine| e.0.lock().unwrap().pipeline.as_ref().map(|p| p.child.id());
+        engine.start_synthetic(false).unwrap();
+        assert!(wait_until(Duration::from_secs(20), || {
+            let _ = engine.0.lock().unwrap().collect_segments();
+            engine.0.lock().unwrap().ring.segments.len() >= 3
+        }));
+        let encoder = pid(&engine).unwrap();
+        let frames_before = engine.status().frames;
+        let mut jobs = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            jobs.push(engine.save_replay().unwrap());
+            // 11-85 ms in the save-stutter benchmark; the bound allows a test
+            // machine busy with a dozen parallel FFmpeg tests.
+            assert!(
+                t.elapsed() < Duration::from_secs(2),
+                "hand-over {:?}",
+                t.elapsed()
+            );
+        }
+        assert_eq!(engine.status().saving, 3);
+        let workers: Vec<_> = jobs
+            .into_iter()
+            .map(|job| {
+                let engine = engine.clone();
+                thread::spawn(move || {
+                    let result = job.run();
+                    engine.complete_save(&result);
+                    result
+                })
+            })
+            .collect();
+        // While the three saves run, status stays readable at once.
+        let t = Instant::now();
+        let _ = engine.status();
+        assert!(t.elapsed() < Duration::from_millis(100));
+        let clips: Vec<_> = workers
+            .into_iter()
+            .map(|w| w.join().unwrap().unwrap())
+            .collect();
+        let mut paths: Vec<_> = clips.iter().map(|(p, _)| p.clone()).collect();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), 3, "three separate clips");
+        for (path, probe) in &clips {
+            assert!(path.is_file());
+            assert!(probe.duration > 3.0, "{}", probe.duration);
+        }
+        let s = engine.status();
+        assert_eq!(s.saving, 0);
+        assert!(s.error.is_none(), "{:?}", s.error);
+        // The encoder kept capturing through the saves, without a restart.
+        assert_eq!(pid(&engine), Some(encoder));
+        assert!(wait_until(Duration::from_secs(5), || engine
+            .status()
+            .frames
+            > frames_before));
+        // A later save works as usual, and no snapshot folder is left behind.
+        let job = engine.save_replay().unwrap();
+        let result = job.run();
+        engine.complete_save(&result);
+        assert!(result.unwrap().0.is_file());
+        let saves = root.path().join("data").join("saves");
+        assert_eq!(
+            session_dirs(root.path().join("data").as_path(), "saves"),
+            0,
+            "{saves:?}"
+        );
+        engine.stop_replay().unwrap();
     }
 
     #[test]

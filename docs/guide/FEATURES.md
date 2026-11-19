@@ -60,6 +60,51 @@ Browse **All clips** or **By game**; sort by date, game, length, size or type; f
 
 The **Games** page shows how long you played each game today, yesterday, this week, this month, over the last 7 or 30 days, all time or any dates you choose, with a daily chart, your most-played games and a page per game. It counts only time while the game is the window in front and REPLAYX is running, skips idle stretches (15 minutes without keyboard or mouse, adjustable) and sleep, and stays on your PC. Pause it, exclude games, export it to CSV, clear it or turn it off in **Settings**.
 
+## Crosshair Studio
+
+*Not released yet.* This is on the `feature/crosshair-studio-v1` branch.
+
+<p align="center">
+  <img src="../images/crosshair.png" alt="Crosshair Studio: color, length, thickness, gap, opacity, center dot and outline controls beside a large live preview" width="80%">
+</p>
+
+A free crosshair overlay, built in, in **Tools → Crosshair Studio**.
+
+- **Style:** start from one of 16 styles: Classic, Dot, Cross + dot,
+  Precision, Circle + dot, T, Micro, Bold, Wide gap, Long lines, X, X + dot,
+  Scope, Round dot, Box and Chevron.
+- **Shape:** cross, T, circle, dot, box or chevron. Turn each of a cross's
+  four lines on or off, and turn the whole crosshair by 0–90° (45° makes an
+  X).
+- **Look:** adjust color, length, thickness, gap, opacity, a square or round
+  center dot, a ring around the center (with any shape) and an outline.
+- **Preview:** a large preview shows exactly what appears on screen, over a
+  dark, bright or split background, at actual size or zoomed.
+- **Saving:** changes save automatically and show on screen at once.
+
+**When it shows:**
+- *In-game only* (default) shows it while a recognized game is in front. A
+  quick Alt+Tab never makes it flicker.
+- The page tells you when a recognized game is already running behind other
+  windows (switch to it), and when a game was in exclusive full screen, where
+  no window can show.
+- *Always on* shows it everywhere.
+- <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F6</kbd> hides or shows it; you can
+  change the shortcut. The shortcut is only taken while the crosshair is on.
+- You can choose the display, and nudge the crosshair if your game's center
+  differs.
+
+**How it works:**
+- It is a tiny native window that Windows draws over the game. REPLAYX draws
+  it once per change; there is no render loop.
+- It never takes focus, and mouse clicks go through it.
+- It doesn't read or change the game.
+- It shows over windowed and borderless full-screen games, not over
+  exclusive full screen.
+- REPLAYX's clips don't include it.
+
+Design and measurements: [Crosshair Studio V1](../engineering/CROSSHAIR_STUDIO_V1.md).
+
 ## Status overlay and pop-ups
 
 <p align="center">

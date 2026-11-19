@@ -1,4 +1,13 @@
-# Known limitations — 0.3.1-alpha.9
+# Known limitations
+
+## 0.4.0
+
+- **Native V2** is experimental and supports compatible 1080p60 hardware H.264 setups. Intel Quick Sync and NVIDIA on the RTX-driven external display passed generated encoding tests and earlier physical capture. NVIDIA Media Foundation activation on the Intel-driven layout remains unresolved. FFmpeg is the default and the fallback. Native Radeon has yet to be validated on actual Radeon hardware.
+- **Crosshair Studio** uses a click-through Windows window. Use windowed or borderless mode where allowed by the game. REPLAYX keeps the overlay hidden when Windows cannot confirm capture exclusion. Some games or exclusive fullscreen modes can cover it. Real in-game overlay visibility and cost can vary by configuration.
+- **A/V timing** passed generated multi-track recording and replay checks. The AAC fix also passed an isolated 18-second real-device FFmpeg test on the Intel panel with the FxSound system playback route. Other device configurations remain outside that test. The prior rapid-motion CS2 comparison exceeded the baseline drift limit. Existing performance numbers describe the tested profiles on one laptop.
+- **Deployment** requires isolated installation, upgrade, uninstall and updater qualification. The local rc.3 setup is unsigned. Keep your recordings backed up when testing upgrades.
+
+See the [0.4.0 release notes](../release-notes/v0.4.0.md) and [Windows installer qualification](../engineering/INSTALLER_QUALIFICATION.md). The [0.4.0 release checklist](../engineering/FINAL_0.4.0_RELEASE_CHECKLIST.md) records the remaining deployment checks.
 
 ## Alpha.9 release validation
 

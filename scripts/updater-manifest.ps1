@@ -5,18 +5,46 @@
 # Skips (with a notice) when no update signature was produced.
 # -BundleDir: where the NSIS installer is (local builds into another target
 # folder); the release workflow uses the default.
-param([Parameter(Mandatory)][string]$Repository, [Parameter(Mandatory)][string]$Tag, [string]$BundleDir)
+param(
+    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$')][string]$Repository,
+    [Parameter(Mandatory)][string]$Tag,
+    [string]$BundleDir,
+    [switch]$RequireSignature
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $dir = if ($BundleDir) { $BundleDir } else { Join-Path $root 'src-tauri/target/release/bundle/nsis' }
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if ("v$version" -ne $Tag) { throw "Tag $Tag does not match package version $version" }
-$installer = Get-ChildItem $dir -Filter "*_${version}_x64-setup.exe" | Select-Object -First 1
-if (!$installer) { throw "No installer for version $version in $dir" }
+$installers = @(Get-ChildItem -LiteralPath $dir -File -Filter "*_${version}_x64-setup.exe")
+if ($installers.Count -ne 1) { throw "Expected one installer for version $version in $dir. Found $($installers.Count)." }
+$installer = $installers[0]
+if ($installer.VersionInfo.ProductName -ne 'REPLAYX' -or $installer.VersionInfo.ProductVersion -ne $version) {
+    throw 'The installer product or version does not match package.json.'
+}
 $sig = "$($installer.FullName).sig"
-if (!(Test-Path $sig)) { Write-Host 'No update signature (signing key not configured); latest.json not written.'; exit 0 }
+$manifestPath = Join-Path $dir 'latest.json'
+if (!(Test-Path -LiteralPath $sig -PathType Leaf)) {
+    if ($RequireSignature -or (Test-Path -LiteralPath $manifestPath)) {
+        throw 'Update signature is missing. Generate release metadata from a fresh signed bundle.'
+    }
+    Write-Host 'No update signature. latest.json was not written.'
+    exit 0
+}
+if ($version -notmatch '-') {
+    $authenticode = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+    if ($authenticode.Status -ne 'Valid' -or !$authenticode.TimeStamperCertificate) {
+        throw 'A stable updater manifest requires a trusted, timestamped Windows signature on the installer.'
+    }
+}
+$hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+$signature = (Get-Content -LiteralPath $sig -Raw).Trim()
 & node (Join-Path $root 'scripts/verify-update-signature.mjs') $installer.FullName $sig --version $version
-if ($LASTEXITCODE) { throw 'Installer signature/version validation failed; manifest not written.' }
+if ($LASTEXITCODE) { throw 'Installer signature/version validation failed. latest.json was not written.' }
+if ($hash -ne (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash -or
+    $signature -cne (Get-Content -LiteralPath $sig -Raw).Trim()) {
+    throw 'Installer or signature changed during verification.'
+}
 
 # Notes for the update pop-up: the bullet points under "What's New" and
 # "Improvements and Fixes" of the release notes, else the changelog section.
@@ -40,12 +68,12 @@ if (!$notes) {
     pub_date  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     platforms = [ordered]@{
         'windows-x86_64' = [ordered]@{
-            signature = (Get-Content $sig -Raw).Trim()
+            signature = $signature
             url       = "https://github.com/$Repository/releases/download/$Tag/REPLAYX.exe"
         }
     }
 } | ConvertTo-Json -Depth 5 | ForEach-Object {
     # UTF-8 without a byte-order mark: JSON parsers reject a BOM.
-    [IO.File]::WriteAllText((Join-Path $dir 'latest.json'), $_, (New-Object Text.UTF8Encoding $false))
+    [IO.File]::WriteAllText($manifestPath, $_, (New-Object Text.UTF8Encoding $false))
 }
-Write-Host "Wrote latest.json for $($installer.Name)"
+Write-Host "Wrote latest.json for $($installer.Name) (SHA-256 $hash)"

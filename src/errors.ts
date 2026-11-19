@@ -3,7 +3,7 @@
  * text (with Windows codes) stays available as technical details and in
  * diagnostics; it is never the headline. */
 
-export type Destination = { page: 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings'; tab?: 'general' | 'hotkeys' | 'updates' | 'about'; anchor?: string };
+export type Destination = { page: 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'crosshair' | 'performance' | 'settings'; tab?: 'general' | 'hotkeys' | 'updates' | 'about'; anchor?: string };
 export type ErrorAction =
   | { kind: 'navigate'; label: string; to: Destination }
   | { kind: 'windows'; label: string; page: 'sound' | 'microphone-privacy' | 'display' | 'storage' }

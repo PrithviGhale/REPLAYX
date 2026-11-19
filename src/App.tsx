@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { ErrorNotice } from './ErrorNotice';
 import type { Destination } from './errors';
 import { NAVIGATE_EVENT, revealAnchor } from './navigation';
-import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
-import { native, VERSION } from './api';
+import { AudioLines, Crosshair, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
+import { native, VERSION, VERSION_STAGE } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
 import { ReplaySwitch } from './ReplaySwitch';
@@ -16,6 +16,7 @@ import { CapturePage } from './pages/Capture';
 import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
 import { GamesPage } from './pages/Games';
+import { CrosshairPage } from './pages/Crosshair';
 import { PerformancePage } from './pages/Performance';
 import { SettingsPage, type SettingsTab } from './pages/Settings';
 import { UpdatePrompt } from './UpdatePrompt';
@@ -25,7 +26,7 @@ import { QuitPrompt } from './QuitPrompt';
 import { BrandMark } from './brand';
 import { Tour } from './Tour';
 
-export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings';
+export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'crosshair' | 'performance' | 'settings';
 const NAV: { group: string; items: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] }[] = [
   { group: 'Capture', items: [
     { id: 'home', label: 'Home', icon: Home },
@@ -34,6 +35,7 @@ const NAV: { group: string; items: { id: Page; label: string; icon: React.Compon
     { id: 'audio', label: 'Audio', icon: AudioLines },
   ] },
   { group: 'Library', items: [{ id: 'clips', label: 'Clips', icon: Film }, { id: 'games', label: 'Games', icon: Gamepad2 }] },
+  { group: 'Tools', items: [{ id: 'crosshair', label: 'Crosshair Studio', icon: Crosshair }] },
   { group: 'System', items: [
     { id: 'performance', label: 'Performance', icon: Gauge },
     { id: 'settings', label: 'Settings', icon: Settings2 },
@@ -178,7 +180,7 @@ export function App() {
         </nav>
         <div className="sidebar-foot">
           <div className="local-note"><span className="dot" />Local only · no account</div>
-          <div className="version">v{VERSION} <span>alpha</span></div>
+          <div className="version">v{VERSION}{VERSION_STAGE && <> <span>{VERSION_STAGE}</span></>}</div>
         </div>
       </aside>
       <div className="main">
@@ -200,6 +202,7 @@ export function App() {
           {page === 'audio' && <AudioPage />}
           {page === 'clips' && <ClipsPage />}
           {page === 'games' && <GamesPage go={setPage} />}
+          {page === 'crosshair' && <CrosshairPage />}
           {page === 'performance' && <PerformancePage />}
           {page === 'settings' && <SettingsPage tab={settingsTab} setTab={setSettingsTab} />}
           </PageBoundary>

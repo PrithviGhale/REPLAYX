@@ -360,6 +360,56 @@ pub fn process_running(pid: u32, started: u64) -> bool {
     }
 }
 
+/// Recognized games with a visible window right now, in front or not
+/// (a game started before REPLAYX, sitting behind it). Reads window and
+/// process information only, never messaging another process's windows;
+/// meant for an occasional status check (a page that is open), not a loop.
+pub fn running_games(overrides: &[GameMapping]) -> Vec<String> {
+    use windows::{
+        core::BOOL,
+        Win32::{
+            Foundation::{HWND, LPARAM},
+            UI::WindowsAndMessaging::{
+                EnumWindows, GetWindow, GetWindowThreadProcessId, IsWindowVisible, GW_OWNER,
+            },
+        },
+    };
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let found = &mut *(lp.0 as *mut Vec<(u32, HWND)>);
+        let owned = GetWindow(hwnd, GW_OWNER).is_ok_and(|o| !o.0.is_null());
+        if IsWindowVisible(hwnd).as_bool() && !owned {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid != 0 && pid != std::process::id() && !found.iter().any(|(p, _)| *p == pid) {
+                found.push((pid, hwnd));
+            }
+        }
+        true.into()
+    }
+    let mut found: Vec<(u32, HWND)> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut _ as isize));
+    }
+    let mut games: Vec<String> = Vec::new();
+    for (_, hwnd) in found {
+        if let Some((_, path, title)) = window_process(hwnd) {
+            if let Foreground::Game(g) = classify(&path, &title, overrides) {
+                if !games.contains(&g) {
+                    games.push(g);
+                }
+            }
+        }
+    }
+    games
+}
+
+/// Whether a full-screen Direct3D app runs in exclusive mode right now:
+/// Windows composes no other window (so no crosshair) over it.
+pub fn exclusive_fullscreen() -> bool {
+    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN};
+    unsafe { SHQueryUserNotificationState().is_ok_and(|s| s == QUNS_RUNNING_D3D_FULL_SCREEN) }
+}
+
 /// Classify whatever is in the foreground right now.
 pub fn sample(overrides: &[GameMapping]) -> Foreground {
     match foreground_process() {
@@ -398,6 +448,24 @@ mod tests {
         // new process with another creation time): ended either way.
         assert!(!process_running(pid, t));
         assert!(!process_running(0xFFFF_FFFC, 1), "no such process");
+        // The running-games scan and the full-screen query are safe to call
+        // (no game runs on a test machine necessarily; they must not fail).
+        let _ = running_games(&[]);
+        let _ = exclusive_fullscreen();
+        // A "game" behind other windows is found: the Windows shell, mapped
+        // as one, always has a visible window (the taskbar) in a desktop
+        // session. Sessions without a shell (some CI services) skip this.
+        let shell = [GameMapping {
+            exe: "explorer.exe".into(),
+            name: "Shell As A Game".into(),
+        }];
+        let has_shell = std::process::Command::new("tasklist")
+            .args(["/fi", "imagename eq explorer.exe", "/fo", "csv", "/nh"])
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("explorer.exe"));
+        if has_shell {
+            assert!(running_games(&shell).contains(&"Shell As A Game".to_string()));
+        }
         assert!(!process_running(0xFFFF_FFFC, 0));
         // Creation time unknown (0): the id alone, while it runs.
         assert!(process_running(me, 0));

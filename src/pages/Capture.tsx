@@ -104,6 +104,20 @@ export function CapturePage() {
 
   return (
     <Section>
+      <Card title="Recording engine" subtitle="FFmpeg stays the default. Native Engine Alpha uses hardware encoding and saves MP4 clips.">
+        <Field label="Recording backend">
+          <select aria-label="Recording backend" value={draft.recording_engine ?? 'ffmpeg'} disabled={active}
+            onChange={e => patch({ recording_engine: e.target.value as 'auto' | 'ffmpeg' | 'native' })}>
+            <option value="auto">Automatic (FFmpeg for this candidate)</option>
+            <option value="ffmpeg">Existing FFmpeg Engine (default)</option>
+            <option value="native" disabled={!caps?.native_engine_available}>REPLAYX Native V2 (Experimental)</option>
+          </select>
+        </Field>
+        <p className="muted small">Native Alpha tries hardware H.264 on the display GPU at 1920 x 1080, 60 FPS, Stretch to fill, with Balanced or Custom bitrate. Intel and NVIDIA laptop paths have generated-frame tests; AMD remains hardware-unverified. Other settings use FFmpeg with an explanation. Audio mix, separate tracks and microphone mute use your existing controls.</p>
+        {draft.recording_engine === 'native' && display?.adapter_vendor !== undefined && ![0x8086, 0x10de, 0x1002].includes(display.adapter_vendor) && <p className="muted small">This GPU vendor has no native path yet. Native Alpha will use FFmpeg with an explanation.</p>}
+        {!caps?.native_engine_available && <p className="muted small">Launch with npm run desktop:native to enable the experimental backend in its isolated workspace.</p>}
+        {draft.recording_engine === 'native' && <p className="muted small">Physical audio sync, driver recovery and performance with all features remain under validation. A display-mode change stops and preserves the current clip before recovery.</p>}
+      </Card>
       <Card anchor="display" title="Source" actions={<Button variant="ghost" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing displays', refreshCaps)}>Refresh</Button>}>
         <Segmented label="Capture method" value={draft.capture} disabled={active}
           onChange={v => patch({ capture: v, source_rect: null })}

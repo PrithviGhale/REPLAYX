@@ -27,6 +27,16 @@
   <sub>The Alpha.9 interface, shown with sample data.</sub>
 </p>
 
+## What?s coming in 0.4.0
+
+- **Recording and Instant Replay** keep AAC on its own clock. Verified generated 1080p60 recordings and replay saves cover the mix and separate tracks.
+- **Recording recovery** clears the saving state after a failed Stop and keeps completed footage available under **Instant Replay → Recover**.
+- **Crosshair Studio** saves the latest edit when you leave the page. The click-through overlay works over compatible windowed and borderless games. Follow the game's overlay rules.
+- **Recording engine** is under Video. FFmpeg remains the default. Automatic uses FFmpeg's existing hardware probes. Native V2 remains experimental for compatible 1080p60 hardware H.264 setups and shows a reason when startup falls back.
+- **Windows setup** still installs per user. Setup clears retired diagnostic tools when upgrading. The signed stable installer is awaiting qualification.
+
+See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) and [known limitations](docs/guide/KNOWN_LIMITATIONS.md). The download button above links to the previously published Alpha.9.
+
 ## Why REPLAYX
 
 Everything in this list is in the current download (0.3.1-alpha.9):

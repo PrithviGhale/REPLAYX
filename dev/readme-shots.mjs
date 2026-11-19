@@ -45,6 +45,7 @@ const shots = [
   { file: 'settings-overlay.png', url: 'state=off#settings', then: () => scrollTo('Status overlay') },
   { file: 'hotkeys.png', url: 'state=off#settings', then: () => clickText('[role=tab]', 'Hotkeys') },
   { file: 'tour.png', url: 'state=off&tour#home', wait: 2500 },
+  { file: 'crosshair.png', url: 'state=off#crosshair', then: () => js(`document.querySelector('.xh-enable .switch').click()`) },
 ];
 fs.mkdirSync(out, { recursive: true });
 for (const s of shots) {

@@ -877,3 +877,72 @@ input[type=range].length-slider { width: 100%; height: 6px; background: linear-g
 .banner-close { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: -4px -6px -4px 0; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; opacity: 0.7; cursor: pointer; }
 .banner-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.08); }
 .banner-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+
+/* Crosshair Studio */
+.xh-hero { background: radial-gradient(ellipse 60% 120% at 0% 0%, rgba(139, 124, 255, 0.16), transparent 60%), var(--surface); }
+.xh-hero-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.xh-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; color: #fff;
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong)); box-shadow: 0 6px 22px rgba(114, 98, 255, 0.35); }
+.xh-title h2 { font-size: 22px; }
+.xh-title p { margin: 2px 0 0; }
+.xh-enable { margin-left: auto; min-width: 200px; }
+.xh-enable .toggle-row { border: 0; padding: 0; }
+.xh-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .xh-main { grid-template-columns: minmax(0, 1fr); } }
+.xh-controls { display: grid; gap: 16px; }
+.xh-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; letter-spacing: 0.01em; }
+.xh-range { display: grid; gap: 8px; }
+.xh-range.disabled { opacity: 0.45; }
+.xh-range-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
+.xh-range-head b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.xh-range input[type=range] { width: 100%; height: 6px; }
+.xh-swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.xh-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.14); cursor: pointer; padding: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.xh-swatch:hover { transform: scale(1.08); }
+.xh-swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.xh-custom { position: relative; width: 24px; height: 24px; border-radius: 50%; overflow: hidden; cursor: pointer;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); border: 2px solid rgba(255, 255, 255, 0.14); }
+.xh-custom input { position: absolute; inset: -6px; width: 40px; height: 40px; opacity: 0; cursor: pointer; }
+.xh-hex { width: 92px; height: 30px; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--line-2); background: var(--surface-2);
+  color: var(--text); font: 12.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; text-transform: uppercase; }
+.xh-hex.bad { border-color: rgba(255, 93, 110, 0.6); }
+.xh-pair { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.xh-pair .toggle-row { border: 0; padding: 0; }
+.xh-stage { position: relative; height: 340px; border-radius: var(--radius); overflow: hidden; display: grid; place-items: center;
+  border: 1px solid var(--line-2); transition: background 0.2s ease; }
+.xh-stage.dark { background: radial-gradient(ellipse at 50% 45%, #1b1d27, #0b0c11 70%); }
+.xh-stage.bright { background: linear-gradient(180deg, #cfe3f7 0%, #eef3f9 55%, #d8d3c4 56%, #c9c2ad 100%); }
+.xh-stage.split { background: linear-gradient(90deg, #0d0f15 50%, #e9edf4 50%); }
+.xh-stage-grid { position: absolute; inset: 0; pointer-events: none; opacity: 0.35;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px; background-position: center; }
+.xh-stage:not(.dark) .xh-stage-grid { display: none; }
+.xh-art { position: relative; }
+.xh-stage-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.xh-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.xh-preset { display: grid; justify-items: center; gap: 8px; padding: 12px 8px 10px; border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 600;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease; }
+.xh-preset:hover { border-color: var(--accent-line); color: var(--text); transform: translateY(-1px); }
+.xh-preset.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.xh-preset-art { display: grid; place-items: center; width: 100%; height: 72px; border-radius: var(--radius-sm);
+  background: radial-gradient(ellipse at 50% 45%, #1b1d27, #0b0c11 75%); }
+.xh-note { margin: 10px 0 14px; display: flex; align-items: center; gap: 6px; }
+.xh-shortcut { display: grid; gap: 6px; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.xh-shortcut-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.xh-shortcut-row .xh-label { margin: 0 auto 0 0; }
+.xh-limits { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
+.xh-limits p { margin: 0; }
+.xh-limits svg { flex: none; margin-top: 2px; }
+.xh-pair .segmented { justify-self: start; }
+.xh-preset-art { overflow: hidden; }
+.xh-arm-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.xh-arm { min-width: 64px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--line-2); background: var(--surface-2);
+  color: var(--text-2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.xh-arm:hover:not(:disabled) { border-color: var(--accent-line); color: var(--text); }
+.xh-arm.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.xh-arm:disabled { opacity: 0.4; cursor: default; }
+.xh-arm:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.xh-hero .banner { margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .xh-preset, .xh-swatch, .xh-stage { transition: none; } .xh-preset:hover, .xh-swatch:hover { transform: none; } }

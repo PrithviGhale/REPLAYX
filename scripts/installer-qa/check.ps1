@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory)][string]$Archive,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ArchiveSha256,
     [Parameter(Mandatory)][ValidateSet('0.4.0-rc.3','0.4.0')][string]$CandidateVersion,
-    [ValidateSet('clean','alpha4','alpha9','rc1','rc2')][string]$Scenario = 'clean',
+    [ValidateSet('clean','alpha4','alpha9','rc1','rc2','alpha9-updater')][string]$Scenario = 'clean',
     [Parameter(Mandatory)][string]$Output,
     [switch]$IntegrityOnly
 )
@@ -26,6 +26,10 @@ $checks = [ordered]@{}
 $evidence = [ordered]@{ scenario = $Scenario; candidate = $CandidateVersion; archive_sha256 = $ArchiveSha256; integrity_only = [bool]$IntegrityOnly; steps = $checks }
 $pins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'rc3-pins.json') -Raw | ConvertFrom-Json
 $phase = 'archive integrity'
+$expectInstallerRestart = $Scenario -eq 'alpha9-updater'
+if ($expectInstallerRestart -and $CandidateVersion -ne '0.4.0') {
+    throw 'The updater-mode scenario requires the signed stable installer.'
+}
 
 function Assert-Hash([string]$Path, [string]$Expected) {
     $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
@@ -136,12 +140,26 @@ function Assert-Fixture {
     Assert-Hash $savedClip $fixturePin.sha256
 }
 
-function Test-Startup([string]$Name) {
+function Test-Startup([string]$Name, [switch]$InstallerRestart) {
     if (![Environment]::UserInteractive -or (Get-Process -Id $PID).SessionId -eq 0) {
+        if ($InstallerRestart) { throw 'The updater restart check needs an interactive Windows session.' }
         $checks[$Name] = 'BLOCKED - runner lacks an interactive Windows session'
         return
     }
-    $process = Start-Process -FilePath $app -WorkingDirectory $installDir -PassThru -RedirectStandardOutput (Join-Path $logs "$Name.stdout.txt") -RedirectStandardError (Join-Path $logs "$Name.stderr.txt")
+    if ($InstallerRestart) {
+        $restartClock = [Diagnostics.Stopwatch]::StartNew()
+        $process = $null
+        do {
+            $process = Get-Process -Name replayx -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $app } | Select-Object -First 1
+            if ($process) { break }
+            Start-Sleep -Milliseconds 500
+        } while ($restartClock.Elapsed.TotalSeconds -lt 20)
+        if (!$process) { throw 'The updater-mode installer did not restart the installed application.' }
+        $evidence.installer_restart_detected_ms = $restartClock.ElapsedMilliseconds
+    } else {
+        $process = Start-Process -FilePath $app -WorkingDirectory $installDir -PassThru -RedirectStandardOutput (Join-Path $logs "$Name.stdout.txt") -RedirectStandardError (Join-Path $logs "$Name.stderr.txt")
+    }
     try {
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $handle = 0
@@ -219,8 +237,8 @@ try {
     $checks[$phase] = 'PASS'
 
     $legacyPrograms = @('replayx-cli.exe','replayx-gameproxy.exe','replayx-dda-profile.exe','replayx-wgc-profile.exe')
-    $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -eq 'alpha9') { $legacyPrograms }
-    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha9 = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
+    $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -in 'alpha9','alpha9-updater') { $legacyPrograms }
+    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha9 = 'Alpha9-setup.exe'; 'alpha9-updater' = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
     if ($Scenario -ne 'clean') {
         $phase = 'baseline install'
         $baseline = $baselines[$Scenario]
@@ -259,7 +277,8 @@ try {
         Assert-Fixture
     }
     $phase = if ($Scenario -eq 'clean') { 'clean install' } else { 'upgrade install' }
-    Invoke-CheckedExe $candidate @('/S') $phase 120
+    $arguments = if ($expectInstallerRestart) { @('/P','/UPDATE','/R','/ARGS') } else { @('/S') }
+    Invoke-CheckedExe $candidate $arguments $phase 120
     Assert-Installed $CandidateVersion
     $evidence.legacy_programs_before_upgrade = @($expectedLegacyPrograms | Where-Object { $_ })
     $evidence.legacy_programs_after_upgrade = @($legacyPrograms | Where-Object {
@@ -287,7 +306,7 @@ try {
     $checks[$phase] = 'PASS'
 
     $phase = 'candidate startup'
-    Test-Startup $phase
+    Test-Startup $phase -InstallerRestart:$expectInstallerRestart
     Assert-Fixture
     $phase = 'uninstall and data retention'
     Invoke-CheckedExe $uninstaller @('/S') 'silent uninstall' 120

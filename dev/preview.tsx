@@ -104,6 +104,12 @@ mockIPC((cmd, args) => {
     case 'settings': return settings;
     case 'save_settings': settings = a.settings as Settings; return null;
     case 'set_mix': return null;
+    case 'set_crosshair': settings = { ...settings, crosshair: a.crosshair as Settings['crosshair'] }; return { crosshair: settings.crosshair, warning: null };
+    case 'crosshair_status': return {
+      overlay: { running: settings.crosshair.enabled, shown: settings.crosshair.enabled && settings.crosshair.visibility === 'always', excluded_from_capture: true, display: 'Display 1 (main) · 2560 × 1600 · 150%', error: null },
+      displays: [{ index: 0, label: 'Display 1 (main) · 2560 × 1600 · 150%' }, { index: 1, label: 'Display 2 · 1920 × 1080 · 100%' }],
+      game: { in_front: null, running: ['Counter-Strike 2'], exclusive: null },
+    };
     case 'capabilities': return {
       encoders: [{ name: 'h264_nvenc', available: true, reason: '' }, { name: 'h264_amf', available: false, reason: '' }, { name: 'h264_qsv', available: true, reason: '' }, { name: 'libopenh264', available: true, reason: '' }, { name: 'mpeg4', available: true, reason: '' }],
       codecs: [{ codec: 'h264', encoders: ['h264_nvenc'] }, { codec: 'hevc', encoders: ['hevc_nvenc'] }, { codec: 'av1', encoders: ['av1_nvenc'] }],

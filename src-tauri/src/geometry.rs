@@ -133,9 +133,9 @@ pub fn display(index: u32) -> Result<DisplayGeometry> {
         Ok(result)
     }
 }
-struct PhysicalPixels(DPI_AWARENESS_CONTEXT);
+pub(crate) struct PhysicalPixels(DPI_AWARENESS_CONTEXT);
 impl PhysicalPixels {
-    fn enter() -> Result<Self> {
+    pub(crate) fn enter() -> Result<Self> {
         let previous =
             unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         if previous.0.is_null() {

@@ -13,7 +13,7 @@ import { activeOf, useStatus } from '../store';
 import { Badge, Button, Card, Field, Kbd, Modal, Segmented, Toggle } from '../ui';
 import type { OverlayPosition, OverlaySettings } from '../api';
 import { Section } from './shared';
-import { VERSION } from '../api';
+import { VERSION, VERSION_STAGE } from '../api';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'updates' | 'about';
 type Tab = SettingsTab;
@@ -141,7 +141,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
 
       {tab === 'about' && (
         <Card className="about">
-          <div className="about-brand"><BrandMark size={48} /><div><h2>REPLAY<b>X</b></h2><p>{BRAND.tagline}</p></div><Badge tone="warn">Alpha · v{VERSION}</Badge></div>
+          <div className="about-brand"><BrandMark size={48} /><div><h2>REPLAY<b>X</b></h2><p>{BRAND.tagline}</p></div><Badge tone={VERSION_STAGE ? "warn" : "neutral"}>{VERSION_STAGE && <>{VERSION_STAGE} · </>}v{VERSION}</Badge></div>
           <ul className="principles">
             <li><ShieldCheck size={16} />Free and open source. No accounts, ads, subscriptions or telemetry.</li>
             <li><ShieldCheck size={16} />Everything stays on this PC. Capture only runs when you turn it on, and is always shown.</li>

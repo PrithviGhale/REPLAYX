@@ -7,8 +7,10 @@ Use --fixture for the silent motion fixture's binary 60Hz wall-clock counter.
 import argparse
 import collections
 import json
+import math
 import pathlib
 import subprocess
+import tempfile
 import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -20,7 +22,44 @@ def summary(values):
                     map(float, np.percentile(a, [50, 95, 99, 100])))) if len(a) else None
 
 
-def analyze(path, seconds=0, fixture=False):
+NEAR_IDENTICAL_LUMA = 0.15
+
+
+def motion_stats(differences):
+    longest, run = 0, 0
+    for delta in differences:
+        run = run + 1 if delta < NEAR_IDENTICAL_LUMA else 0
+        longest = max(longest, run)
+    return dict(compared_pairs=len(differences),
+                mean_absolute_luma_difference=summary(differences),
+                near_identical_pairs=sum(d < NEAR_IDENTICAL_LUMA for d in differences),
+                longest_near_identical_run_frames=longest+1)
+
+
+def analyze_motion_windows(pts, differences, windows):
+    if len(pts) < 2 or len(pts) != len(differences)+1:
+        raise ValueError('Decoded timestamps and image counts do not match')
+    if not all(math.isfinite(t) for t in pts) or any(b <= a for a, b in zip(pts, pts[1:])):
+        raise ValueError('Motion windows require finite, increasing decoded timestamps')
+    elapsed = np.asarray(pts) - pts[0]
+    result = []
+    for start, end in windows:
+        if not all(map(math.isfinite, (start, end))) or not 0 <= start < end <= elapsed[-1]:
+            raise ValueError(f'Motion window {start:g}-{end:g} s falls outside decoded video timestamps')
+        # Half-open window relative to the first decoded picture. Do not count
+        # a pair straddling either end of the motion interval.
+        left, right = np.searchsorted(elapsed, [start, end])
+        if right-left < 2:
+            raise ValueError(f'Motion window {start:g}-{end:g} s contains fewer than two frames')
+        result.append(dict(start_seconds=start, end_seconds=end, decoded_frames=int(right-left),
+                           interval_ms=summary(np.diff(elapsed[left:right])*1000),
+                           **motion_stats(differences[left:right-1])))
+    return result
+
+
+def analyze(path, seconds=0, fixture=False, windows=()):
+    if seconds and windows:
+        raise ValueError('Motion windows require a full decode. Omit --seconds.')
     lock = json.loads((ROOT / 'tools/ffmpeg-lock.json').read_text(encoding='utf-8-sig'))
     runtime = ROOT / 'tools' / lock['runtime_dir']
     probe = str(runtime / 'ffprobe.exe')
@@ -51,8 +90,8 @@ def analyze(path, seconds=0, fixture=False):
         args += ['-t', str(seconds)]
     args += ['-map', '0:v:0', '-vf', 'scale=320:180:flags=area,format=gray',
              '-threads', '1', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-']
-    diffs, ids, holds, last, run = [], [], [], None, 0
-    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+    diffs, ids, last = [], [], None
+    with tempfile.TemporaryFile() as stderr, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr) as p:
         while True:
             raw = p.stdout.read(320 * 180)
             if not raw:
@@ -63,26 +102,26 @@ def analyze(path, seconds=0, fixture=False):
             if last is not None:
                 delta = float(np.abs(frame.astype(np.int16)-last).mean())
                 diffs.append(delta)
-                if delta < 0.15:
-                    run += 1
-                elif run:
-                    holds.append(run)
-                    run = 0
             if fixture:
                 # Fixture is scaled to the entire capture canvas, fullscreen.
                 bits = [frame[9:13, 10+i*12:14+i*12].mean() > 128 for i in range(24)]
                 ids.append(sum(int(b) << i for i, b in enumerate(bits)))
             last = frame.astype(np.int16)
-        error = p.stderr.read().decode(errors='replace')
         code = p.wait()
-    if run:
-        holds.append(run)
+        stderr.seek(0)
+        error = stderr.read().decode(errors='replace')
     result = dict(file=str(path.resolve()), format=data['format'], tracks=tracks,
                   decoded_frames=len(diffs)+int(last is not None), decode_exit=code, decode_errors=error,
-                  mean_absolute_luma_difference=summary(diffs),
-                  near_identical_pairs=sum(d < .15 for d in diffs),
-                  longest_near_identical_run_frames=max(holds, default=0)+1,
+                  **motion_stats(diffs),
                   limitations='Visual repeats are content dependent. Capture drops, encoder drops, physical AV offset and playback smoothness cannot be attributed from this file alone.')
+    if windows:
+        if code:
+            raise RuntimeError(f'Cannot assess motion windows after decode failure: {error}')
+        frames = json.loads(subprocess.check_output(
+            [probe, '-v', 'error', '-threads', '2', '-select_streams', 'v:0', '-show_frames',
+             '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', str(path)]))
+        pts = [float(frame['best_effort_timestamp_time']) for frame in frames['frames']]
+        result['motion_windows'] = analyze_motion_windows(pts, diffs, windows)
     if fixture:
         changes = np.diff(ids)
         result['fixture'] = dict(source_ticks=ids, increments_histogram=dict(collections.Counter(map(int, changes))),
@@ -95,9 +134,13 @@ if __name__ == '__main__':
     parser.add_argument('file', type=pathlib.Path)
     parser.add_argument('--seconds', type=float, default=0)
     parser.add_argument('--fixture', action='store_true')
+    parser.add_argument('--motion-window', action='append', nargs=2, type=float, default=[],
+                        metavar=('START', 'END'), help='Review interval in seconds from the first decoded picture. Repeat for multiple windows.')
     parser.add_argument('--out', type=pathlib.Path, required=True)
     args = parser.parse_args()
-    result = analyze(args.file, args.seconds, args.fixture)
+    if args.seconds and args.motion_window:
+        parser.error('--motion-window requires a full decode. Omit --seconds.')
+    result = analyze(args.file, args.seconds, args.fixture, args.motion_window)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps({k: v for k, v in result.items() if k not in ('fixture',)}, indent=2))
