@@ -3,6 +3,8 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import type { Clip, Settings, Status } from '../src/api';
 import { CLEAR_VOICE } from '../src/audio';
+import { TOUR_STORAGE } from '../src/release-tour';
+import type { Release } from '../src/release-tour';
 
 mockWindows('main');
 // Surface uncaught errors in the screenshot itself.
@@ -20,13 +22,21 @@ console.error = (...a: unknown[]) => { showError(a.map(x => (x instanceof Error 
 // App modules read the Tauri globals at load time, so import them after mocking.
 let emptyStatus = {} as Status;
 let previewSettings = {} as Settings;
-const scenario = new URLSearchParams(window.location.search).get('state') ?? 'replay';
+const params = new URLSearchParams(window.location.search);
+let scenario = params.get('state') ?? 'replay';
+const onboarding = params.get('onboarding');
+const fixFixture: Release = {
+  version: '0.4.1', features: [], improvements: [], fixes: ['Sample fix: corrected audio timing when saving a replay.'],
+};
+if (onboarding === 'fixes' && !localStorage.getItem(TOUR_STORAGE)) {
+  localStorage.setItem(TOUR_STORAGE, JSON.stringify({ version: '0.4.0', previous: null, welcome: false, outcomes: {} }));
+}
 let settings = {} as Settings;
 const plain = { boost_db: 0, voice: { ...CLEAR_VOICE } };
 const initialSettings = (): Settings => ({
   ...previewSettings,
-  // The tour opens only with ?tour (screenshots), never on its own here.
-  tour_done: !new URLSearchParams(window.location.search).has('tour'),
+  // The welcome is opt-in for fixture runs.
+  tour_done: onboarding !== 'fresh',
   output_dir: 'C:\\Users\\You\\Videos\\REPLAYX',
   audio: [
     { kind: 'application', device: '', pid: 29336, process_started: 1, name: 'Game', enabled: true, volume: 1, muted: false, ...plain },
@@ -43,7 +53,7 @@ const settingsProblem: Status['settings_problem'] = settingsScenario === 'damage
 const started = Date.now();
 const status = (): Status => {
   const t = (Date.now() - started) / 1000;
-  const on = !['off', 'error'].includes(scenario);
+  const on = !['off', 'error', 'empty', 'rec'].includes(scenario);
   return {
     ...emptyStatus,
     // ?state=error: the start failure users reported (friendly card on Home).
@@ -54,9 +64,9 @@ const status = (): Status => {
     // ?notice=TEXT: a Home message (closable).
     notice: new URLSearchParams(window.location.search).get('notice'),
     notice_id: 1,
-    state: scenario === 'error' ? 'Error' : !on ? 'Stopped' : scenario === 'rec' ? 'Recording' : 'Buffering', replay: on, recording: scenario === 'rec',
+    state: scenario === 'error' ? 'Error' : scenario === 'rec' ? 'Recording' : on ? 'Buffering' : 'Stopped', replay: on, recording: scenario === 'rec',
     encoder: on ? 'h264_nvenc' : '', encoder_label: on ? 'h264_nvenc' : '', encoder_speed: on ? 1.0 : 0, video_lag_ms: on ? 140 : 0,
-    target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: 'Roblox', recording_elapsed: scenario === 'rec' ? 94 + t : 0,
+    target_bitrate_mbps: on ? 28 : 0, detected_game: on ? 'Roblox' : null, foreground_game: params.has('game') ? 'Roblox' : null, recording_elapsed: scenario === 'rec' ? 94 + t : 0,
     scaling: on ? 'GPU zero-copy (Intel Quick Sync)' : '', output_width: 1920, output_height: 1080,
     buffer_seconds: on ? Math.min(60, 42 + t) : 0, buffer_bytes: on ? 71_000_000 : 0, free_bytes: 412 * 1024 ** 3,
     frames: on ? 2650 + Math.round(t * 60) : 0, dropped_frames: 0, fps: on ? 59.7 + Math.sin(t) * 0.2 : 0, elapsed: on ? 154 + t : 0,
@@ -102,7 +112,19 @@ mockIPC((cmd, args) => {
   switch (cmd) {
     case 'status': return status();
     case 'settings': return settings;
-    case 'save_settings': settings = a.settings as Settings; return null;
+        case 'save_settings': settings = a.settings as Settings; return settings;
+    case 'tour_install_origin': return onboarding === 'fresh' ? 'fresh' : onboarding === 'features' ? 'pre-0.4' : onboarding === 'fixes' ? 'existing' : null;
+    case 'installed_release_notes': {
+      if (params.has('failedNotes') && !a.all) throw new Error('Preview cannot open a release.');
+      return null;
+    }
+    case 'action': {
+      if (a.name === 'start_recording') scenario = 'rec';
+      if (a.name === 'start_replay') scenario = 'replay';
+      if (a.name === 'stop_replay' || a.name === 'stop_recording' || a.name === 'stop_all') scenario = 'off';
+      if (a.name === 'save_replay' || a.name === 'stop_recording') return { file: clips[0]?.id, probe: clips[0]?.probe };
+      return null;
+    }
     case 'set_mix': return null;
     case 'set_crosshair': settings = { ...settings, crosshair: a.crosshair as Settings['crosshair'] }; return { crosshair: settings.crosshair, warning: null };
     case 'crosshair_status': return {
@@ -113,11 +135,14 @@ mockIPC((cmd, args) => {
     case 'capabilities': return {
       encoders: [{ name: 'h264_nvenc', available: true, reason: '' }, { name: 'h264_amf', available: false, reason: '' }, { name: 'h264_qsv', available: true, reason: '' }, { name: 'libopenh264', available: true, reason: '' }, { name: 'mpeg4', available: true, reason: '' }],
       codecs: [{ codec: 'h264', encoders: ['h264_nvenc'] }, { codec: 'hevc', encoders: ['hevc_nvenc'] }, { codec: 'av1', encoders: ['av1_nvenc'] }],
-      media_error: null, updates_configured: false,
+      media_error: null, updates_configured: false, native_engine_available: true,
       displays: [status().geometry, { ...status().geometry!, index: 1, device: '\\\\.\\DISPLAY2', left: 2560, active_width: 1920, active_height: 1080, desktop_width: 1920, desktop_height: 1080, refresh_hz: 144 }],
       devices: [{ id: 'a', name: 'Speakers (Realtek(R) Audio)', kind: 'system' }, { id: 'b', name: 'Headset Microphone', kind: 'microphone' }],
     };
     case 'clips': return clips;
+    case 'clip_action':
+      document.documentElement.dataset.previewClipAction = String(a.operation) + ':' + String(a.id);
+      return a.id;
     case 'clip_thumbnail': { const i = clips.findIndex(c => c.id === a.id); return svg(230 + i * 35, clips[i]?.category ?? ''); }
     case 'audio_sessions': return [
       { pid: 29336, name: 'Game.exe', path: '', started: 1, active: true }, { pid: 25872, name: 'Discord.exe', path: '', started: 1, active: true },
@@ -142,4 +167,5 @@ mockIPC((cmd, args) => {
 });
 ({ emptyStatus, previewSettings } = await import('../src/api'));
 settings = initialSettings();
-await import('../src/main');
+const { mount } = await import('../src/bootstrap');
+mount(onboarding === 'fixes' ? fixFixture : undefined);

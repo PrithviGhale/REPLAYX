@@ -1,140 +1,260 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, X } from 'lucide-react';
-import { api, native } from './api';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Compass, ExternalLink, X } from 'lucide-react';
+import { api, native, VERSION } from './api';
+import { BrandMark } from './brand';
 import { useApp } from './context';
 import { hotkeyLabel } from './format';
-import { TOUR, placeTip, shouldAutoStart, type Placement, type Rect, type TourPage } from './tour-steps';
+import { activeOf, firstPoll, usePollError, useStatus } from './store';
+import { TOUR, placeTip, type Placement, type Rect, type TourPage, type TourStep } from './tour-steps';
+import { advanceTourState, featuresFor, pendingTour, readTourState, RELEASES, releaseNotesUrl, RELEASES_PAGE, TOUR_STORAGE, type Outcome, type Release, type TourState } from './release-tour';
+import { Button } from './ui';
 
-/** Start the tour from anywhere (Settings → Replay tutorial). */
-export const startTour = () => window.dispatchEvent(new Event('replayx-tour'));
+const TOUR_EVENT = 'replayx-tour';
+type Mode = 'welcome' | 'update';
+export const startTour = () => window.dispatchEvent(new CustomEvent<Mode>(TOUR_EVENT, { detail: 'welcome' }));
+export const startWhatsNew = () => window.dispatchEvent(new CustomEvent<Mode>(TOUR_EVENT, { detail: 'update' }));
 
-const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+type Session = { mode: Mode; step: number | null; manual: boolean };
+const FEATURE_ANCHORS: Record<string, { page: TourPage; target: string }> = {
+  workspaces: { page: 'home', target: 'nav-home' },
+  crosshair: { page: 'crosshair', target: 'crosshair-studio' },
+  'native-engine': { page: 'capture', target: 'engine-choice' },
+};
 
-/** Spotlight tour over the real interface. Navigates between pages and
- * scrolls the highlighted component into view, but never clicks anything:
- * the dimmed layer takes all pointer input while the tour is open. */
-export function Tour({ go }: { go: (page: TourPage) => void }) {
-  const { saved, loaded } = useApp();
-  const [step, setStep] = useState<number | null>(null);
-  const [rect, setRect] = useState<Rect | null>(null);
-  const [missing, setMissing] = useState(false);
-  const [place, setPlace] = useState<Placement | null>(null);
+function loadState() {
+  try { return readTourState(localStorage.getItem(TOUR_STORAGE)); } catch { return null; }
+}
+function writeState(state: TourState) {
+  try { localStorage.setItem(TOUR_STORAGE, JSON.stringify(state)); } catch { /* Available for this session. */ }
+}
+
+function TourDialog({ children, guided, close, arrows }: { children: ReactNode; guided: boolean; close: () => void; arrows: (delta: number) => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const element = dialog.current!;
+    const previous = document.activeElement;
+    element.showModal();
+    element.querySelector<HTMLElement>("[data-tour-primary]")?.focus({ preventScroll: true });
+    return () => {
+      element.close();
+      if (previous instanceof HTMLElement && previous.isConnected && document.hasFocus()) previous.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    <dialog ref={dialog} className={guided ? 'tour guided-tour' : 'tour tour-intro'} aria-labelledby="tour-title"
+      onCancel={event => { event.preventDefault(); close(); }}
+      onKeyDown={event => {
+        if (guided && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          event.preventDefault();
+          arrows(event.key === 'ArrowLeft' ? -1 : 1);
+        }
+      }}>
+      {children}
+    </dialog>
+  );
+}
+
+function Spotlight({ step, index, total, go, move, close, done, keys }: {
+  step: TourStep; index: number; total: number; go: (page: TourPage) => void; move: (delta: number) => void;
+  close: () => void; done: () => void; keys: { replay: string; record: string };
+}) {
   const tip = useRef<HTMLDivElement>(null);
   const next = useRef<HTMLButtonElement>(null);
-  const auto = useRef(false);
+  const [layout, setLayout] = useState<{ rect: Rect | null; place: Placement } | null>(null);
+  const [missing, setMissing] = useState(false);
 
-  // First run: once settings are loaded and the splash is gone.
-  useEffect(() => {
-    if (auto.current || !shouldAutoStart(loaded, saved.tour_done, native)) return;
-    auto.current = true;
-    const t = window.setTimeout(() => setStep(0), 400);
-    return () => window.clearTimeout(t);
-  }, [loaded, saved.tour_done]);
-  useEffect(() => {
-    const start = () => setStep(0);
-    window.addEventListener('replayx-tour', start);
-    // UI preview screenshots only (the app's own URL never has ?tour).
-    if (new URLSearchParams(window.location.search).has('tour')) start();
-    return () => window.removeEventListener('replayx-tour', start);
-  }, []);
-
-  const close = useCallback(() => {
-    setStep(null);
-    setRect(null);
-    if (native) void api.markTourDone().catch(() => undefined);
-  }, []);
-
-  const current = step === null ? null : TOUR[step];
-  // Go to the step's page, then find its component (it may render a moment later).
-  useEffect(() => {
-    if (!current) return;
-    go(current.page);
-    setMissing(false);
-    setRect(null);
-    if (!current.target) return;
-    let tries = 0;
-    const find = window.setInterval(() => {
-      const el = document.querySelector<HTMLElement>(`[data-tour="${current.target}"]`);
-      if (el) {
-        window.clearInterval(find);
-        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduceMotion() ? 'auto' : 'smooth' });
-      } else if (++tries > 25) {
-        window.clearInterval(find);
-        setMissing(true);
-      }
-    }, 40);
-    return () => window.clearInterval(find);
-  }, [current, go]);
-  // Follow the component while it scrolls, the window resizes or layout moves.
-  useEffect(() => {
-    if (!current?.target) return;
-    let frame = 0;
-    const track = () => {
-      const el = document.querySelector<HTMLElement>(`[data-tour="${current.target}"]`);
-      if (el) {
-        const r = el.getBoundingClientRect();
-        setRect(prev => (prev && Math.abs(prev.left - r.left) < 0.5 && Math.abs(prev.top - r.top) < 0.5 && Math.abs(prev.width - r.width) < 0.5 && Math.abs(prev.height - r.height) < 0.5
-          ? prev : { left: r.left, top: r.top, width: r.width, height: r.height }));
-      }
-      frame = requestAnimationFrame(track);
-    };
-    frame = requestAnimationFrame(track);
-    return () => cancelAnimationFrame(frame);
-  }, [current]);
   useLayoutEffect(() => {
-    if (!current || !tip.current) return;
-    const box = tip.current.getBoundingClientRect();
-    const pad = 6;
-    const target = rect && !missing ? { left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 } : null;
-    setPlace(placeTip(target, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight }));
-  }, [rect, missing, current]);
-  useEffect(() => { next.current?.focus(); }, [step]);
-  useEffect(() => {
-    if (step === null) return;
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-      else if (e.key === 'ArrowRight') { e.preventDefault(); setStep(s => (s === null ? s : Math.min(TOUR.length - 1, s + 1))); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); setStep(s => (s === null ? s : Math.max(0, s - 1))); }
+    go(step.page);
+    setMissing(false);
+    const root = document.getElementById('root')!;
+    const view = () => ({ width: window.innerWidth, height: window.innerHeight });
+    let target: HTMLElement | null = null;
+    let frame = 0;
+    const measure = () => {
+      const box = tip.current?.getBoundingClientRect();
+      if (!box) return;
+      const r = target?.getBoundingClientRect();
+      const rect = r && r.width && r.height && r.bottom > 0 && r.top < view().height
+        ? { left: r.left - 5, top: r.top - 5, width: r.width + 10, height: r.height + 10 } : null;
+      setLayout({ rect, place: placeTip(rect, box, view()) });
     };
-    window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
-  }, [step, close]);
+    const queueMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const resize = new ResizeObserver(queueMeasure);
+    const lookup = () => {
+      if (document.querySelector<HTMLElement>('.workspace-content')?.dataset.page !== step.page) return;
+      target = step.target ? root.querySelector<HTMLElement>('[data-tour="' + step.target + '"]') : null;
+      if (!target) return;
+      watch.disconnect();
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      resize.observe(target);
+      const content = document.querySelector('.workspace-inner');
+      if (content) resize.observe(content);
+      queueMeasure();
+    };
+    const watch = new MutationObserver(lookup);
+    if (tip.current) resize.observe(tip.current);
+    if (step.target) {
+      watch.observe(root, { childList: true, subtree: true });
+      lookup();
+    }
+    const timeout = step.target && !target ? window.setTimeout(() => {
+      watch.disconnect();
+      if (!target) { setMissing(true); measure(); }
+    }, 750) : 0;
+    window.addEventListener('resize', queueMeasure);
+    window.addEventListener('scroll', queueMeasure, true);
+    measure();
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+      watch.disconnect();
+      resize.disconnect();
+      window.removeEventListener('resize', queueMeasure);
+      window.removeEventListener('scroll', queueMeasure, true);
+    };
+  }, [step, go]);
+  useEffect(() => { next.current?.focus({ preventScroll: true }); }, [step]);
 
-  if (step === null || !current) return null;
-  const last = step === TOUR.length - 1;
-  const pad = 6;
-  const hole = rect && !missing ? { x: rect.left - pad, y: rect.top - pad, w: rect.width + pad * 2, h: rect.height + pad * 2 } : null;
-  const keys = { replay: hotkeyLabel(saved.replay_hotkey), record: hotkeyLabel(saved.recording_hotkey) };
-  return (
-    <div className={`tour ${reduceMotion() ? 'still' : ''}`} role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-body">
-      <svg className="tour-dim" width="100%" height="100%" aria-hidden="true">
-        <defs>
-          <mask id="tour-hole">
-            <rect width="100%" height="100%" fill="#fff" />
-            {hole && <rect x={hole.x} y={hole.y} width={hole.w} height={hole.h} rx="12" fill="#000" />}
-          </mask>
-        </defs>
-        <rect width="100%" height="100%" fill="rgba(6,7,11,0.72)" mask="url(#tour-hole)" />
-        {hole && <rect className="tour-ring" x={hole.x} y={hole.y} width={hole.w} height={hole.h} rx="12" />}
-      </svg>
-      <div ref={tip} className={`tour-tip side-${place?.side ?? 'center'}`}
-        style={{ left: place?.x ?? -9999, top: place?.y ?? -9999, ['--arrow' as string]: `${place?.arrow ?? 0}px` }}>
-        <div className="tour-top">
-          <span className="tour-progress">Step {step + 1} of {TOUR.length}</span>
-          <button className="tour-x" aria-label="Skip tour" title="Skip tour (Esc)" onClick={close}><X size={15} /></button>
-        </div>
-        <h3 id="tour-title">{current.title}</h3>
-        <p id="tour-body">{current.body(keys)}{missing && ' (Not available right now.)'}</p>
-        <div className="tour-dots" aria-hidden="true">{TOUR.map((_, i) => <i key={i} className={i === step ? 'on' : i < step ? 'done' : ''} />)}</div>
-        <div className="tour-actions">
-          <button className="tour-skip" onClick={close}>Skip tour</button>
-          <span className="spacer" />
-          {step > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setStep(step - 1)}><ArrowLeft size={14} /><span>Back</span></button>}
-          <button ref={next} className="btn btn-primary btn-sm" onClick={() => (last ? close() : setStep(step + 1))}>
-            <span>{last ? 'Finish' : 'Next'}</span>{!last && <ArrowRight size={14} />}
-          </button>
-        </div>
+  const hole = layout?.rect;
+  const last = index + 1 === total;
+  return <>
+    <svg className="tour-dim" width="100%" height="100%" aria-hidden="true">
+      <defs><mask id="tour-hole">
+        <rect width="100%" height="100%" fill="white" />
+        {hole && <rect x={hole.left} y={hole.top} width={hole.width} height={hole.height} rx="10" fill="black" />}
+      </mask></defs>
+      <rect width="100%" height="100%" fill="rgba(8,10,13,0.76)" mask="url(#tour-hole)" />
+      {hole && <rect className="tour-ring" x={hole.left} y={hole.top} width={hole.width} height={hole.height} rx="10" />}
+    </svg>
+    <div ref={tip} className={'tour-tip side-' + (layout?.place.side ?? 'center')}
+      style={{ left: layout?.place.x ?? 0, top: layout?.place.y ?? 0, visibility: layout ? 'visible' : 'hidden', ['--arrow' as string]: (layout?.place.arrow ?? 0) + 'px' }}>
+      <div className="tour-top"><span className="tour-progress">Step {index + 1} of {total}</span>
+        <button type="button" className="tour-x" aria-label="Skip tour" onClick={close}><X size={17} /></button></div>
+      <h2 id="tour-title">{step.title}</h2>
+      <p>{step.body(keys)}{missing && ' This control is currently unavailable.'}</p>
+      <div className="tour-dots" aria-hidden="true">{Array.from({ length: total }, (_, i) => <i key={i} className={i === index ? 'on' : i < index ? 'done' : ''} />)}</div>
+      <div className="tour-actions">
+        <button className="tour-skip" onClick={close}>Skip</button><span className="spacer" />
+        {index > 0 && <Button variant="ghost" icon={ArrowLeft} onClick={() => move(-1)}>Back</Button>}
+        <button type="button" ref={next} className="btn btn-primary" onClick={() => last ? done() : move(1)}>
+          {last ? 'Finish' : 'Next'}{!last && <ArrowRight size={15} />}
+        </button>
       </div>
     </div>
-  );
+  </>;
+}
+
+export function Tour({ go, fixture }: { go: (page: TourPage) => void; fixture?: Release }) {
+  const version = fixture?.version ?? VERSION;
+  const release = fixture ?? RELEASES.find(entry => entry.version === version);
+  const { saved, loaded, toast } = useApp();
+  const held = useStatus(status => ({ busy: activeOf(status) || !!status.foreground_game, damaged: !!status.settings_problem }));
+  const engineError = usePollError();
+  const [ready, setReady] = useState(!native);
+  const [state, setState] = useState<TourState | null>(loadState);
+  const [session, setSession] = useState<Session | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [notesError, setNotesError] = useState(false);
+
+  useEffect(() => {
+    const read = () => setFocused(document.visibilityState === 'visible' && document.hasFocus());
+    read();
+    window.addEventListener('focus', read);
+    window.addEventListener('blur', read);
+    document.addEventListener('visibilitychange', read);
+    return () => {
+      window.removeEventListener('focus', read);
+      window.removeEventListener('blur', read);
+      document.removeEventListener('visibilitychange', read);
+    };
+  }, []);
+  useEffect(() => {
+    if (!loaded || !native) return;
+    let cancelled = false;
+    void Promise.all([firstPoll, state?.version === version ? Promise.resolve('existing' as const) : api.tourOrigin()]).then(([, origin]) => {
+      if (cancelled) return;
+      if (!origin) { setReady(true); return; }
+      const next = advanceTourState(state, version, origin, saved.tour_done);
+      if (state !== next) { writeState(next); setState(next); }
+      setReady(true);
+    }).catch(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+  }, [loaded, saved.tour_done, state, version]);
+
+  const safe = ready && focused && !held.busy && !engineError;
+  useEffect(() => {
+    if (!safe || !state || held.damaged || session) return;
+    const mode = pendingTour(state, release ? [release] : []);
+    if (mode) { setNotesError(false); setSession({ mode, step: null, manual: false }); }
+  }, [state, session, safe, held.damaged, release]);
+  useEffect(() => {
+    const show = (event: Event) => {
+      const mode = (event as CustomEvent<Mode>).detail;
+      if (held.busy) { toast('info', 'Stop capture and return to REPLAYX to open the tour.'); return; }
+      setNotesError(false);
+      setSession({ mode: mode === 'update' ? 'update' : 'welcome', step: null, manual: true });
+    };
+    window.addEventListener(TOUR_EVENT, show);
+    return () => window.removeEventListener(TOUR_EVENT, show);
+  }, [held.busy, toast]);
+
+  const updating = session?.mode === 'update';
+  const previous = session?.manual ? null : state?.previous ?? null;
+  const features = useMemo(() => release && updating ? featuresFor(release, previous) : [], [release, updating, previous]);
+  const steps = useMemo(() => updating ? features.flatMap(({ id, title, summary }) => FEATURE_ANCHORS[id]
+    ? [{ id, title, body: () => summary, ...FEATURE_ANCHORS[id] }] : []) : TOUR, [updating, features]);
+  if (!session || !safe) return null;
+  const step = session.step === null ? undefined : steps[session.step];
+  const exit = (outcome: Outcome) => {
+    if (state?.version === version) {
+      const key = updating ? 'release:' + version : 'welcome';
+      const value = state.outcomes[key] === 'completed' ? 'completed' : outcome;
+      const next = { ...state, outcomes: { ...state.outcomes, [key]: value } };
+      writeState(next);
+      setState(next);
+    }
+    setSession(null);
+  };
+  const move = (delta: number) => setSession(current => current && current.step !== null
+    ? { ...current, step: Math.max(0, Math.min(steps.length - 1, current.step + delta)) } : current);
+  const openNotes = (all: boolean) => {
+    if (!native) { window.open(all ? RELEASES_PAGE : releaseNotesUrl(version), '_blank', 'noopener'); return; }
+    setNotesError(false);
+    void api.installedReleaseNotes(all).catch(() => setNotesError(true));
+  };
+  return <TourDialog guided={!!step} close={() => exit('dismissed')} arrows={move}>
+    {step ? <Spotlight step={step} index={session.step!} total={steps.length} go={go} move={move}
+      close={() => exit('dismissed')} done={() => exit('completed')}
+      keys={{ replay: hotkeyLabel(saved.replay_hotkey), record: hotkeyLabel(saved.recording_hotkey) }} />
+      : <div className="tour-intro-body">
+        <button type="button" className="tour-x" aria-label="Dismiss" onClick={() => exit('dismissed')}><X size={19} /></button>
+        <BrandMark size={50} />
+        <h2 id="tour-title">{!updating ? 'Welcome to REPLAYX' : features.length ? "What's new in " + version : 'REPLAYX Updated'}</h2>
+        {!updating ? <p>Learn how to record, save the last few moments and find your clips. The tour takes about a minute.</p>
+          : <>
+            {features.length === 0 && <p>You’re using REPLAYX {version}.</p>}
+            {features.length > 0 && <ul className="release-features">{features.map(feature => (
+              <li key={feature.id}><strong>{feature.title}</strong><span>{feature.summary}</span></li>
+            ))}</ul>}
+            {release && (release.improvements.length > 0 || release.fixes.length > 0) && <>
+              <h3>What’s improved</h3>
+              <ul className="release-fixes">{[...release.improvements, ...release.fixes].map(note => <li key={note}>{note}</li>)}</ul>
+            </>}
+            {notesError && <p role="alert" className="release-note-error">Could not open release notes. Try All releases.</p>}
+            <div className="release-links">
+              <button type="button" className="link-btn" onClick={() => openNotes(false)}>Full release notes on GitHub <ExternalLink size={13} /></button>
+              <button type="button" className="link-btn" onClick={() => openNotes(true)}>All releases</button>
+            </div>
+          </>}
+        <div className="tour-intro-actions">
+          {steps.length > 0 ? <>
+            <Button variant="ghost" onClick={() => exit('dismissed')}>{updating ? 'Skip' : 'Maybe later'}</Button>
+            <Button variant="primary" data-tour-primary icon={Compass} onClick={() => setSession({ ...session, step: 0 })}>{updating ? 'Show me what’s new' : 'Start tour'}</Button>
+          </> : <Button variant="primary" data-tour-primary onClick={() => exit('completed')}>Done</Button>}
+        </div>
+      </div>}
+  </TourDialog>;
 }

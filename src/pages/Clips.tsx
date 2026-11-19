@@ -30,7 +30,7 @@ export function showGameClips(game: string) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...loadPrefs(), view: 'all', game })); } catch { /* preview */ }
 }
 
-export function ClipsPage() {
+export function ClipsPage({ requestedClip }: { requestedClip: React.RefObject<string | null> }) {
   const { clips, refreshClips, dropClip, pendingSaves, run, busy, draft, toast } = useApp();
   const { go } = useCapture();
   const replayOn = useStatus(x => x.replay);
@@ -42,7 +42,12 @@ export function ClipsPage() {
   });
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => requestedClip.current);
+  useEffect(() => {
+    if (!requestedClip.current) return;
+    setPrefsState(old => ({ ...DEFAULT_PREFS, sort: old.sort }));
+    requestedClip.current = null;
+  }, [requestedClip]);
   const [renaming, setRenaming] = useState<Clip | null>(null);
   const [newName, setNewName] = useState('');
   const [moving, setMoving] = useState<Clip | null>(null);

@@ -3,6 +3,9 @@
 
 ## 0.4.0
 
+- Replaced the sidebar with Capture, Library, Studio and Settings workspaces and put recording and replay controls on every page.
+- Added a brand startup animation, an optional guided tutorial, and What's New summaries that offer tours only for new features.
+
 - Added Crosshair Studio with presets, persistent edits, and capture exclusion on supported displays and games.
 - Improved FFmpeg audio timing across recording and replay segments and kept completed footage recoverable after a failed Stop.
 - Added experimental Native V2 hardware recording for compatible setups. FFmpeg remains the default and handles fallback.
@@ -10,7 +13,10 @@
 
 See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) for compatibility and the measured results.
 
-## 0.4.0-rc.3
+## 0.4.0
+
+- Replaced the sidebar with Capture, Library, Studio and Settings workspaces and put recording and replay controls on every page.
+- Added a brand startup animation, an optional guided tutorial, and What's New summaries that offer tours only for new features.-rc.3
 
 - Kept FFmpeg audio on its sample clock, correcting recurring AAC timing gaps without changing the video frame grid.
 - Cleared the saving state after a failed recording stop and retained completed clips for recovery. A second Stop cannot take ownership of the same recording.
@@ -18,7 +24,10 @@ See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) for compatibility an
 - Staged the Native worker before desktop source checks and installer builds, including on clean CI checkouts.
 - Kept FFmpeg as default and Native V2 experimental. No engine tuning or frame-selection changes.
 
-## 0.4.0-rc.2
+## 0.4.0
+
+- Replaced the sidebar with Capture, Library, Studio and Settings workspaces and put recording and replay controls on every page.
+- Added a brand startup animation, an optional guided tutorial, and What's New summaries that offer tours only for new features.-rc.2
 
 ### Fixed
 
@@ -34,7 +43,10 @@ See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) for compatibility an
 
 - The NVIDIA Media Foundation activation failure remains reproducible on the tested Intel-driven hybrid layout. FFmpeg NVENC passed a generated hardware probe. Radeon hardware and matched gameplay performance still need qualification.
 
-## 0.4.0-rc.1
+## 0.4.0
+
+- Replaced the sidebar with Capture, Library, Studio and Settings workspaces and put recording and replay controls on every page.
+- Added a brand startup animation, an optional guided tutorial, and What's New summaries that offer tours only for new features.-rc.1
 
 ### Added
 

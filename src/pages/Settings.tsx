@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Compass, Download, FolderOpen, Info, Keyboard, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
-import { startTour } from '../Tour';
+import { startTour, startWhatsNew } from '../Tour';
 import { comboFrom } from '../hotkeys';
 import { BRAND, BrandMark } from '../brand';
 import { UpdatesTab } from './Updates';
@@ -77,12 +77,25 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
 
   return (
     <Section>
-      <div className="tabs" role="tablist" data-tour="settings-tabs">
-        {tabs.map(t => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}><t.icon size={15} />{t.label}{t.id === 'updates' && updateWaiting && <span className="tab-badge" aria-label="Update available">1</span>}</button>)}
+      <div className="tabs" role="tablist" aria-label="Preferences" data-tour="settings-tabs" onKeyDown={event => {
+        const index = tabs.findIndex(item => item.id === tab);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+          : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+          : event.key === 'ArrowRight' ? (index + 1) % tabs.length : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        setTab(tabs[next].id);
+        event.currentTarget.querySelectorAll('button')[next]?.focus();
+      }}>
+        {tabs.map(t => <button key={t.id} id={'preferences-tab-' + t.id} role="tab" type="button" aria-controls="preferences-panel"
+          aria-selected={tab === t.id} tabIndex={tab === t.id ? 0 : -1} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
+          <t.icon size={15} />{t.label}{t.id === 'updates' && updateWaiting && <span className="tab-badge" aria-label="Update available">1</span>}
+        </button>)}
       </div>
+      <div className="preferences-panel" id="preferences-panel" role="tabpanel" aria-labelledby={'preferences-tab-' + tab}>
 
       {tab === 'general' && (
-        <>
+        <div className="settings-workbench"><div>
           <Card anchor="output-folder" title="Saving">
             <Field label="Clips folder" hint="Must be a full local path. Clips never leave this PC.">
               <div className="input-action">
@@ -113,6 +126,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
               <Button size="sm" disabled={active || draft.game_mappings.length >= 200} onClick={() => patch({ game_mappings: [...draft.game_mappings, { exe: '', name: '' }] })}>Add correction</Button>
             </div>
           </Card>
+        </div><div>
           <OverlayCard />
           <PlaytimeCard />
           <Card tour="tray" title="Startup and window">
@@ -124,7 +138,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
           <Card title="Getting started" subtitle="A one-minute guided tour of the main features. It only shows things; it never starts recording.">
             <Button icon={Compass} onClick={startTour}>Replay tutorial</Button>
           </Card>
-        </>
+        </div></div>
       )}
 
       {tab === 'hotkeys' && (
@@ -142,6 +156,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
       {tab === 'about' && (
         <Card className="about">
           <div className="about-brand"><BrandMark size={48} /><div><h2>REPLAY<b>X</b></h2><p>{BRAND.tagline}</p></div><Badge tone={VERSION_STAGE ? "warn" : "neutral"}>{VERSION_STAGE && <>{VERSION_STAGE} · </>}v{VERSION}</Badge></div>
+          <div className="about-actions"><Button icon={Compass} onClick={startTour}>Replay tutorial</Button><Button icon={Info} onClick={startWhatsNew}>What&apos;s new</Button></div>
           <ul className="principles">
             <li><ShieldCheck size={16} />Free and open source. No accounts, ads, subscriptions or telemetry.</li>
             <li><ShieldCheck size={16} />Everything stays on this PC. Capture only runs when you turn it on, and is always shown.</li>
@@ -150,6 +165,7 @@ export function SettingsPage({ tab, setTab }: { tab: SettingsTab; setTab: (t: Se
           <p className="muted small">REPLAYX is MIT licensed. Video and audio are processed with FFmpeg (LGPL build, shipped as separate programs). See THIRD_PARTY_NOTICES.md and PRIVACY.md in the install folder.</p>
         </Card>
       )}
+      </div>
     </Section>
   );
 }

@@ -32,7 +32,7 @@ export function Thumb({ clip, className = '' }: { clip: Clip; className?: string
   }, [clip.id, key, state.url, state.failed]);
   return (
     <div ref={ref} className={`thumb ${className}`} data-clip={clip.id}>
-      {state.url ? <img key={key} src={state.url} alt="" draggable={false} /> : <Film size={26} className={state.failed ? '' : 'pulse'} />}
+      {state.url ? <img key={key} src={state.url} alt="" draggable={false} /> : <Film size={26} />}
     </div>
   );
 }

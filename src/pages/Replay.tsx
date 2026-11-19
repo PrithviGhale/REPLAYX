@@ -43,7 +43,7 @@ export function ReplayPage() {
       <Card className="replay-hero">
         <div className="replay-hero-row">
           <div>
-            <h2>Instant Replay</h2>
+            <h2>Rolling buffer</h2>
             <p className="muted">{s.replay ? `Keeping the last ${durationLabel(draft.replay_seconds)} on disk, ready to save.` : 'Off. Turn it on before you play; nothing before that moment can be saved.'}</p>
           </div>
           <ReplaySwitch size="lg" label={false} />

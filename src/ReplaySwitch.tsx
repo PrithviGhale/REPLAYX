@@ -20,7 +20,7 @@ export function ReplaySwitch({ size = 'md', label = true }: { size?: 'md' | 'lg'
     : state === 'error' ? 'Capture stopped with an error (details on Home). Click to try again.'
     : working ? 'Instant Replay is changing state…' : 'Instant Replay is off. Click to start buffering.';
   return (
-    <button type="button" role="switch" aria-checked={on} aria-busy={working} title={title}
+    <button type="button" role="switch" aria-label="Instant Replay" aria-checked={on} aria-busy={working} title={title}
       disabled={!native || working || (!!busy && !working)}
       className={`replay-switch ${size} ${state}`}
       onClick={() => go(on ? 'stop_replay' : 'start_replay')}>

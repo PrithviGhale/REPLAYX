@@ -150,6 +150,8 @@ export const api = {
   /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
   openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
+  tourOrigin: () => call<import('./release-tour').InstallOrigin>('tour_install_origin'),
+  installedReleaseNotes: (all: boolean) => call<void>('installed_release_notes', { all }),
   dismissNotice: (id: number) => call<void>('dismiss_notice', { id }),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),

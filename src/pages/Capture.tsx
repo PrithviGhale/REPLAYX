@@ -104,7 +104,8 @@ export function CapturePage() {
 
   return (
     <Section>
-      <Card title="Recording engine" subtitle="FFmpeg stays the default. Native Engine Alpha uses hardware encoding and saves MP4 clips.">
+      <div className="video-workbench"><div>
+      <Card tour="engine-choice" title="Recording engine" subtitle="FFmpeg stays the default. Native Engine Alpha uses hardware encoding and saves MP4 clips.">
         <Field label="Recording backend">
           <select aria-label="Recording backend" value={draft.recording_engine ?? 'ffmpeg'} disabled={active}
             onChange={e => patch({ recording_engine: e.target.value as 'auto' | 'ffmpeg' | 'native' })}>
@@ -147,6 +148,7 @@ export function CapturePage() {
         )}
       </Card>
 
+      </div><div>
       <Card tour="video-output" title="Output" subtitle="The video size is independent of your display: 1920 × 1080 always saves a 1920 × 1080 file.">
         <dl className="size-flow">
           <div><dt>Display (source)</dt><dd>{src.width} × {src.height} <em>{aspect(src.width, src.height)}</em></dd></div>
@@ -292,6 +294,7 @@ export function CapturePage() {
           )}
         </Card>
       )}
+      </div></div>
     </Section>
   );
 }

@@ -216,12 +216,12 @@ export function CrosshairPage() {
 
   return (
     <Section>
-      <Card className="xh-hero">
+      <Card className="xh-hero" tour="crosshair-studio">
         <div className="xh-hero-row">
           <span className="xh-mark" aria-hidden><Crosshair size={22} /></span>
           <div className="xh-title">
-            <h2>Crosshair Studio</h2>
-            <p className="muted">Your aim. Your style.</p>
+            <h2>In-game overlay</h2>
+
           </div>
           <Badge tone={state.tone} dot>{state.text}</Badge>
           <div className="xh-enable">
@@ -247,6 +247,18 @@ export function CrosshairPage() {
       </Card>
 
       <div className="xh-main">
+        <Card className="xh-preview-card" title="Preview" subtitle="Exactly what appears on screen."
+          actions={<Segmented label="Preview zoom" value={zoom} onChange={setZoom} options={[{ value: 1, label: 'Actual size' }, { value: 4, label: 'Zoom' }]} />}>
+          <div className={`xh-stage ${backdrop}`} role="img" aria-label="Crosshair preview">
+            <div className="xh-stage-grid" aria-hidden />
+            <CrosshairArt c={c} scale={scale} zoom={zoom} fit={320} className="xh-art" />
+          </div>
+          <div className="xh-stage-foot">
+            <Segmented label="Preview background" value={backdrop} onChange={setBackdrop}
+              options={[{ value: 'dark', label: 'Dark' }, { value: 'bright', label: 'Bright' }, { value: 'split', label: 'Split' }]} />
+            <span className="muted small">{preset ? PRESETS.find(p => p.id === preset)?.name : 'Custom'} · {Math.round(scale * 100)}% scaling</span>
+          </div>
+        </Card>
         <Card title="Appearance" subtitle="Changes appear at once and are saved automatically."
           actions={<Button size="sm" variant="ghost" icon={RotateCcw} onClick={reset}>Reset</Button>}>
           <div className="xh-controls">
@@ -302,18 +314,6 @@ export function CrosshairPage() {
           </div>
         </Card>
 
-        <Card className="xh-preview-card" title="Preview" subtitle="Exactly what appears on screen."
-          actions={<Segmented label="Preview zoom" value={zoom} onChange={setZoom} options={[{ value: 1, label: 'Actual size' }, { value: 4, label: 'Zoom' }]} />}>
-          <div className={`xh-stage ${backdrop}`} role="img" aria-label="Crosshair preview">
-            <div className="xh-stage-grid" aria-hidden />
-            <CrosshairArt c={c} scale={scale} zoom={zoom} fit={320} className="xh-art" />
-          </div>
-          <div className="xh-stage-foot">
-            <Segmented label="Preview background" value={backdrop} onChange={setBackdrop}
-              options={[{ value: 'dark', label: 'Dark' }, { value: 'bright', label: 'Bright' }, { value: 'split', label: 'Split' }]} />
-            <span className="muted small">{preset ? PRESETS.find(p => p.id === preset)?.name : 'Custom'} · {Math.round(scale * 100)}% scaling</span>
-          </div>
-        </Card>
       </div>
 
       <Card title="Styles" subtitle="Start from a style, then make it yours.">

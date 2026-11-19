@@ -66,6 +66,7 @@ struct AppState {
     /// Crosshair Studio's on-screen crosshair (a native window; none while off).
     crosshair: Arc<crate::crosshair_overlay::CrosshairRuntime>,
     data_dir: PathBuf,
+    tour_origin: &'static str,
 }
 impl AppState {
     fn data_dir(&self) -> PathBuf {
@@ -798,6 +799,63 @@ async fn dismiss_notice(id: u64, state: State<'_, AppState>) -> Reply<()> {
         .map_err(err)
 }
 #[tauri::command]
+fn tour_install_origin(state: State<AppState>) -> &'static str {
+    state.tour_origin
+}
+
+fn tour_origin(data: &std::path::Path) -> &'static str {
+    match std::fs::read(data.join("settings.json")) {
+        Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(serde_json::Value::Object(settings)) if !settings.contains_key("crosshair") => {
+                "pre-0.4"
+            }
+            _ => "existing",
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::read_dir(data) {
+                Ok(mut entries) => {
+                    if entries.next().is_none() {
+                        "fresh"
+                    } else {
+                        "existing"
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => "fresh",
+                Err(_) => "existing",
+            }
+        }
+        Err(_) => "existing",
+    }
+}
+
+#[tauri::command]
+fn installed_release_notes(all: bool, app: tauri::AppHandle) -> Reply<()> {
+    let base = crate::updates::RELEASES_PAGE;
+    let url = if all {
+        base.to_owned()
+    } else {
+        format!("{base}/tag/v{}", app.package_info().version)
+    };
+    winutil::open_url(&url).map_err(err)
+}
+
+#[cfg(test)]
+#[test]
+fn tour_origin_distinguishes_fresh_legacy_and_damaged_settings() {
+    let data = tempfile::tempdir().unwrap();
+    assert_eq!(tour_origin(data.path()), "fresh");
+    let settings = data.path().join("settings.json");
+    std::fs::write(&settings, "{}").unwrap();
+    assert_eq!(tour_origin(data.path()), "pre-0.4");
+    std::fs::write(&settings, r#"{"crosshair":{}}"#).unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+    std::fs::write(&settings, "{oops").unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+    std::fs::rename(&settings, data.path().join("settings.unreadable.json")).unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+}
+
+#[tauri::command]
 fn mark_tour_done(state: State<AppState>) {
     state.engine.mark_tour_done();
 }
@@ -1470,6 +1528,7 @@ pub fn run() {
             } else {
                 app.path().app_local_data_dir()?
             };
+            let tour_origin = tour_origin(&data);
             let (settings, settings_problem) =
                 Settings::load_or_recover(&data.join("settings.json"));
             discard_audio_tests(&data);
@@ -1511,6 +1570,7 @@ pub fn run() {
                 notices: crate::overlay::Overlay::spawn(),
                 crosshair: Arc::new(crate::crosshair_overlay::CrosshairRuntime::default()),
                 data_dir: data.clone(),
+                tour_origin,
             });
             {
                 // Before the installer replaces the app: stop playtime, finalize
@@ -1959,6 +2019,8 @@ pub fn run() {
             retry_hotkeys,
             voice_presets,
             mark_tour_done,
+            tour_install_origin,
+            installed_release_notes,
             dismiss_notice,
             set_crosshair,
             crosshair_status,
