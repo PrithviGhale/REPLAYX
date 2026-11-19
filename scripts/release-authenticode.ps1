@@ -11,12 +11,14 @@ function Assert-ReleaseAuthenticode {
     if ($AllowUnsigned040) {
         # Exactly two approved unsigned 0.4.0 builds: the qualified fallback
         # (35b20b6) and the redesigned release candidate (3f30a61, installer
-        # AAEA05CA...). Each role must match one of them byte for byte.
+        # AAEA05CA...). Each role must match one of them byte for byte. App
+        # hashes are of the file packed in the installer, which carries Tauri's
+        # NSIS bundle marker (target/release keeps the unmarked build).
         $approved = @{
             Installer = @('0F2E944EFAEA6C2106D4FF91BDAA05BE63019CF6C34E63BF03AF9E46FEE53576',
                           'AAEA05CAC9169FD025F895AE62A21A5EFE652E4562CEFA9DC0E2DFC0DBFD3169')
             App = @('341349C4C2A5A8DC5CF3F4D39A0004236397629145C6E7F9C240594BB75E18F5',
-                    '02CFAEA3F3A510AF25A6DD93F10048369F84B89039F0A36EE88D69D5994655B4')
+                    'D40ECC03AED5A130D4CBFA99BB728799DAD1C9C3BA3E1E1F789867FAB7084684')
             Worker = @('F49064F886AE99FDFE3D8A76D733583BE153BCCD3FFA68D1941A65419A0DFE5F',
                        '9636C8991764A1931A02B0753B81B03E2772A1DB859482E8CC990CDF547738EC')
         }

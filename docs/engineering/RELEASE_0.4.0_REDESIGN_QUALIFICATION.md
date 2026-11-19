@@ -10,7 +10,7 @@ qualified fallback (`35b20b6`, installer `0F2E944E…`) and its existing
 | --- | ---: | --- |
 | `REPLAYX.exe` (NSIS setup) | 60,452,641 | `aaea05cac9169fd025f895ae62a21a5efe652e4562cefa9dc0e2dfc0dbfd3169` |
 | `REPLAYX.exe.sig` (Tauri) | 416 | `3e3776d7292c2b737d4249f6ea8b226d747082a11dd445b925897b8871d048bf` |
-| `replayx.exe` (app inside setup) | 18,203,648 | `02cfaea3f3a510af25a6dd93f10048369f84b89039f0a36ee88d69d5994655b4` |
+| `replayx.exe` (app packed in setup) | 18,203,648 | `d40ecc03aed5a130d4cbfa99bb728799dad1c9c3ba3e1e1f789867fab7084684` |
 | `replayx-native-proto.exe` (worker) | 959,488 | `9636c8991764a1931a02b0753b81b03e2772a1db859482e8cc990cdf547738ec` |
 
 **Provenance.** The candidate's recorded source commit had been added by hand
@@ -22,6 +22,13 @@ after the build. So the clean `3f30a61` tree was rebuilt with
   `3f30a61`.**
 - **Whole-file hashes are not reproducible across rebuilds** for that reason.
   The qualified bytes are the candidate above.
+
+**Packed app.** The app packed in the installer was extracted from the NSIS
+LZMA stream. Every packed runtime file matches its pin.
+- **It differs from `target/release/replayx.exe` (`02cfaea3…`) in 3 bytes:**
+  Tauri's bundle marker reads `NSS` instead of `UNK`.
+- **The first hosted clean run failed** because the app pin had been taken
+  from the unmarked build file. The exception now pins the packed bytes.
 
 **Updater signature.** It verifies against the embedded key for version 0.4.0,
 and is rejected for 0.4.1 and for a single flipped byte.
