@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOUR, placeTip, shouldAutoStart } from '../src/tour-steps.ts';
+import { TOUR, placeTip } from '../src/tour-steps.ts';
 
 const view = { width: 1280, height: 820 };
 const tip = { width: 320, height: 170 };
@@ -8,10 +8,10 @@ const inside = (p: { x: number; y: number }) => p.x >= 0 && p.y >= 0 && p.x + ti
 
 test('the tour has the twelve steps with real, distinct anchors', () => {
   assert.equal(TOUR.length, 12);
-  assert.equal(TOUR[0].target, undefined, 'welcome is centred');
+  assert.equal(TOUR[0].target, 'nav-home');
   const targets = TOUR.map(s => s.target).filter(Boolean);
   assert.equal(new Set(targets).size, targets.length);
-  for (const id of ['record', 'replay-switch', 'save-replay', 'video-output', 'mic-device', 'voice-enhancer', 'overlay', 'nav-clips', 'game-detection', 'tray', 'settings-tabs'])
+  for (const id of ['record', 'replay-switch', 'save-replay', 'video-output', 'mic-device', 'voice-enhancer', 'overlay', 'nav-clips', 'nav-games', 'nav-crosshair', 'settings-tabs'])
     assert.ok(targets.includes(id), id);
   assert.match(TOUR[3].body({ replay: 'Ctrl + Shift + F10', record: 'x' }), /Ctrl \+ Shift \+ F10/);
 });
@@ -37,11 +37,4 @@ test('tooltip goes below, flips above or beside, and stays inside the window', (
   const small = { width: 400, height: 300 };
   const p = placeTip({ left: 10, top: 10, width: 50, height: 20 }, tip, small);
   assert.ok(p.x >= 0 && p.y >= 0 && p.x + tip.width <= small.width && p.y + tip.height <= small.height, JSON.stringify(p));
-});
-
-test('tour starts by itself only on a real first run', () => {
-  assert.equal(shouldAutoStart(true, false, true), true);
-  assert.equal(shouldAutoStart(true, true, true), false, 'finished or skipped is remembered');
-  assert.equal(shouldAutoStart(false, false, true), false, 'waits for settings');
-  assert.equal(shouldAutoStart(true, false, false), false, 'never in the browser preview');
 });

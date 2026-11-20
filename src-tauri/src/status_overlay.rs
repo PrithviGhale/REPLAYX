@@ -506,7 +506,7 @@ fn place(area: (i32, i32, i32, i32), size: (i32, i32), position: &str, margin: i
 }
 
 /// Copy premultiplied pixels into the layered window at `pos`.
-unsafe fn present(
+pub(crate) unsafe fn present(
     hwnd: windows::Win32::Foundation::HWND,
     pos: (i32, i32),
     (w, h, pixels): &(i32, i32, Vec<u8>),

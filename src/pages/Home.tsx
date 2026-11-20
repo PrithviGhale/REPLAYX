@@ -2,33 +2,15 @@ import { useState } from 'react';
 import { ErrorNotice } from '../ErrorNotice';
 import { describeError, describeSettingsProblem, type SettingsProblem } from '../errors';
 import { visibleNotice } from '../notices';
-import { ChevronRight, Circle, Cpu, HardDrive, Info, Mic, MicOff, MonitorPlay, RotateCcw, Save, Square, X } from 'lucide-react';
+import { ChevronRight, Cpu, HardDrive, Info, Mic, MicOff, MonitorPlay, RotateCcw, Save, X } from 'lucide-react';
 import { api, native } from '../api';
 import { microphoneLabel, microphoneOn } from '../update-logic';
 import { useApp } from '../context';
-import { useCapture, useRecordButton } from '../capture';
-import { ReplaySwitch } from '../ReplaySwitch';
 import { activeOf, refreshNow, useStatus } from '../store';
 import { bytes, duration, encoderName, outputWidth, plan, sourceRect } from '../format';
-import { Badge, Button, Card, Empty, Kbd, Meter } from '../ui';
+import { Badge, Card, Empty, Kbd, Meter } from '../ui';
 import { SourceIcon, Section, Thumb, feedIndex } from './shared';
 import type { Page } from '../App';
-
-function ReplayRing({ value, total, live }: { value: number; total: number; live: boolean }) {
-  const r = 70, c = 2 * Math.PI * r, f = total > 0 ? Math.min(1, value / total) : 0;
-  return (
-    <div className={`ring ${live ? 'live' : ''}`}>
-      <svg viewBox="0 0 160 160" aria-hidden="true">
-        <circle cx="80" cy="80" r={r} className="ring-track" />
-        <circle cx="80" cy="80" r={r} className="ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - f)} />
-      </svg>
-      <div className="ring-center">
-        <strong>{duration(value)}</strong>
-        <span>of {duration(total)}</span>
-      </div>
-    </div>
-  );
-}
 
 /** The microphone row of the home Audio card: level and one On/Off switch.
  * The switch shows what the engine confirmed, also when it was changed from
@@ -79,13 +61,13 @@ function Health() {
   );
 }
 
-export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
+export function HomePage({ go: navigate, openClip }: { go: (p: Page) => void; openClip: (id: string) => void }) {
   const { draft, caps, clips } = useApp();
-  const { go, busy, saved } = useCapture();
-  const { toast } = useApp();
+
+
   const s = useStatus(x => ({
     replay: x.replay, recording: x.recording, state: x.state, buffer: x.buffer_seconds, bufferBytes: x.buffer_bytes,
-    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
+    elapsed: x.recording_elapsed, pending: x.pending_recording, fps: x.fps, pw: x.play_width, ph: x.play_height, backend: x.recording_engine, encoder: x.encoder, scaling: x.scaling, ow: x.output_width, oh: x.output_height,
     free: x.free_bytes, error: x.error, retry: (x.error_retry ?? []).join(','), notice: x.notice, noticeId: x.notice_id ?? 0,
     // Compared as text: the status object is new on every poll.
     settingsProblem: x.settings_problem ? JSON.stringify(x.settings_problem) : '', hotkey: x.hotkey_error, recovery: x.recovery_sessions,
@@ -97,7 +79,7 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
   const out = active && s.ow ? `${s.ow} × ${s.oh}${s.pw ? ` (plays as ${s.pw} × ${s.ph})` : ''}` : `${p.width} × ${p.height}`;
   // The microphone is always listed (with its switch), also when it is off.
   const enabled = draft.audio.map((a, i) => ({ a, i })).filter(x => x.a.enabled || x.a.kind === 'microphone');
-  const rec = useRecordButton('Stop & save');
+
   const starting = s.pending || s.state === 'Starting';
   const headline = starting ? (s.pending || s.recording ? 'Starting recording…' : 'Starting capture…') : s.recording ? 'Recording' : s.replay ? 'Instant Replay is on' : s.state === 'Recovering' ? 'Recovering capture' : 'Capture is off';
   const sub = starting ? 'Opening the display, encoder and audio. Recording begins with the first encoded frame; Cancel stops it without saving.'
@@ -136,43 +118,52 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
           {s.recovery} interrupted capture session{s.recovery > 1 ? 's' : ''} can be recovered <ChevronRight size={14} />
         </button>
       )}
-      <div className="home-grid">
-        <Card className="hero">
-          <div className="hero-body">
-            <div className="hero-text">
-              <Badge tone={starting ? 'warn' : s.recording ? 'rec' : s.replay ? 'ok' : s.state === 'Error' ? 'bad' : 'neutral'} dot>{starting ? 'STARTING' : s.recording ? 'REC' : s.replay ? 'BUFFERING' : s.state.toUpperCase()}</Badge>
-              <h2>{headline}</h2>
-              <p>{sub}</p>
-              <div className="hero-actions">
-                <ReplaySwitch size="lg" />
-                <Button size="lg" variant="primary" icon={Save} disabled={!!busy || !s.replay || s.buffer <= 0} title={s.replay ? 'Save the last moments now' : 'Turn on Instant Replay first'}
-                  onClick={async () => { const m = saved(await go('save_replay')); if (m) toast('success', `Replay saved — ${m}`); }}>Save replay</Button>
-                <Button size="lg" variant="record" icon={rec.mode === 'record' ? Circle : rec.mode === 'cancel' ? X : Square} disabled={rec.disabled || !native}
-                  onClick={rec.onClick}>
-                  {rec.label}
-                </Button>
-              </div>
-              <div className="hotkeys-inline">
-                <span>Save replay <Kbd combo={draft.replay_hotkey} /></span>
-                <span>Record <Kbd combo={draft.recording_hotkey} /></span>
-              </div>
+      <div className="overview-grid">
+        <div className="overview-column">
+          <Card className="capture-stage">
+            <div className="stage-head">
+              <span><MonitorPlay size={16} />Capture session</span>
+              <Badge tone={starting ? 'warn' : s.recording ? 'rec' : s.replay ? 'ok' : s.state === 'Error' ? 'bad' : 'neutral'} dot>{s.state}</Badge>
             </div>
-            <ReplayRing value={s.buffer} total={draft.replay_seconds} live={s.replay} />
-          </div>
+            <h2>{headline}</h2>
+            <p>{sub}</p>
+            <div className="stage-scale" aria-label={'Replay buffer: ' + duration(s.buffer) + ' of ' + duration(draft.replay_seconds)}>
+              <div className="stage-scale-head"><span>Replay buffer</span><strong>{duration(s.buffer)} / {duration(draft.replay_seconds)}</strong></div>
+              <div className="stage-track" aria-hidden="true"><div className="stage-fill" style={{ '--progress': Math.max(0, Math.min(1, s.buffer / Math.max(1, draft.replay_seconds))) } as React.CSSProperties} /></div>
+              <div className="stage-scale-foot"><span>Oldest</span><span>Now</span></div>
+            </div>
+            <div className="stage-keys">
+              <span>Save replay <Kbd combo={draft.replay_hotkey} /></span>
+              <span>Record <Kbd combo={draft.recording_hotkey} /></span>
+            </div>
+          </Card>
+        <Card title="Recent clips" actions={<button className="link-btn" onClick={() => navigate('clips')}>Library <ChevronRight size={13} /></button>}>
+          {clips.length === 0 ? <Empty icon={Save} title="No clips yet">Saved replays and recordings appear here.</Empty> : (
+            <div className="recent-list">
+              {clips.slice(0, 4).map(c => (
+                <button key={c.id} className="recent-item" onClick={() => openClip(c.id)} title={c.name}>
+                  <Thumb clip={c} />
+                  <div><strong>{c.category === 'Unsorted' ? c.kind : `${c.category} · ${c.kind}`}</strong><span>{new Date(c.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.probe && ` · ${duration(c.probe.duration)}`}</span></div>
+                  <ChevronRight size={15} />
+                </button>
+              ))}
+            </div>
+          )}
         </Card>
-
-        <Card title="Capture" actions={<button className="link-btn" onClick={() => navigate('capture')}>Video settings <ChevronRight size={13} /></button>}>
+        </div>
+        <div className="overview-column">
+        <Card title="Capture configuration" actions={<button className="link-btn" onClick={() => navigate('capture')}>Recording settings <ChevronRight size={13} /></button>}>
           <dl className="facts">
             <div><dt><MonitorPlay size={14} />Display</dt><dd>{display ? `${display.device.replace('\\\\.\\', '')} · ${display.active_width}×${display.active_height} @ ${display.refresh_hz} Hz` : draft.capture === 'desktop-duplication' ? `Display ${draft.display + 1}` : 'GDI capture'}</dd></div>
             <div><dt>Output</dt><dd>{out} · {active && s.fps ? `${s.fps.toFixed(0)} / ${draft.fps}` : draft.fps} fps</dd></div>
-            <div><dt><Cpu size={14} />Encoder</dt><dd>{active && s.encoder ? encoderName(s.encoder) : `${encoderName(draft.encoder)} · chosen at start`}</dd></div>
+            <div><dt><Cpu size={14} />{s.backend === 'native' && active ? 'Native Engine · Experimental' : 'Encoder'}</dt><dd>{active && s.encoder ? encoderName(s.encoder) : `${encoderName(draft.encoder)} · chosen at start`}</dd></div>
             <div><dt>Scaling</dt><dd>{active && s.scaling ? s.scaling : draft.gpu_scaling ? 'Fastest working GPU path' : 'CPU (GPU scaling off)'}</dd></div>
             <div><dt><HardDrive size={14} />Free space</dt><dd>{native ? bytes(s.free) : '—'}</dd></div>
             <div><dt>Buffer on disk</dt><dd>{bytes(s.bufferBytes)}</dd></div>
           </dl>
         </Card>
 
-        <Card title="Health"><Health /></Card>
+
 
         <Card title="Audio" actions={<button className="link-btn" onClick={() => navigate('audio')}>Mixer <ChevronRight size={13} /></button>}>
           {enabled.length === 0 ? <p className="muted small">No audio sources enabled — clips will be silent.</p> : (
@@ -191,18 +182,8 @@ export function HomePage({ go: navigate }: { go: (p: Page) => void }) {
           <p className="muted small">{draft.separate_tracks ? 'Mix + one editable track per source' : 'Single mixed track'} · {draft.audio_bitrate_kbps} kbps</p>
         </Card>
 
-        <Card title="Recent clips" className="span-2" actions={<button className="link-btn" onClick={() => navigate('clips')}>Library <ChevronRight size={13} /></button>}>
-          {clips.length === 0 ? <Empty icon={Save} title="No clips yet">Saved replays and recordings appear here.</Empty> : (
-            <div className="recent">
-              {clips.slice(0, 4).map(c => (
-                <button key={c.id} className="recent-item" onClick={() => navigate('clips')} title={c.name}>
-                  <Thumb clip={c} />
-                  <div><strong>{c.category === 'Unsorted' ? c.kind : `${c.category} · ${c.kind}`}</strong><span>{new Date(c.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.probe && ` · ${duration(c.probe.duration)}`}</span></div>
-                </button>
-              ))}
-            </div>
-          )}
-        </Card>
+          <Card title="Health"><Health /></Card>
+        </div>
       </div>
     </Section>
   );

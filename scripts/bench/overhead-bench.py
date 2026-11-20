@@ -99,6 +99,14 @@ CONFIGS = {
     # The user-facing setting (not the benchmark switch), and its fallback:
     # a WGC window that does not exist must fall back to Desktop Duplication.
     "wgc-setting-h264": (["codec=h264", "capture_api=wgc"], ""),
+    # The capture GPU priority and NVENC adaptive quantization, for displays
+    # driven by the GPU that also renders the game.
+    "wgc-setting-prio0": (["codec=h264", "capture_api=wgc"], "gpu_priority=0"),
+    "wgc-setting-aq0": (["codec=h264", "capture_api=wgc"], "nvenc_aq=0"),
+    # November 14 candidates against wgc-setting-h264 (the owner's WGC path):
+    "wgc-setting-eco": (["codec=h264", "capture_api=wgc"], "capture_eco=1"),
+    "wgc-setting-floor15": (["codec=h264", "capture_api=wgc"], "wgc_floor_us=15000"),
+    "wgc-setting-early-sfc": (["codec=h264", "capture_api=wgc"], "wgc_early_drop=1,vpp_scale_mode=1"),
     # NVENC selected on an Intel-driven display (the November 12 Fortnite
     # test): the three paths, all through the user-facing setting.
     "dda-nvenc": (["codec=h264", "encoder=h264_nvenc"], ""),
@@ -398,7 +406,7 @@ def run(label, args, fps, height, mode, out):
     clips = sorted(glob.glob(os.path.join(out, "test-output", "capture-test-*", "clips", "**", "*.mkv"), recursive=True),
                    key=os.path.getsize)
     if clips:
-        clip = json.loads(subprocess.check_output([sys.executable, "-I", os.path.join(root, "scripts", "gameproxy-check.py"),
+        clip = json.loads(subprocess.check_output([sys.executable, "-I", os.path.join(root, "scripts", "bench", "gameproxy-check.py"),
                                                    clips[-1], "--skip-seconds", "6"]))
         clip.pop("advance_histogram_ms", None)
     control_fps = statistics.mean([base['fps'], after['fps']]) if base and after else None

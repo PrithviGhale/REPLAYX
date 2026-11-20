@@ -8,6 +8,7 @@ tools/ffmpeg-stable/
 tools/ffmpeg-release-current.json
 tools/ffmpeg-stable-candidate.json
 src-tauri/media/
+src-tauri/binaries/
 tools/*.zip
 tools/ffmpeg-release.json
 test-output/

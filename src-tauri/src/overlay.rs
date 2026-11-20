@@ -613,15 +613,6 @@ fn show(n: &Notice) -> windows::core::Result<()> {
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
             );
         }
-        // Windows' "Animation effects" off (reduced motion): fade only.
-        let mut animate = windows::core::BOOL(1);
-        let _ = SystemParametersInfoW(
-            SPI_GETCLIENTAREAANIMATION,
-            0,
-            Some(&mut animate as *mut _ as *mut _),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        );
-        let slide = if animate.as_bool() { 24.0 * scale } else { 0.0 };
         let margin = (20.0 * scale) as i32;
         let x = work.right - w - margin;
         let y = work.top + margin;
@@ -659,7 +650,7 @@ fn show(n: &Notice) -> windows::core::Result<()> {
             class,
             w!("REPLAYX"),
             WS_POPUP,
-            x + slide as i32,
+            x,
             y,
             w,
             h,
@@ -682,23 +673,17 @@ fn show(n: &Notice) -> windows::core::Result<()> {
                 DispatchMessageW(&msg);
             }
         };
-        // Slide in and fade in (240 ms, ease-out), hold, then fade out while
-        // drifting 8 px right (260 ms). About 30 short frames in total: no
-        // lasting work while a game runs. Reduced motion: fades only.
+        // Fade in (200 ms, ease-out), hold, fade out (200 ms), in place. Only
+        // the window's opacity changes: it is placed once (topmost, at its
+        // spot) and never moved or re-ordered while a game runs, since each
+        // move or z-order change over a full-screen game costs it a frame
+        // (5-9 ms single frames measured with the earlier slide-in; see
+        // docs/engineering/SAVE_STUTTER_AND_CAPTURE_2026-11-13.md).
         let ease = |t: f32| 1.0 - (1.0 - t).powi(3);
         let start = Instant::now();
         loop {
-            let t = (start.elapsed().as_secs_f32() / 0.24).min(1.0);
+            let t = (start.elapsed().as_secs_f32() / 0.2).min(1.0);
             let e = ease(t);
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOPMOST),
-                x + ((1.0 - e) * slide) as i32,
-                y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOACTIVATE,
-            );
             let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), (e * 248.0) as u8, LWA_ALPHA);
             pump();
             if t >= 1.0 {
@@ -713,16 +698,7 @@ fn show(n: &Notice) -> windows::core::Result<()> {
         }
         let fade = Instant::now();
         loop {
-            let t = (fade.elapsed().as_secs_f32() / 0.26).min(1.0);
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOPMOST),
-                x + (t * t * slide / 3.0) as i32,
-                y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOACTIVATE,
-            );
+            let t = (fade.elapsed().as_secs_f32() / 0.2).min(1.0);
             let _ =
                 SetLayeredWindowAttributes(hwnd, COLORREF(0), ((1.0 - t) * 248.0) as u8, LWA_ALPHA);
             pump();

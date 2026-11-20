@@ -2,8 +2,12 @@ use anyhow::{bail, Result};
 use replayx_core::{engine::Engine, media::Media, model::Settings};
 use std::{path::PathBuf, thread, time::Duration};
 fn main() -> Result<()> {
+    let invocation_started = std::time::Instant::now();
     let args: Vec<_> = std::env::args().collect();
     let action = args.get(1).map(String::as_str).unwrap_or("help");
+    if action == "native-app-test" {
+        return native_app_test(&args);
+    }
     if action == "audio-test" {
         return audio_test(&args);
     }
@@ -16,8 +20,24 @@ fn main() -> Result<()> {
     if action == "overlay-test" {
         return overlay_test(&args);
     }
+    if action == "save-stutter" {
+        return save_stutter(&args);
+    }
+    if action == "crosshair-capture-test" {
+        return crosshair_capture_test(&args);
+    }
+    if action == "crosshair-bench" {
+        return crosshair_bench(&args);
+    }
     if action == "start-bench" {
         return start_bench(&args);
+    }
+    if action == "native-topology" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&replayx_core::native_gpu::topology()?)?
+        );
+        return Ok(());
     }
     if action == "displays" {
         println!(
@@ -413,6 +433,34 @@ fn main() -> Result<()> {
     // Optional overrides: fps=60 mode=stretch|fit|crop|native height=1080 encoder=h264_nvenc
     for arg in args.iter().skip(4) {
         match arg.split_once('=') {
+            Some(("engine", v)) => {
+                if !["ffmpeg", "native"].contains(&v) {
+                    bail!("Unknown recording engine")
+                }
+                settings.recording_engine = v.into();
+                if v == "native" {
+                    std::env::set_var("REPLAYX_NATIVE_ALPHA", "1");
+                    std::env::set_var(
+                        "REPLAYX_NATIVE_EXE",
+                        std::env::current_exe()?.with_file_name("replayx-native-proto.exe"),
+                    );
+                    for key in [
+                        "REPLAYX_ALPHA_SYNTHETIC",
+                        "REPLAYX_NATIVE_TRACE_ROI",
+                        "REPLAYX_NATIVE_TEST_SECONDS",
+                        "REPLAYX_NATIVE_PHYSICAL_AUDIO",
+                    ] {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+            Some(("native_interval_us", v)) => {
+                let interval: u32 = v.parse()?;
+                if interval > 8333 {
+                    bail!("Experimental native capture interval must be 0..8333 microseconds")
+                }
+                std::env::set_var("REPLAYX_NATIVE_CAPTURE_INTERVAL_US", interval.to_string());
+            }
             Some(("fps", v)) => settings.fps = v.parse()?,
             Some(("mode", v)) => settings.canvas_mode = v.into(),
             Some(("height", v)) => settings.height = v.parse()?,
@@ -451,6 +499,10 @@ fn main() -> Result<()> {
     } else {
         run.join("data")
     };
+    let benchmark_crosshair = args.iter().any(|arg| arg == "benchmark_crosshair=on");
+    if benchmark_crosshair && action != "capture-test" {
+        bail!("The benchmark crosshair is available only for capture-test");
+    }
     let engine = Engine::new(data, settings)?;
     if action == "recover" {
         println!("{:?}", engine.recover()?);
@@ -465,18 +517,47 @@ fn main() -> Result<()> {
         thread::sleep(Duration::from_secs(3));
         engine.start_recording()?;
     } else if action == "record-test" {
+        if args.iter().any(|arg| arg == "with_replay=1") {
+            engine.start_replay()?;
+        }
         engine.start_recording()?;
     } else {
         engine.start_replay()?;
     }
+    let crosshair = if benchmark_crosshair {
+        use replayx_core::{crosshair::CrosshairSettings, crosshair_overlay::CrosshairOverlay};
+        let overlay = CrosshairOverlay::default();
+        overlay.apply(
+            &CrosshairSettings {
+                enabled: true,
+                visibility: "always".into(),
+                ..Default::default()
+            },
+            true,
+        );
+        Some(overlay)
+    } else {
+        None
+    };
     let seconds = args
         .get(2)
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(10)
         .clamp(6, 7200);
+    // Benchmarks budget the complete child process. Include initialization in
+    // their acquisition deadline, while other CLI callers retain capture time
+    // measured from successful startup. Poll against absolute ticks so status
+    // work never adds another delay to every requested second.
+    let wall_clock = args.iter().any(|arg| arg == "wall_clock=1");
+    let capture_clock = if wall_clock {
+        invocation_started
+    } else {
+        std::time::Instant::now()
+    };
+    let capture_limit = Duration::from_secs(seconds);
     let mut samples = Vec::new();
-    for _ in 0..seconds {
-        thread::sleep(Duration::from_secs(1));
+    while let Some(delay) = capture_poll_delay(capture_clock.elapsed(), capture_limit) {
+        thread::sleep(delay);
         let s = engine.status();
         println!(
             "{} frames={} fps={:.1} buffer={:.2}s audio={:?}",
@@ -486,6 +567,14 @@ fn main() -> Result<()> {
             std::fs::write(run.join("failure.json"), serde_json::to_vec_pretty(&s)?)?;
             bail!("{}", s.error.unwrap_or_default())
         }
+        if let Some(overlay) = &crosshair {
+            let state = overlay.state();
+            if !state.shown || !state.excluded_from_capture || state.error.is_some() {
+                engine.shutdown()?;
+                bail!("Benchmark crosshair was not shown with capture exclusion: {state:?}");
+            }
+            overlay.raise_if_covered();
+        }
         samples.push(s);
         if samples.len() % 10 == 0 {
             std::fs::write(
@@ -494,10 +583,15 @@ fn main() -> Result<()> {
             )?;
         }
     }
+    let crosshair_state = crosshair.as_ref().map(|overlay| overlay.state());
+    drop(crosshair);
+    let capture_end_ms = invocation_started.elapsed().as_millis();
     let stop_started = std::time::Instant::now();
     let frames_before = engine.status().frames;
     let first = if action == "record-test" || action == "record-self-test" {
         engine.stop_recording()?
+    } else if args.iter().any(|arg| arg == "wait_for_replay=1") {
+        engine.save_replay_when_ready(Duration::from_secs(4))?
     } else {
         engine.save_replay()?
     };
@@ -540,7 +634,7 @@ fn main() -> Result<()> {
         "first clip ready {} ms after the stop/save request",
         first_ready_ms
     );
-    let result = serde_json::json!({"kind":action,"handover_ms":handover_ms,"first_ready_ms":first_ready_ms,"second_ready_ms":second_ready_ms,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
+    let result = serde_json::json!({"kind":action,"wall_clock_budget":wall_clock,"wait_for_replay":args.iter().any(|arg| arg == "wait_for_replay=1"),"requested_seconds":seconds,"capture_end_ms":capture_end_ms,"handover_ms":handover_ms,"first_ready_ms":first_ready_ms,"second_ready_ms":second_ready_ms,"crosshair":crosshair_state,"first":path,"concurrent":other,"probe":probe,"status":engine.status(),"note":"Synthetic tests do not validate real device synchronization or game performance."});
     std::fs::write(run.join("report.json"), serde_json::to_vec_pretty(&result)?)?;
     std::fs::write(
         run.join("samples.json"),
@@ -630,6 +724,170 @@ fn audio_test(args: &[String]) -> Result<()> {
     if packets == 0 {
         bail!("No real device packets received; saved samples may be idle-loopback silence")
     }
+    Ok(())
+}
+
+/// Seconds on the QueryPerformanceCounter clock (the same clock
+/// replayx-gameproxy logs its presents on, so frames and events align).
+fn qpc_seconds() -> f64 {
+    use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+    let (mut c, mut f) = (0i64, 0i64);
+    unsafe {
+        let _ = QueryPerformanceCounter(&mut c);
+        let _ = QueryPerformanceFrequency(&mut f);
+    }
+    c as f64 / f as f64
+}
+
+/// Instant Replay saves while a game-like workload runs: what a save costs
+/// the game. Captures the screen (Windows Graphics Capture by default) with
+/// the app's usual 1080p60 Balanced settings, then saves at the given offsets
+/// (seconds after Instant Replay started) the way the app does: each save on
+/// its own thread, the on-screen "saved" notice, and (thumb=1) the Clips
+/// thumbnail. Every stage is logged on the QPC clock to events.json for
+/// scripts/bench/save-stutter.py.
+///
+/// usage: replayx-cli save-stutter OUT_DIR saves=130,160,161,190,190.4,190.8
+///        [end=220] [replay=120] [audio=silent|system] [notice=0|1] [thumb=0|1]
+///        [capture_api=wgc|dda] [encoder=auto|...] [height=1080] [fps=60]
+///        [overlay=0|1] (the in-game status overlay, updated once a second
+///        as the app does)
+fn save_stutter(args: &[String]) -> Result<()> {
+    use replayx_core::overlay::{capture_notice, CaptureEvent, Overlay};
+    use std::sync::{Arc, Mutex};
+    let out = PathBuf::from(args.get(2).expect("output directory required"));
+    std::fs::create_dir_all(&out)?;
+    let opt = |k: &str, d: &str| -> String {
+        args.iter()
+            .skip(3)
+            .find_map(|a| a.strip_prefix(&format!("{k}=")).map(str::to_owned))
+            .unwrap_or_else(|| d.to_owned())
+    };
+    let saves: Vec<f64> = opt("saves", "130,160,161,190,190.4,190.8")
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let end: f64 = opt("end", "220").parse()?;
+    let mut settings = Settings {
+        output_dir: out.join("clips"),
+        capture_api: opt("capture_api", "wgc"),
+        encoder: opt("encoder", "auto"),
+        codec: "h264".into(),
+        preset: "balanced".into(),
+        fps: opt("fps", "60").parse()?,
+        height: opt("height", "1080").parse()?,
+        canvas_mode: "stretch".into(),
+        replay_seconds: opt("replay", "120").parse()?,
+        buffer_mb: 2048,
+        ..Default::default()
+    };
+    settings.width = replayx_core::geometry::canvas(settings.height).0;
+    settings.audio.truncate(1);
+    if opt("audio", "silent") == "silent" {
+        settings.audio.clear();
+    }
+    let notices = (opt("notice", "1") == "1").then(Overlay::spawn);
+    let status_overlay =
+        (opt("overlay", "1") == "1").then(replayx_core::status_overlay::StatusOverlay::spawn);
+    let mut last_overlay = std::time::Instant::now();
+    let thumb = opt("thumb", "0") == "1";
+    let overlay_settings = settings.clone();
+    let engine = Engine::new(out.join("data"), settings)?;
+    let events: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let log = {
+        let events = events.clone();
+        move |save: i64, what: &str| {
+            events
+                .lock()
+                .unwrap()
+                .push(serde_json::json!({"t": qpc_seconds(), "save": save, "event": what}));
+        }
+    };
+    log(-1, "start requested");
+    engine.start_replay()?;
+    let started = std::time::Instant::now();
+    log(-1, "start returned");
+    let mut workers = Vec::new();
+    let mut next = 0usize;
+    let mut live_logged = false;
+    while started.elapsed().as_secs_f64() < end {
+        let s = engine.status();
+        if !live_logged && s.frames > 0 {
+            log(-1, "capturing");
+            live_logged = true;
+        }
+        if s.state == "Error" {
+            bail!("capture failed: {}", s.error.unwrap_or_default());
+        }
+        if let Some(o) = &status_overlay {
+            // As the app's 1 s loop: the frame for the current status.
+            if last_overlay.elapsed() >= Duration::from_secs(1) {
+                use replayx_core::status_overlay::{tiles, view, Frame};
+                let os = &overlay_settings.overlay;
+                let frame = Frame {
+                    tiles: tiles(&view(&s, &overlay_settings), os),
+                    position: os.position.clone(),
+                    opacity: os.opacity,
+                    capturable: false,
+                };
+                o.update((!frame.tiles.is_empty()).then_some(frame));
+                last_overlay = std::time::Instant::now();
+            }
+        }
+        if let Some(at) = saves.get(next).copied() {
+            if started.elapsed().as_secs_f64() >= at {
+                let n = next as i64;
+                log(n, "requested");
+                let job = engine.save_replay()?;
+                log(n, "handed over");
+                let (engine, log, notices) = (engine.clone(), log.clone(), notices.clone());
+                workers.push(thread::spawn(move || {
+                    let result = job.run_progress(|stage| log(n, stage));
+                    engine.complete_save(&result);
+                    match &result {
+                        Ok((path, probe)) => {
+                            log(n, "ready");
+                            if let Some(o) = &notices {
+                                o.show(capture_notice(
+                                    CaptureEvent::ReplaySaved,
+                                    Some("Desktop"),
+                                    Some(probe.duration),
+                                    "",
+                                ));
+                                log(n, "notice shown");
+                            }
+                            if thumb {
+                                let m = Media::discover().expect("media");
+                                let _ = m.thumbnail(path, probe.duration, 480);
+                                log(n, "thumbnail done");
+                            }
+                            serde_json::json!({"save": n, "path": path, "duration": probe.duration, "timings": probe.save_timings})
+                        }
+                        Err(e) => {
+                            log(n, "failed");
+                            serde_json::json!({"save": n, "error": format!("{e:#}")})
+                        }
+                    }
+                }));
+                next += 1;
+                continue;
+            }
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    let live = engine.status();
+    log(-1, "stopping");
+    engine.shutdown()?;
+    log(-1, "stopped");
+    // Let the last notice finish its fade before the process exits.
+    thread::sleep(Duration::from_millis(3500));
+    let report = serde_json::json!({
+        "saves": results, "events": *events.lock().unwrap(), "status": live,
+        "note": "Synthetic workload; not a game result.",
+    });
+    std::fs::write(out.join("events.json"), serde_json::to_vec_pretty(&report)?)?;
+    println!("{}", serde_json::to_string_pretty(&report["saves"])?);
     Ok(())
 }
 
@@ -1196,4 +1454,620 @@ fn voice_eval(args: &[String]) -> Result<()> {
         replayx_core::audio::write_wav16(&wav, &stereo)?;
     }
     Ok(())
+}
+
+/// Exercises the SAME Engine used by Tauri. Physical mode is explicit and bounded.
+fn native_app_duration(
+    desktop_silent: bool,
+    physical: bool,
+    requested: Option<u64>,
+) -> Result<u64> {
+    let limit = match (desktop_silent, physical) {
+        (true, true) => bail!("Choose silent desktop or physical audio capture"),
+        (true, false) => Some((6..=180, 6)),
+        (false, true) => Some((6..=30, 15)),
+        (false, false) => None,
+    };
+    match (limit, requested) {
+        (Some((range, _)), Some(seconds)) if range.contains(&seconds) => Ok(seconds),
+        (Some((range, _)), Some(_)) => bail!("Capture duration must be {range:?} seconds"),
+        (Some((_, default)), None) => Ok(default),
+        (None, Some(_)) => bail!("Custom duration requires an explicit physical capture mode"),
+        (None, None) => Ok(8),
+    }
+}
+
+fn native_app_test(args: &[String]) -> Result<()> {
+    let desktop_silent = args.iter().any(|a| a == "--desktop-silent");
+    let physical_requested = args.iter().any(|a| a == "--physical");
+    std::env::remove_var("REPLAYX_NATIVE_TRACE_ROI");
+    std::env::remove_var("REPLAYX_NATIVE_TIMESTAMP_TEST");
+    std::env::remove_var("REPLAYX_NATIVE_PHASE_SOURCE");
+    std::env::remove_var("REPLAYX_NATIVE_CAPTURE_INTERVAL_US");
+    if let Some(index) = args.iter().position(|arg| arg == "--capture-interval-us") {
+        let interval: u32 = args
+            .get(index + 1)
+            .ok_or_else(|| anyhow::anyhow!("Capture interval missing"))?
+            .parse()?;
+        if interval > 8333 {
+            bail!("Experimental native capture interval must be 0..8333 microseconds")
+        }
+        std::env::set_var("REPLAYX_NATIVE_CAPTURE_INTERVAL_US", interval.to_string());
+    }
+    if args.iter().any(|a| a == "--phase-global") {
+        if !args.iter().any(|a| a == "--phase-lock") {
+            bail!("Global comparator requires explicit phase-lock")
+        }
+        std::env::set_var("REPLAYX_NATIVE_PHASE_SOURCE", "global");
+    }
+    if args.iter().any(|a| a == "--phase-lock") {
+        if !(desktop_silent || physical_requested) || args.iter().any(|a| a == "--capture-vfr") {
+            bail!("Phase-lock test requires an explicit desktop/device test and one pacing mode")
+        }
+        std::env::set_var("REPLAYX_NATIVE_TIMESTAMP_TEST", "phase-lock");
+    }
+    if args.iter().any(|a| a == "--capture-vfr") {
+        if !desktop_silent {
+            bail!("Explicit VFR experiment requires silent desktop test")
+        }
+        std::env::set_var("REPLAYX_NATIVE_TIMESTAMP_TEST", "capture-vfr");
+    }
+    if let Some(i) = args.iter().position(|a| a == "--trace-roi") {
+        if !desktop_silent {
+            bail!("Frame-content tracing is allowed only in the explicit silent desktop test")
+        }
+        let roi = args
+            .get(i + 1)
+            .ok_or_else(|| anyhow::anyhow!("Trace ROI missing"))?;
+        std::env::set_var("REPLAYX_NATIVE_TRACE_ROI", roi);
+    }
+
+    let physical = desktop_silent || physical_requested;
+    let requested_seconds = args
+        .iter()
+        .position(|a| a == "--seconds")
+        .map(|i| {
+            args.get(i + 1)
+                .ok_or_else(|| anyhow::anyhow!("Duration missing"))?
+                .parse::<u64>()
+                .map_err(anyhow::Error::from)
+        })
+        .transpose()?;
+    let stop_after = native_app_duration(desktop_silent, physical_requested, requested_seconds)?;
+    if args.iter().any(|arg| arg == "--plan-only") {
+        println!(
+            "{}",
+            serde_json::json!({
+                "seconds": stop_after,
+                "physical": physical,
+                "no_capture_started": true,
+                "output_parent": std::env::current_dir()?.join("test-output"),
+            })
+        );
+        return Ok(());
+    }
+
+    let device_only = args.iter().any(|a| a == "--devices-with-generated-video");
+    // This explicit test command runs before Engine/audio threads exist.
+    std::env::set_var("REPLAYX_NATIVE_ALPHA", "1");
+    std::env::remove_var("REPLAYX_ALPHA_SYNTHETIC");
+    if device_only {
+        std::env::set_var("REPLAYX_NATIVE_PHYSICAL_AUDIO", "1");
+    } else {
+        std::env::remove_var("REPLAYX_NATIVE_PHYSICAL_AUDIO");
+    }
+    if physical || device_only {
+        std::env::set_var(
+            "REPLAYX_NATIVE_TEST_SECONDS",
+            if requested_seconds.is_some() || physical_requested {
+                (stop_after + 10).to_string()
+            } else {
+                "12".into()
+            },
+        );
+    }
+    if physical
+        && matches!(
+            replayx_core::games::sample(&[]),
+            replayx_core::games::Foreground::Game(_)
+        )
+    {
+        bail!("A game is in front; unattended device capture was not started")
+    }
+    let root = std::env::current_dir()?.join("test-output").join(format!(
+        "native-alpha-{}-{}",
+        if desktop_silent {
+            "desktop-silent"
+        } else if physical {
+            "physical"
+        } else if device_only {
+            "devices"
+        } else {
+            "generated"
+        },
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    std::fs::create_dir(&root)?;
+    let settings = Settings {
+        recording_engine: "native".into(),
+        output_dir: root.join("clips"),
+        organize_by_game: false,
+        audio: if desktop_silent {
+            Vec::new()
+        } else {
+            vec![
+                Default::default(),
+                replayx_core::model::AudioSource::microphone(),
+            ]
+        },
+        capture_notices: false,
+        ..Default::default()
+    };
+    let engine = Engine::new(root.join("data"), settings)?;
+    let result = (|| -> Result<()> {
+        if physical {
+            engine.start_recording()?;
+        } else {
+            engine.start_synthetic(true)?;
+        }
+        let ready = engine.status();
+        if physical_requested && ready.recording_engine != "native" {
+            bail!(
+                "Physical Native qualification fell back to FFmpeg: {:?}",
+                ready.engine_fallback
+            );
+        }
+        let mut samples = Vec::new();
+        let began = std::time::Instant::now();
+        if physical_requested && !desktop_silent {
+            eprintln!(
+                "Physical capture is active. Play the fixture now. {stop_after} seconds remaining."
+            );
+        }
+        loop {
+            let status = engine.status();
+            if status.state == "Error" {
+                // Preserve evidence and allow the existing runtime-recovery save
+                // to finish before this short-lived test process exits.
+                let until = std::time::Instant::now() + std::time::Duration::from_secs(12);
+                while engine.status().saving > 0 && std::time::Instant::now() < until {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                std::fs::write(
+                    root.join("failure.json"),
+                    serde_json::to_vec_pretty(
+                        &serde_json::json!({"status":engine.status(),"samples":samples}),
+                    )?,
+                )?;
+                bail!(
+                    "{}; diagnostic evidence: {}",
+                    status.error.unwrap_or_default(),
+                    root.display()
+                )
+            }
+            let elapsed = status.elapsed;
+            samples.push(status);
+            let ready_elapsed = if physical_requested && !desktop_silent {
+                began.elapsed().as_secs_f64()
+            } else {
+                elapsed
+            };
+            if ready_elapsed >= stop_after as f64
+                || began.elapsed() > std::time::Duration::from_secs(stop_after + 5)
+            {
+                break;
+            }
+            if physical
+                && matches!(
+                    replayx_core::games::sample(&[]),
+                    replayx_core::games::Foreground::Game(_)
+                )
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        let replay = engine.save_replay()?;
+        let replay_worker = thread::spawn(move || replay.run());
+        let recording = engine.stop_recording()?.run();
+        engine.complete_save(&recording);
+        let replay = replay_worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("Replay worker failed"))?;
+        engine.complete_save(&replay);
+        let (recording_path, recording_probe) = recording?;
+        let (replay_path, replay_probe) = replay?;
+        let media = Media::discover()?;
+        media.verify(&recording_path, if desktop_silent { 0 } else { 3 })?;
+        media.verify(&replay_path, if desktop_silent { 0 } else { 3 })?;
+        let summary = serde_json::json!({"physical":physical,"physical_audio":!desktop_silent && (physical || device_only),"recording":recording_path,"replay":replay_path,"recording_probe":recording_probe,"replay_probe":replay_probe,"status":engine.status(),"samples":samples,"note":"No sounds played. Device packets and timestamps do not prove speech intelligibility, acoustic A/V sync or long-session drift."});
+        std::fs::write(
+            root.join("report.json"),
+            serde_json::to_vec_pretty(&summary)?,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+        Ok(())
+    })();
+    let stopped = engine.shutdown();
+    result?;
+    stopped
+}
+
+/// Delay to the next absolute diagnostic sampling tick, capped at the cut.
+fn capture_poll_delay(elapsed: Duration, limit: Duration) -> Option<Duration> {
+    if elapsed >= limit {
+        return None;
+    }
+    let next_tick = Duration::from_secs(elapsed.as_secs().saturating_add(1));
+    Some(next_tick.min(limit).saturating_sub(elapsed))
+}
+
+/// Crosshair Studio cost: REPLAYX's own CPU, memory and GDI/USER objects with
+/// the crosshair off, on and off again, then the game-like GPU workload
+/// (replayx-gameproxy, borderless full screen) with the crosshair off, on
+/// and off (A/B/A): FPS, 1% and 0.1% lows and how Windows presented the
+/// frames. Shows a crosshair and a full-screen workload on the main display.
+/// usage: replayx-cli crosshair-bench [seconds per game run, default 12]
+fn crosshair_bench(args: &[String]) -> Result<()> {
+    use replayx_core::{crosshair::CrosshairSettings, crosshair_overlay::CrosshairOverlay};
+    use windows::Win32::System::{
+        ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+        Threading::{
+            GetCurrentProcess, GetGuiResources, GetProcessTimes, GR_GDIOBJECTS, GR_USEROBJECTS,
+        },
+    };
+    let seconds: f64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(12.0);
+    let proxy = std::env::current_exe()?.with_file_name("replayx-gameproxy.exe");
+    let root = std::env::current_dir()?.join("test-output").join(format!(
+        "crosshair-bench-{}",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    std::fs::create_dir_all(&root)?;
+    let on = CrosshairSettings {
+        enabled: true,
+        visibility: "always".into(),
+        ..Default::default()
+    };
+    let overlay = CrosshairOverlay::default();
+    // (CPU ms, working set KB, GDI objects, USER objects) of this process.
+    let sample = || unsafe {
+        let p = GetCurrentProcess();
+        let (mut c, mut e, mut k, mut u) = Default::default();
+        let _ = GetProcessTimes(p, &mut c, &mut e, &mut k, &mut u);
+        let ft = |f: windows::Win32::Foundation::FILETIME| {
+            ((f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64) as f64 / 10_000.0
+        };
+        let mut mem = PROCESS_MEMORY_COUNTERS {
+            cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            ..Default::default()
+        };
+        let _ = GetProcessMemoryInfo(p, &mut mem, mem.cb);
+        (
+            ft(k) + ft(u),
+            mem.WorkingSetSize as f64 / 1024.0,
+            GetGuiResources(p, GR_GDIOBJECTS),
+            GetGuiResources(p, GR_USEROBJECTS),
+        )
+    };
+    println!("== Resources in REPLAYX's process (5 s each)");
+    let mut resources = Vec::new();
+    for (label, show) in [("off", false), ("on", true), ("off again", false)] {
+        if show {
+            overlay.apply(&on, true);
+        } else {
+            overlay.stop();
+        }
+        thread::sleep(Duration::from_millis(500)); // drawn and settled
+        let a = sample();
+        thread::sleep(Duration::from_secs(5));
+        let b = sample();
+        println!(
+            "  crosshair {label:<10} CPU {:>6.2} ms / 5 s · working set {:>7.0} KB · GDI {:>3} · USER {:>3} · window {}",
+            b.0 - a.0,
+            b.1,
+            b.2,
+            b.3,
+            overlay.state().shown
+        );
+        resources.push(serde_json::json!({"crosshair": label, "cpu_ms_per_5s": b.0 - a.0,
+            "working_set_kb": b.1, "gdi_objects": b.2, "user_objects": b.3, "shown": overlay.state().shown}));
+    }
+    println!(
+        "\n== Game-like GPU workload, {seconds} s each (replayx-gameproxy, borderless full screen)"
+    );
+    let mut runs = Vec::new();
+    for (n, (label, show)) in [("off", false), ("on", true), ("off", false)]
+        .into_iter()
+        .enumerate()
+    {
+        if show {
+            overlay.apply(&on, true);
+        } else {
+            overlay.stop();
+        }
+        let log = root.join(format!("gameproxy-{n}-{label}.json"));
+        let status = std::process::Command::new(&proxy)
+            .args(["--seconds", &seconds.to_string(), "--log"])
+            .arg(&log)
+            .status()?;
+        if !status.success() {
+            bail!("replayx-gameproxy failed: {status}");
+        }
+        let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&log)?)?;
+        let presents: Vec<f64> = report["presents_s"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
+            .unwrap_or_default();
+        // Skip the first second (start-up), then frame intervals.
+        let kept: Vec<f64> = presents.into_iter().filter(|t| *t >= 1.0).collect();
+        let mut frames: Vec<f64> = kept.windows(2).map(|w| (w[1] - w[0]) * 1000.0).collect();
+        let span = kept.last().unwrap_or(&0.0) - kept.first().unwrap_or(&0.0);
+        let fps = if span > 0.0 {
+            frames.len() as f64 / span
+        } else {
+            0.0
+        };
+        frames.sort_by(|a, b| b.total_cmp(a));
+        let low = |share: f64| {
+            let n = ((frames.len() as f64 * share).ceil() as usize)
+                .max(1)
+                .min(frames.len().max(1));
+            let worst = &frames[..n.min(frames.len())];
+            if worst.is_empty() {
+                0.0
+            } else {
+                1000.0 / (worst.iter().sum::<f64>() / worst.len() as f64)
+            }
+        };
+        let mut modes = std::collections::BTreeMap::<i64, usize>::new();
+        for m in report["presentation_modes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            *modes.entry(m["mode"].as_i64().unwrap_or(-1)).or_default() += 1;
+        }
+        let mode_text: Vec<String> = modes
+            .iter()
+            .map(|(m, c)| {
+                format!(
+                    "{}:{c}",
+                    match m {
+                        0 => "composed",
+                        1 => "overlay-plane",
+                        2 => "independent-flip",
+                        _ => "other",
+                    }
+                )
+            })
+            .collect();
+        println!(
+            "  {} crosshair {label:<4} {fps:>7.1} FPS · 1% low {:>7.1} · 0.1% low {:>7.1} · presented {}",
+            n + 1,
+            low(0.01),
+            low(0.001),
+            mode_text.join(" ")
+        );
+        runs.push(
+            serde_json::json!({"run": n + 1, "crosshair": label, "fps": fps, "low_1pct": low(0.01),
+            "low_0_1pct": low(0.001), "presentation_modes": modes, "adapter": report["adapter"],
+            "width": report["width"], "height": report["height"]}),
+        );
+    }
+    overlay.stop();
+    let out = root.join("crosshair-bench.json");
+    std::fs::write(
+        &out,
+        serde_json::to_vec_pretty(&serde_json::json!({"resources": resources, "workload": runs}))?,
+    )?;
+    println!("\nwrote {}", out.display());
+    Ok(())
+}
+
+/// Proof that the crosshair stays out of REPLAYX's clips: real Desktop
+/// Duplication frames (what REPLAYX records) of the crosshair over a solid
+/// backdrop, with it hidden, shown (excluded from capture) and, as a control
+/// that proves the test can see it, shown with capture allowed.
+/// usage: replayx-cli crosshair-capture-test [out-dir]
+fn crosshair_capture_test(args: &[String]) -> Result<()> {
+    use replayx_core::{crosshair::CrosshairSettings, crosshair_overlay::CrosshairOverlay};
+    use windows::Win32::{
+        Foundation::{HWND, RECT},
+        UI::{
+            HiDpi::{SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            WindowsAndMessaging::*,
+        },
+    };
+    // GetWindowRect and the capture crop must use the same physical pixels.
+    let previous =
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    if previous.0.is_null() {
+        bail!("Could not query crosshair bounds in physical pixels");
+    }
+    let out = PathBuf::from(
+        args.get(2)
+            .map(String::as_str)
+            .unwrap_or("test-output/crosshair-capture"),
+    );
+    std::fs::create_dir_all(&out)?;
+    let media = Media::discover()?;
+    let on = CrosshairSettings {
+        enabled: true,
+        visibility: "always".into(),
+        color: "#FF00FF".into(),
+        thickness: 4.0,
+        length: 20.0,
+        ..Default::default()
+    };
+    let overlay = CrosshairOverlay::default();
+    overlay.apply(&on, true);
+    thread::sleep(Duration::from_millis(600));
+    let state = overlay.state();
+    if !state.shown {
+        bail!("the crosshair did not appear: {:?}", state.error);
+    }
+    let hwnd = HWND(state.hwnd as *mut _);
+    let mut r = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut r) }?;
+    let pad = 40;
+    let back = RECT {
+        left: r.left - pad,
+        top: r.top - pad,
+        right: r.right + pad,
+        bottom: r.bottom + pad,
+    };
+    let backdrop = thread::spawn(move || unsafe {
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        backdrop_window(back, Duration::from_secs(12));
+    });
+    thread::sleep(Duration::from_millis(500));
+    overlay.raise();
+    thread::sleep(Duration::from_millis(300));
+    let display = replayx_core::geometry::displays()
+        .into_iter()
+        .find(|d| {
+            r.left >= d.left
+                && r.left < d.left + d.desktop_width as i32
+                && r.top >= d.top
+                && r.top < d.top + d.desktop_height as i32
+        })
+        .ok_or_else(|| anyhow::anyhow!("the crosshair is not on a known display"))?;
+    let (w, h) = (
+        ((r.right - r.left) as u32 + 1) & !1,
+        ((r.bottom - r.top) as u32 + 1) & !1,
+    );
+    let (x, y) = ((r.left - display.left) as u32, (r.top - display.top) as u32);
+    let monitor = replayx_core::geometry::monitor_handle(display.index)?;
+    // Both capture methods REPLAYX records with.
+    let grab = |name: &str, wgc: bool| -> Result<Vec<u8>> {
+        let name = format!("{name}-{}", if wgc { "wgc" } else { "dda" });
+        let source = if wgc {
+            format!(
+                "gfxcapture=hmonitor={monitor}:crop_left={x}:crop_top={y}:crop_right={}:crop_bottom={}:max_framerate=10:capture_cursor=0:display_border=0,hwdownload,format=bgra",
+                display.desktop_width.saturating_sub(x + w),
+                display.desktop_height.saturating_sub(y + h)
+            )
+        } else {
+            format!("ddagrab=output_idx={}:framerate=10:video_size={w}x{h}:offset_x={x}:offset_y={y},hwdownload,format=bgra", display.index)
+        };
+        let file = out.join(format!("{name}.mkv"));
+        let ok = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg(source)
+            .args(["-frames:v", "8", "-c:v", "ffv1"])
+            .arg(&file)
+            .status()?
+            .success();
+        if !ok {
+            bail!("ddagrab failed for {name}");
+        }
+        let _ = replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-y", "-sseof", "-0.3", "-i"])
+            .arg(&file)
+            .args(["-frames:v", "1"])
+            .arg(out.join(format!("{name}.png")))
+            .status();
+        Ok(replayx_core::media::command(&media.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-sseof", "-0.3", "-i"])
+            .arg(&file)
+            .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()?
+            .stdout)
+    };
+    let excluded = [
+        grab("crosshair-excluded", false)?,
+        grab("crosshair-excluded", true)?,
+    ];
+    // Control: the same window with capture allowed (test only).
+    unsafe { SetWindowDisplayAffinity(hwnd, WDA_NONE) }?;
+    thread::sleep(Duration::from_millis(300));
+    let visible = [
+        grab("crosshair-capturable-control", false)?,
+        grab("crosshair-capturable-control", true)?,
+    ];
+    overlay.stop();
+    thread::sleep(Duration::from_millis(300));
+    let hidden = [
+        grab("crosshair-hidden", false)?,
+        grab("crosshair-hidden", true)?,
+    ];
+    let _ = backdrop.join();
+    let diff = |a: &[u8], b: &[u8]| -> f64 {
+        let n = a.len().min(b.len()).max(1);
+        a.iter()
+            .zip(b)
+            .map(|(p, q)| (*p as f64 - *q as f64).abs())
+            .sum::<f64>()
+            / n as f64
+    };
+    let mut pass = true;
+    let mut methods = serde_json::Map::new();
+    for (i, method) in ["desktop_duplication", "windows_graphics_capture"]
+        .into_iter()
+        .enumerate()
+    {
+        let (ex, ctl) = (
+            diff(&excluded[i], &hidden[i]),
+            diff(&visible[i], &hidden[i]),
+        );
+        let ok = !hidden[i].is_empty() && ex < 1.0 && ctl > 5.0;
+        pass &= ok;
+        methods.insert(method.into(), serde_json::json!({
+            "excluded_vs_hidden_mean_abs_diff": ex, "capturable_vs_hidden_mean_abs_diff": ctl, "pass": ok }));
+    }
+    let report = serde_json::json!({
+        "display": display.device, "region": [x, y, w, h], "methods": methods,
+        "pass": pass, "files": out.display().to_string(),
+    });
+    std::fs::write(out.join("result.json"), serde_json::to_vec_pretty(&report)?)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if !pass {
+        bail!("crosshair capture exclusion check failed");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod capture_clock_tests {
+    use super::{capture_poll_delay, native_app_duration};
+    use std::time::Duration;
+
+    #[test]
+    fn physical_audio_window_is_fifteen_seconds_and_bounded() {
+        assert_eq!(native_app_duration(false, true, None).unwrap(), 15);
+        assert_eq!(native_app_duration(false, true, Some(15)).unwrap(), 15);
+        assert!(native_app_duration(false, true, Some(31)).is_err());
+        assert!(native_app_duration(true, true, Some(15)).is_err());
+        assert!(native_app_duration(false, false, Some(15)).is_err());
+        assert_eq!(native_app_duration(true, false, Some(180)).unwrap(), 180);
+    }
+
+    #[test]
+    fn startup_and_poll_cost_do_not_extend_the_wall_clock_capture() {
+        let limit = Duration::from_secs(44);
+        let mut elapsed = Duration::from_millis(5100);
+        let mut samples = 0;
+        while let Some(delay) = capture_poll_delay(elapsed, limit) {
+            elapsed += delay + Duration::from_millis(200);
+            samples += 1;
+        }
+        assert_eq!(elapsed, Duration::from_millis(44200));
+        assert_eq!(samples, 39);
+    }
+
+    #[test]
+    fn delayed_poll_skips_expired_ticks_without_a_catch_up_burst() {
+        assert_eq!(
+            capture_poll_delay(Duration::from_millis(3700), Duration::from_secs(10)),
+            Some(Duration::from_millis(300))
+        );
+        assert_eq!(
+            capture_poll_delay(Duration::from_millis(9900), Duration::from_secs(10)),
+            Some(Duration::from_millis(100))
+        );
+        assert_eq!(
+            capture_poll_delay(Duration::from_secs(10), Duration::from_secs(10)),
+            None
+        );
+    }
 }

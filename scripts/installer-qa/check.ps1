@@ -2,12 +2,17 @@ param(
     [Parameter(Mandatory)][string]$Archive,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ArchiveSha256,
     [Parameter(Mandatory)][ValidateSet('0.4.0-rc.3','0.4.0')][string]$CandidateVersion,
-    [ValidateSet('clean','alpha4','alpha9','rc1','rc2')][string]$Scenario = 'clean',
+    [ValidateSet('clean','alpha4','alpha6','alpha9','rc1','rc2','alpha9-updater')][string]$Scenario = 'clean',
     [Parameter(Mandatory)][string]$Output,
-    [switch]$IntegrityOnly
+    [switch]$IntegrityOnly,
+    [switch]$AllowUnsigned040
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../release-authenticode.ps1')
+if ($AllowUnsigned040 -and $CandidateVersion -cne '0.4.0') {
+    throw 'The unsigned exception applies only to the approved 0.4.0 release.'
+}
 if (!$IntegrityOnly) {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or !$env:RUNNER_TEMP) {
         throw 'Installation requires a disposable GitHub-hosted runner. Use -IntegrityOnly locally.'
@@ -25,7 +30,14 @@ $logs = (New-Item -ItemType Directory -Path (Join-Path $work 'logs')).FullName
 $checks = [ordered]@{}
 $evidence = [ordered]@{ scenario = $Scenario; candidate = $CandidateVersion; archive_sha256 = $ArchiveSha256; integrity_only = [bool]$IntegrityOnly; steps = $checks }
 $pins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'rc3-pins.json') -Raw | ConvertFrom-Json
+# The stable archive also carries the Alpha.6 baseline; the rc.3 archive does not.
+$pinMembers = @($pins.members) + @(if ($CandidateVersion -eq '0.4.0') { $pins.stable_members })
+if ($Scenario -eq 'alpha6' -and $CandidateVersion -ne '0.4.0') { throw 'The Alpha.6 baseline is only in the stable archive.' }
 $phase = 'archive integrity'
+$expectInstallerRestart = $Scenario -eq 'alpha9-updater'
+if ($expectInstallerRestart -and $CandidateVersion -ne '0.4.0') {
+    throw 'The updater-mode scenario requires the Tauri-signed stable installer.'
+}
 
 function Assert-Hash([string]$Path, [string]$Expected) {
     $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
@@ -35,7 +47,7 @@ function Assert-Hash([string]$Path, [string]$Expected) {
 function Get-Payload {
     $file = (Resolve-Path -LiteralPath $Archive).Path
     Assert-Hash $file $ArchiveSha256
-    $expected = @($pins.members.name)
+    $expected = @($pinMembers.name)
     if ($CandidateVersion -eq '0.4.0') { $expected += 'latest.json' }
     $destination = (New-Item -ItemType Directory -Path (Join-Path $work 'input')).FullName
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -46,7 +58,7 @@ function Get-Payload {
             $members = @($zip.Entries | Where-Object { $_.FullName -ceq $name })
             if ($members.Count -ne 1) { throw "Expected exactly one flat archive member named $name." }
             $member = $members[0]
-            $pin = $pins.members | Where-Object name -CEQ $name
+            $pin = $pinMembers | Where-Object name -CEQ $name
             $stableCandidate = $name -eq 'Candidate-setup.exe' -and $CandidateVersion -eq '0.4.0'
             $size = if ($name -eq 'latest.json') { 1048576 } elseif ($stableCandidate) { 536870912 } else { $pin.bytes }
             if ($member.Length -le 0 -or $member.Length -gt $size -or (!$stableCandidate -and $name -ne 'latest.json' -and $member.Length -ne $size)) {
@@ -66,13 +78,6 @@ function Get-Payload {
         }
     } finally { $zip.Dispose() }
     return $destination
-}
-
-function Assert-Signed([string]$Path) {
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
-        throw "Expected a valid timestamped Authenticode signature on $Path. Got $($signature.Status)."
-    }
 }
 
 function Invoke-CheckedExe([string]$Path, [string[]]$Arguments, [string]$Name, [int]$TimeoutSeconds) {
@@ -136,12 +141,26 @@ function Assert-Fixture {
     Assert-Hash $savedClip $fixturePin.sha256
 }
 
-function Test-Startup([string]$Name) {
+function Test-Startup([string]$Name, [switch]$InstallerRestart) {
     if (![Environment]::UserInteractive -or (Get-Process -Id $PID).SessionId -eq 0) {
+        if ($InstallerRestart) { throw 'The updater restart check needs an interactive Windows session.' }
         $checks[$Name] = 'BLOCKED - runner lacks an interactive Windows session'
         return
     }
-    $process = Start-Process -FilePath $app -WorkingDirectory $installDir -PassThru -RedirectStandardOutput (Join-Path $logs "$Name.stdout.txt") -RedirectStandardError (Join-Path $logs "$Name.stderr.txt")
+    if ($InstallerRestart) {
+        $restartClock = [Diagnostics.Stopwatch]::StartNew()
+        $process = $null
+        do {
+            $process = Get-Process -Name replayx -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $app } | Select-Object -First 1
+            if ($process) { break }
+            Start-Sleep -Milliseconds 500
+        } while ($restartClock.Elapsed.TotalSeconds -lt 20)
+        if (!$process) { throw 'The updater-mode installer did not restart the installed application.' }
+        $evidence.installer_restart_detected_ms = $restartClock.ElapsedMilliseconds
+    } else {
+        $process = Start-Process -FilePath $app -WorkingDirectory $installDir -PassThru -RedirectStandardOutput (Join-Path $logs "$Name.stdout.txt") -RedirectStandardError (Join-Path $logs "$Name.stderr.txt")
+    }
     try {
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $handle = 0
@@ -178,7 +197,7 @@ try {
     $checks[$phase] = 'PASS'
     if ($CandidateVersion -eq '0.4.0') {
         $phase = 'stable signatures'
-        Assert-Signed $candidate
+        Assert-ReleaseAuthenticode -Path $candidate -Version $CandidateVersion -Role Installer -AllowUnsigned040:$AllowUnsigned040
         $feed = Get-Content -LiteralPath (Join-Path $payload 'latest.json') -Raw | ConvertFrom-Json
         $platform = $feed.platforms.'windows-x86_64'
         if ($feed.version -ne $CandidateVersion -or $platform.url -cne "https://github.com/PrithviGhale/REPLAYX/releases/download/v$CandidateVersion/REPLAYX.exe") {
@@ -189,6 +208,7 @@ try {
         & node (Join-Path $PSScriptRoot '../verify-update-signature.mjs') $candidate $sig --version $CandidateVersion
         if ($LASTEXITCODE -ne 0) { throw 'Stable updater signature verification failed.' }
         $checks[$phase] = 'PASS - final installer and version-bound manifest'
+        $evidence.windows_authenticode = if ($AllowUnsigned040) { '0.4.0 unsigned exception; pinned installer bytes' } else { 'valid timestamped Windows signature' }
     }
     if ($IntegrityOnly) { return }
 
@@ -219,13 +239,17 @@ try {
     $checks[$phase] = 'PASS'
 
     $legacyPrograms = @('replayx-cli.exe','replayx-gameproxy.exe','replayx-dda-profile.exe','replayx-wgc-profile.exe')
-    $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -eq 'alpha9') { $legacyPrograms }
-    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha9 = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
+    $expectedLegacyPrograms = if ($Scenario -eq 'alpha4') { $legacyPrograms[0..1] } elseif ($Scenario -in 'alpha9','alpha9-updater') { $legacyPrograms }
+    $baselines = @{ alpha4 = 'Alpha4-setup.exe'; alpha6 = 'Alpha6-setup.exe'; alpha9 = 'Alpha9-setup.exe'; 'alpha9-updater' = 'Alpha9-setup.exe'; rc1 = 'RC1-setup.exe'; rc2 = 'RC2-setup.exe' }
     if ($Scenario -ne 'clean') {
         $phase = 'baseline install'
         $baseline = $baselines[$Scenario]
         Invoke-CheckedExe (Join-Path $payload $baseline) @('/S') $phase 120
-        Assert-Installed ($pins.members | Where-Object name -EQ $baseline).version
+        Assert-Installed ($pinMembers | Where-Object name -EQ $baseline).version
+        if ($Scenario -eq 'alpha6') {
+            # Not catalogued before this run: record what Alpha.6 installed; the upgrade must remove all of it.
+            $expectedLegacyPrograms = @($legacyPrograms | Where-Object { Test-Path -LiteralPath (Join-Path $installDir $_) -PathType Leaf })
+        }
         foreach ($legacy in $expectedLegacyPrograms) {
             if (!(Test-Path -LiteralPath (Join-Path $installDir $legacy) -PathType Leaf)) {
                 throw "Expected the archived baseline to install $legacy."
@@ -237,11 +261,11 @@ try {
     $phase = 'guest fixture'
     $clips = (New-Item -ItemType Directory -Path (Join-Path $work 'clips')).FullName
     $savedClip = Join-Path $clips 'Generated-sample.mkv'
-    $fixturePin = $pins.members | Where-Object name -EQ 'Generated-sample.mkv'
+    $fixturePin = $pinMembers | Where-Object name -EQ 'Generated-sample.mkv'
     Copy-Item -LiteralPath (Join-Path $payload $fixturePin.name) -Destination $savedClip
     $settings = [ordered]@{
         output_dir = $clips; replay_hotkey = 'Control+Alt+F10'
-        replay_seconds = if ($Scenario -eq 'alpha4') { 180 } else { 75 }
+        replay_seconds = if ($Scenario -in 'alpha4','alpha6') { 180 } else { 75 }
         close_to_tray = $false; check_updates = $false; tour_done = $true; launch_at_startup = $false
         updates = @{ auto_check = $false; auto_download = $false; auto_install = $false }
     }
@@ -259,7 +283,8 @@ try {
         Assert-Fixture
     }
     $phase = if ($Scenario -eq 'clean') { 'clean install' } else { 'upgrade install' }
-    Invoke-CheckedExe $candidate @('/S') $phase 120
+    $arguments = if ($expectInstallerRestart) { @('/P','/UPDATE','/R','/ARGS') } else { @('/S') }
+    Invoke-CheckedExe $candidate $arguments $phase 120
     Assert-Installed $CandidateVersion
     $evidence.legacy_programs_before_upgrade = @($expectedLegacyPrograms | Where-Object { $_ })
     $evidence.legacy_programs_after_upgrade = @($legacyPrograms | Where-Object {
@@ -279,15 +304,19 @@ try {
         Assert-Hash $app $pins.rc3_app_sha256
         Assert-Hash $worker $pins.rc3_worker_sha256
     } else {
-        Assert-Signed $app
-        Assert-Signed $worker
+        Assert-ReleaseAuthenticode -Path $app -Version $CandidateVersion -Role App -AllowUnsigned040:$AllowUnsigned040
+        Assert-ReleaseAuthenticode -Path $worker -Version $CandidateVersion -Role Worker -AllowUnsigned040:$AllowUnsigned040
     }
     foreach ($media in $pins.runtime) { Assert-Hash (Join-Path $installDir $media.name) $media.sha256 }
+    if ($CandidateVersion -eq '0.4.0') {
+        $license = Join-Path $PSScriptRoot '../../tools/ffmpeg-lgpl-v3.txt'
+        Assert-Hash (Join-Path $installDir 'media/LICENSE.txt') (Get-FileHash -LiteralPath $license -Algorithm SHA256).Hash
+    }
     Invoke-CheckedExe (Join-Path $installDir 'media/ffmpeg.exe') @('-v','error','-xerror','-nostdin','-progress','pipe:1','-i',('"' + $savedClip + '"'),'-map','0','-f','null','NUL') 'installed FFmpeg full decode' 45
     $checks[$phase] = 'PASS'
 
     $phase = 'candidate startup'
-    Test-Startup $phase
+    Test-Startup $phase -InstallerRestart:$expectInstallerRestart
     Assert-Fixture
     $phase = 'uninstall and data retention'
     Invoke-CheckedExe $uninstaller @('/S') 'silent uninstall' 120

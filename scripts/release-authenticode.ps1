@@ -1,0 +1,37 @@
+# The 0.4.0 release exception requires an explicit opt-in and exact approved bytes.
+# Later versions and all non-opt-in builds still require timestamped Authenticode.
+function Assert-ReleaseAuthenticode {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][ValidateSet('Installer','App','Worker')][string]$Role,
+        [switch]$AllowUnsigned040
+    )
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($AllowUnsigned040) {
+        # The pinned unsigned 0.4.0 builds are the qualified fallback, the
+        # redesigned candidate and the final runtime discovery build (1d3ca8d).
+        # Each role must match a pinned file byte for byte. App
+        # hashes are of the file packed in the installer, which carries Tauri's
+        # NSIS bundle marker (target/release keeps the unmarked build).
+        $approved = @{
+            Installer = @('0F2E944EFAEA6C2106D4FF91BDAA05BE63019CF6C34E63BF03AF9E46FEE53576',
+                          'AAEA05CAC9169FD025F895AE62A21A5EFE652E4562CEFA9DC0E2DFC0DBFD3169',
+                          '6C12440532AF60E99ED683CDF8D15E51E33D73CD5EB126BE7F3F52BEC6C52D05')
+            App = @('341349C4C2A5A8DC5CF3F4D39A0004236397629145C6E7F9C240594BB75E18F5',
+                    'D40ECC03AED5A130D4CBFA99BB728799DAD1C9C3BA3E1E1F789867FAB7084684',
+                    '3A4DDA0FFE9D58ECE69109203576C81459FA55F9980A42E67818D93E1603C6BA')
+            Worker = @('F49064F886AE99FDFE3D8A76D733583BE153BCCD3FFA68D1941A65419A0DFE5F',
+                       '9636C8991764A1931A02B0753B81B03E2772A1DB859482E8CC990CDF547738EC',
+                       'AEE1CAF52BCAEA1287590F8322B018790E2EE1DEA48770FE27564ACEC949C3A7')
+        }
+        if ($Version -cne '0.4.0' -or $signature.Status -ne 'NotSigned' -or
+            (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -cnotin $approved[$Role]) {
+            throw "The unsigned exception only covers the approved 0.4.0 $Role bytes."
+        }
+        return
+    }
+    if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
+        throw "Expected a valid timestamped Authenticode signature on $Path. Got $($signature.Status)."
+    }
+}

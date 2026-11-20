@@ -66,11 +66,14 @@ export function AudioPage() {
   const room = sources.length < 5;
   return (
     <Section>
-      <MicrophoneCard />
+
 
       {conflict && <div className="banner warn">System audio already contains every app's sound. Turn it off (or the app sources) so audio isn't recorded twice. REPLAYX won't save this combination.</div>}
       {!liveMix && sources.length > 0 && <div className="banner info">Save your changes to adjust volume live during capture.</div>}
 
+      <div className="audio-workbench"><div>
+      <MicrophoneCard />
+      </div><div>
       <Card anchor="sound-sources" title="Sound sources" subtitle="What else your clips hear. Each source gets its own track."
         actions={<Button variant="ghost" size="sm" icon={RefreshCw} disabled={!!busy} onClick={() => run('Refreshing devices', refreshCaps)}>Refresh</Button>}>
         {sources.every(s => s.kind === 'microphone') && <Empty icon={Waves} title="No other sources">Add your system sound, or individual apps such as the game and Discord.</Empty>}
@@ -142,6 +145,7 @@ export function AudioPage() {
         </div>
       </Card>
 
+      </div></div>
       {picker && <AppPicker mode={picker.mode} onClose={() => setPicker(null)} onPick={s => {
         const name = s.name.replace(/\.exe$/i, '');
         const extra = { pid: s.pid, process_started: s.started, name: picker.mode === 'exclude' ? `All except ${name}` : name };
@@ -149,6 +153,6 @@ export function AudioPage() {
         setPaths(p => ({ ...p, [s.pid]: s.path }));
         setPicker(null);
       }} />}
-          </Section>
+    </Section>
   );
 }

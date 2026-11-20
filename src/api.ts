@@ -1,4 +1,6 @@
+import { version } from '../package.json';
 import { invoke } from '@tauri-apps/api/core';
+import { defaultCrosshair, orderedCrosshairSaves, type CrosshairSettings } from './crosshair';
 import type { SettingsProblem } from './errors';
 
 /** True inside the Tauri window; false in a plain browser (UI preview only). */
@@ -31,6 +33,7 @@ export type Display = {
 };
 export type CanvasMode = 'stretch' | 'fit' | 'crop' | 'native';
 export type Settings = {
+  recording_engine?: 'auto' | 'ffmpeg' | 'native';
   capture: string; display: number; window_title: string; width: number; height: number; canvas_mode: CanvasMode;
   source_rect: Rect | null; fps: number; encoder: string; codec: 'auto' | 'h264' | 'hevc' | 'av1'; preset: string; bitrate_mbps: number;
   replay_seconds: number; buffer_mb: number; output_dir: string; audio: AudioSource[]; separate_tracks: boolean;
@@ -40,6 +43,7 @@ export type Settings = {
   game_notifications: boolean; settings_version: number; scale_policy: 'smooth' | 'exact';
   overlay: OverlaySettings; tray_hint_shown: boolean; tour_done: boolean; voice_presets: SavedVoice[];
   playtime: PlaytimeSettings; capture_notices: boolean; updates: UpdateSettings;
+  crosshair: CrosshairSettings;
 };
 export type OverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type OverlaySettings = {
@@ -53,6 +57,7 @@ export type PlaytimeData = {
 };
 export type GameArt = { custom: string | null; icon: string | null; id: string | null };
 export type Status = {
+  recording_engine?: string; engine_fallback?: string | null;
   state: string; replay: boolean; recording: boolean; saving: number; encoder: string; capture: string;
   buffer_seconds: number; buffer_bytes: number; free_bytes: number; frames: number; dropped_frames: number;
   fps: number; elapsed: number; write_mbps: number; memory_mb: number; cpu_percent: number;
@@ -82,7 +87,7 @@ export type GameMapping = { exe: string; name: string };
 export type Encoder = { name: string; available: boolean; reason: string };
 export type Device = { id: string; name: string; kind: 'system' | 'microphone' };
 export type Caps = {
-  encoders: Encoder[]; codecs?: { codec: 'h264' | 'hevc' | 'av1'; encoders: string[] }[]; media_error: string | null; displays: Display[]; devices: Device[]; updates_configured: boolean;
+  native_engine_available?: boolean; encoders: Encoder[]; codecs?: { codec: 'h264' | 'hevc' | 'av1'; encoders: string[] }[]; media_error: string | null; displays: Display[]; devices: Device[]; updates_configured: boolean;
 };
 export type Session = { pid: number; name: string; path: string; started: number; active: boolean };
 export type TestCapture = {
@@ -122,6 +127,9 @@ export const api = {
   playtimeData: () => call<PlaytimeData>('playtime_data'),
   playtimeConfigure: (settings: PlaytimeSettings) => call<void>('playtime_configure', { settings }),
   playtimeExport: () => call<string>('playtime_export'),
+  /** Saves the crosshair (made safe) and updates the on-screen crosshair. */
+  setCrosshair: orderedCrosshairSaves((crosshair) => call<{ crosshair: CrosshairSettings; warning: string | null }>('set_crosshair', { crosshair })),
+  crosshairStatus: () => call<CrosshairStatus>('crosshair_status'),
   playtimeClear: () => call<void>('playtime_clear'),
   action: <T = unknown>(name: ActionName) => call<T>('action', { name }),
   setMix: (index: number, volume: number, muted: boolean) => call<void>('set_mix', { index, volume, muted }),
@@ -142,6 +150,8 @@ export const api = {
   /** Fixed Windows Settings pages only (see `windows_settings_uri`). */
   openWindowsSettings: (page: 'sound' | 'microphone-privacy' | 'display' | 'storage') => call<void>('open_windows_settings', { page }),
   markTourDone: () => call<void>('mark_tour_done'),
+  tourOrigin: () => call<import('./release-tour').InstallOrigin>('tour_install_origin'),
+  installedReleaseNotes: (all: boolean) => call<void>('installed_release_notes', { all }),
   dismissNotice: (id: number) => call<void>('dismiss_notice', { id }),
   exitApp: () => call<void>('exit_app'),
   audioDevices: () => call<Device[]>('audio_devices'),
@@ -175,6 +185,15 @@ export const emptyStatus: Status = {
   cap_bitrate_mbps: 0, constant_quality: null, codec: '',
 };
 
+/** What the on-screen crosshair is doing (Crosshair Studio). */
+export type CrosshairStatus = {
+  overlay: { running: boolean; shown: boolean; excluded_from_capture: boolean; display: string | null; error: string | null };
+  displays: { index: number; label: string }[];
+  /** The recognized game in front, recognized games running behind other
+   * windows, and the game last seen in exclusive full screen. */
+  game?: { in_front: string | null; running: string[]; exclusive: string | null };
+};
+
 /** Browser-preview defaults; the native app always loads real settings. */
 export const previewSettings: Settings = {
   capture: 'desktop-duplication', display: 0, window_title: '', width: 1920, height: 1080, canvas_mode: 'stretch', source_rect: null,
@@ -187,6 +206,9 @@ export const previewSettings: Settings = {
   playtime: { enabled: true, paused: false, idle_minutes: 15, excluded: [] }, capture_notices: true,
   updates: { auto_check: true, interval_hours: 6, auto_download: false, auto_install: false, notify: true, idle_minutes: 5 },
   tray_hint_shown: false, tour_done: false, voice_presets: [],
+  crosshair: defaultCrosshair(),
 };
 
-export const VERSION = '0.3.1-alpha.9';
+export const VERSION = version;
+const channel = version.split('-')[1]?.split('.')[0];
+export const VERSION_STAGE = channel === 'rc' ? 'RC' : channel === 'beta' ? 'Beta' : channel === 'alpha' ? 'Alpha' : null;

@@ -1,5 +1,6 @@
 /** First-run tour: steps and tooltip placement (pure, unit-tested). */
-export type TourPage = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings';
+import type { Page } from './workspace';
+export type TourPage = Page;
 export type TourStep = {
   id: string;
   /** Page to show first (the tour navigates; it never presses anything). */
@@ -11,8 +12,8 @@ export type TourStep = {
 };
 
 export const TOUR: TourStep[] = [
-  { id: 'welcome', page: 'home', title: 'Welcome to REPLAYX',
-    body: () => 'Capture everything. Miss nothing. This quick tour shows the essentials in about a minute. Skip it anytime with Esc.' },
+  { id: 'welcome', page: 'home', target: 'nav-home', title: 'Workspaces',
+    body: () => 'Capture tools, clips, Crosshair Studio and preferences each have a workspace. The capture controls are always along the bottom.' },
   { id: 'record', page: 'home', target: 'record', title: 'Record',
     body: k => `Starts a normal recording; press it again to stop and save. Shortcut: ${k.record}.` },
   { id: 'replay', page: 'home', target: 'replay-switch', title: 'Instant Replay',
@@ -29,12 +30,12 @@ export const TOUR: TourStep[] = [
     body: () => 'Small icons in a corner show Instant Replay, your mic and recording. You see them while playing; they never appear in clips.' },
   { id: 'clips', page: 'clips', target: 'nav-clips', title: 'Your clips',
     body: () => 'Every replay and recording lands here, sorted by game. Play, rename, export to MP4 or delete them.' },
-  { id: 'games', page: 'settings', target: 'game-detection', title: 'Game detection',
-    body: () => 'REPLAYX notices which game you play and files clips in a folder per game. Correct it here if a game is missed.' },
-  { id: 'tray', page: 'settings', target: 'tray', title: 'Runs in the background',
-    body: () => 'REPLAYX can keep running in the system tray, so Instant Replay and shortcuts work while the window is closed. Quit from the tray icon.' },
+  { id: 'games', page: 'games', target: 'nav-games', title: 'Games library',
+    body: () => 'Your games, their clips and optional playtime tracking live here. Configure detection in Preferences.' },
+  { id: 'crosshair', page: 'crosshair', target: 'nav-crosshair', title: 'Crosshair Studio',
+    body: () => 'Customize a crosshair for supported windowed or borderless games. Exclusive fullscreen can hide Windows overlays.' },
   { id: 'settings', page: 'settings', target: 'settings-tabs', title: 'Settings and shortcuts',
-    body: () => 'Change your keyboard shortcuts and other preferences here. You can replay this tour from Settings anytime. Have fun!' },
+    body: () => 'Open Hotkeys to customize your shortcuts. REPLAYX can keep running in the system tray with the window closed.' },
 ];
 
 export type Rect = { left: number; top: number; width: number; height: number };
@@ -59,6 +60,3 @@ export function placeTip(target: Rect | null, tip: { width: number; height: numb
   const y = clamp(cy - tip.height / 2, margin, view.height - tip.height - margin);
   return { x, y, side: right ? 'right' : 'left', arrow: clamp(cy - y, 18, tip.height - 18) };
 }
-
-/** Show automatically only on a real first run (the engine remembers). */
-export const shouldAutoStart = (loaded: boolean, tourDone: boolean, native: boolean) => native && loaded && !tourDone;

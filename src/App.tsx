@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { ErrorNotice } from './ErrorNotice';
 import type { Destination } from './errors';
 import { NAVIGATE_EVENT, revealAnchor } from './navigation';
-import { AudioLines, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Settings2, Square, X } from 'lucide-react';
-import { native, VERSION } from './api';
+import { AudioLines, Crosshair, Gamepad2, Circle, Film, Gauge, Home, LoaderCircle, MonitorPlay, RotateCcw, Save, Settings2, Square, X, CircleHelp } from 'lucide-react';
+import { native, VERSION, VERSION_STAGE } from './api';
 import { useApp } from './context';
 import { useCapture, useRecordButton } from './capture';
 import { ReplaySwitch } from './ReplaySwitch';
@@ -16,30 +16,31 @@ import { CapturePage } from './pages/Capture';
 import { AudioPage } from './pages/Audio';
 import { ClipsPage } from './pages/Clips';
 import { GamesPage } from './pages/Games';
+import { CrosshairPage } from './pages/Crosshair';
 import { PerformancePage } from './pages/Performance';
-import { SettingsPage, type SettingsTab } from './pages/Settings';
+import { SettingsPage } from './pages/Settings';
 import { UpdatePrompt } from './UpdatePrompt';
 import { startUpdates, useUpdate } from './updates';
 import { hasUpdate } from './update-logic';
 import { QuitPrompt } from './QuitPrompt';
 import { BrandMark } from './brand';
-import { Tour } from './Tour';
+import { Tour, startTour } from './Tour';
+import type { Release } from './release-tour';
+import { DEFAULT_ROUTE, PAGES, WORKSPACES, parseRoute, routeHash, type Page } from './workspace';
 
-export type Page = 'home' | 'replay' | 'capture' | 'audio' | 'clips' | 'games' | 'performance' | 'settings';
-const NAV: { group: string; items: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] }[] = [
-  { group: 'Capture', items: [
-    { id: 'home', label: 'Home', icon: Home },
-    { id: 'replay', label: 'Instant Replay', icon: RotateCcw },
-    { id: 'capture', label: 'Video', icon: MonitorPlay },
-    { id: 'audio', label: 'Audio', icon: AudioLines },
-  ] },
-  { group: 'Library', items: [{ id: 'clips', label: 'Clips', icon: Film }, { id: 'games', label: 'Games', icon: Gamepad2 }] },
-  { group: 'System', items: [
-    { id: 'performance', label: 'Performance', icon: Gauge },
-    { id: 'settings', label: 'Settings', icon: Settings2 },
-  ] },
-];
-
+export type { Page } from './workspace';
+const icons = { home: Home, replay: RotateCcw, capture: MonitorPlay, audio: AudioLines, clips: Film, games: Gamepad2, crosshair: Crosshair, performance: Gauge, settings: Settings2 };
+const subtitles: Record<Page, string> = {
+  home: 'Monitor capture, audio and recent clips.',
+  replay: 'Set how much footage Instant Replay keeps and recover interrupted sessions.',
+  capture: 'Choose a display, recording engine and video quality.',
+  audio: 'Choose your inputs and tune the tracks in your recordings.',
+  clips: 'Play, organize and export your saved footage.',
+  games: 'Find game clips and manage playtime tracking.',
+  crosshair: 'Build and position a crosshair for supported windowed games.',
+  performance: 'Inspect capture health, encoding and resource use.',
+  settings: 'Manage your shortcuts, overlays, updates and app preferences.',
+};
 
 function StatePill() {
   const s = useStatus(x => ({ state: x.state, recording: x.recording, replay: x.replay, elapsed: x.recording_elapsed, saving: x.saving, pending: x.pending_recording }));
@@ -121,95 +122,112 @@ function Toasts() {
   );
 }
 
-export function App() {
-  const [page, setPage] = useState<Page>(() => {
-    const hash = window.location.hash.slice(1) as Page;
-    return NAV.some(g => g.items.some(i => i.id === hash)) ? hash : 'home';
-  });
+export function App({ tourFixture }: { tourFixture?: Release }) {
+  const [route, setRoute] = useState(() => parseRoute(window.location.hash) ?? DEFAULT_ROUTE);
+  const { page, tab: settingsTab } = route;
+  const clipRequested = React.useRef<string | null>(null);
   const { clips } = useApp();
-  // The sidebar folds to an icon rail; the choice is remembered (best effort).
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('replayx.sidebar') === 'collapsed'; } catch { return false; } });
-  const toggleSidebar = () => setCollapsed(c => {
-    try { localStorage.setItem('replayx.sidebar', c ? 'open' : 'collapsed'); } catch { /* not stored */ }
-    return !c;
-  });
   const pollError = usePollError();
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const updateWaiting = hasUpdate(useUpdate());
+  const group = WORKSPACES.find(workspace => workspace.pages.some(item => item.id === page)) ?? WORKSPACES[0];
+  const title = PAGES.find(item => item.id === page)?.label;
+
   useEffect(() => { startPolling(); void startUpdates(); }, []);
-  const title = NAV.flatMap(g => g.items).find(i => i.id === page)!.label;
-  // Tray "Settings…" and similar open a page by name.
-  // "settings:updates" opens a Settings tab (tray "Update available").
-  const go = React.useCallback((target: string) => {
-    const [p, tab] = target.split(':');
-    if (!NAV.some(g => g.items.some(i => i.id === p))) return;
-    if (p === 'settings' && ['general', 'hotkeys', 'updates', 'about'].includes(tab)) setSettingsTab(tab as SettingsTab);
-    setPage(p as Page);
-  }, []);
-  // Error actions open the page that fixes the problem, then its section.
   useEffect(() => {
-    const open = (e: Event) => {
-      const to = (e as CustomEvent<Destination>).detail;
-      go(to.tab ? `${to.page}:${to.tab}` : to.page);
+    const read = () => setRoute(parseRoute(window.location.hash) ?? DEFAULT_ROUTE);
+    window.addEventListener('popstate', read);
+    window.addEventListener('hashchange', read);
+    return () => {
+      window.removeEventListener('popstate', read);
+      window.removeEventListener('hashchange', read);
+    };
+  }, []);
+
+  const go = React.useCallback((target: string, replace = false) => {
+    const next = parseRoute(target);
+    if (!next) return;
+    const hash = routeHash(next);
+    if (hash !== routeHash(parseRoute(window.location.hash) ?? DEFAULT_ROUTE)) {
+      if (replace) window.history.replaceState(null, '', hash);
+      else window.history.pushState(null, '', hash);
+    }
+    setRoute(current => routeHash(current) === hash ? current : next);
+  }, []);
+  const tourNavigate = React.useCallback((target: Page) => go(target, true), [go]);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const to = (event as CustomEvent<Destination>).detail;
+      go(to.tab ? to.page + ':' + to.tab : to.page);
       if (to.anchor) revealAnchor(to.anchor);
     };
     window.addEventListener(NAVIGATE_EVENT, open);
     return () => window.removeEventListener(NAVIGATE_EVENT, open);
   }, [go]);
+
   return (
-    <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-      <aside className="sidebar">
-        <div className="brand"><BrandMark size={28} /><span>REPLAY<b>X</b></span></div>
-        <button type="button" className="nav-item sidebar-toggle" aria-expanded={!collapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={toggleSidebar}>
-          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>Collapse</span>
+    <div className="shell workspace-shell">
+      <a className="skip-content" href="#workspace-content" onClick={event => {
+        event.preventDefault();
+        document.getElementById('workspace-content')?.focus();
+      }}>Skip to content</a>
+      <header className="workspace-header">
+        <button className="workspace-brand" aria-label="REPLAYX overview" onClick={() => go('home')}>
+          <BrandMark size={31} /><span>REPLAY<b>X</b></span>
         </button>
-        <nav aria-label="Main">
-          {NAV.map(g => (
-            <div className="nav-group" key={g.group}>
-              <div className="nav-title">{g.group}</div>
-              {g.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} data-tour={`nav-${id}`} className={`nav-item ${page === id ? 'on' : ''}`} aria-current={page === id ? 'page' : undefined} aria-label={collapsed ? label : undefined} title={collapsed ? label : undefined} onClick={() => setPage(id)}>
-                  <Icon size={17} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
-                  {id === 'settings' && updateWaiting && <i className="nav-dot" role="img" aria-label="Update available" title="Update available" />}
-                </button>
-              ))}
-            </div>
+        <nav className="workspace-nav" aria-label="Workspaces">
+          {WORKSPACES.map(workspace => (
+            <button type="button" key={workspace.title} onClick={() => go(workspace.pages[0].id)}
+              aria-current={workspace === group ? 'true' : undefined}>
+              {workspace.title}
+              {workspace.title === 'Settings' && updateWaiting && <i className="nav-dot" role="img" aria-label="Update available" title="Update available" />}
+            </button>
           ))}
         </nav>
-        <div className="sidebar-foot">
-          <div className="local-note"><span className="dot" />Local only · no account</div>
-          <div className="version">v{VERSION} <span>alpha</span></div>
-        </div>
-      </aside>
-      <div className="main">
-        <header className="topbar">
-          <h1>{title}</h1>
-          <StatePill />
-          <DetectedGame />
-          <div className="spacer" />
-          <CaptureDock />
-        </header>
-        {!native && <div className="banner warn">Browser preview — capture controls need the REPLAYX desktop app.</div>}
-        {pollError && <div className="banner bad">Lost connection to the recording engine: {pollError}</div>}
+        <button className="workspace-help" type="button" title="Replay tutorial" aria-label="Replay tutorial" onClick={startTour}><CircleHelp size={19} /></button>
+      </header>
+      <nav className="workspace-pages" aria-label={group.title + ' pages'}>
+        {group.pages.map(({ id, label }) => {
+          const Icon = icons[id];
+          return <button key={id} type="button" className="workspace-page-link" data-tour={'nav-' + id}
+            aria-current={page === id ? 'page' : undefined} onClick={() => go(id)}>
+            <Icon size={16} /><span>{label}</span>{id === 'clips' && clips.length > 0 && <small>{clips.length}</small>}
+          </button>;
+        })}
+      </nav>
+      <div className="main workspace-main">
+        {!native && <div className="banner warn">Browser preview · Capture controls require the desktop app.</div>}
+        {pollError && <div className="banner bad" role="alert">Lost connection to the recording engine: {pollError}</div>}
         <LockNotice page={page} />
-        <main className="content" key={page}>
-          <PageBoundary>
-          {page === 'home' && <HomePage go={setPage} />}
-          {page === 'replay' && <ReplayPage />}
-          {page === 'capture' && <CapturePage />}
-          {page === 'audio' && <AudioPage />}
-          {page === 'clips' && <ClipsPage />}
-          {page === 'games' && <GamesPage go={setPage} />}
-          {page === 'performance' && <PerformancePage />}
-          {page === 'settings' && <SettingsPage tab={settingsTab} setTab={setSettingsTab} />}
-          </PageBoundary>
+        <main className="content workspace-content" id="workspace-content" data-page={page} tabIndex={-1} key={page}>
+          <div className="workspace-inner">
+            <div className="workspace-heading">
+              <h1>{title}</h1>
+              <p>{subtitles[page]}</p>
+            </div>
+            <PageBoundary>
+              {page === 'home' && <HomePage go={go} openClip={id => { clipRequested.current = id; go('clips'); }} />}
+              {page === 'replay' && <ReplayPage />}
+              {page === 'capture' && <CapturePage />}
+              {page === 'audio' && <AudioPage />}
+              {page === 'clips' && <ClipsPage requestedClip={clipRequested} />}
+              {page === 'games' && <GamesPage go={go} />}
+              {page === 'crosshair' && <CrosshairPage />}
+              {page === 'performance' && <PerformancePage />}
+              {page === 'settings' && <SettingsPage tab={settingsTab} setTab={tab => go('settings:' + tab)} />}
+            </PageBoundary>
+          </div>
         </main>
         <SaveBar />
       </div>
+      <footer className="transport">
+        <div className="transport-status"><StatePill /><DetectedGame /></div>
+        <CaptureDock />
+        <div className="transport-version" title={'REPLAYX ' + VERSION}>v{VERSION}{VERSION_STAGE && <span>{VERSION_STAGE}</span>}</div>
+      </footer>
       <UpdatePrompt suppressed={page === 'settings' && settingsTab === 'updates'} />
       <Toasts />
       <QuitPrompt onNavigate={go} />
-      <Tour go={setPage} />
+      <Tour go={tourNavigate} fixture={tourFixture} />
     </div>
   );
 }

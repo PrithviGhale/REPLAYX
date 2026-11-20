@@ -63,7 +63,10 @@ struct AppState {
     games_seen: Arc<Mutex<crate::game_art::Registry>>,
     /// Native notices (game detected, capture events); excluded from capture.
     notices: crate::overlay::Overlay,
+    /// Crosshair Studio's on-screen crosshair (a native window; none while off).
+    crosshair: Arc<crate::crosshair_overlay::CrosshairRuntime>,
     data_dir: PathBuf,
+    tour_origin: &'static str,
 }
 impl AppState {
     fn data_dir(&self) -> PathBuf {
@@ -199,31 +202,45 @@ fn perform(state: &AppState, name: &str) -> Reply<serde_json::Value> {
     };
     result.map(|_| serde_json::json!({"ok":true})).map_err(err)
 }
+/// REPLAYX's own shortcuts, always registered.
 const HOTKEYS: usize = 5;
-const HOTKEY_LABELS: [&str; HOTKEYS] = [
+const HOTKEY_LABELS: [&str; HOTKEYS + 1] = [
     "Save replay",
     "Start/stop recording",
     "Mute microphone",
     "Instant Replay on/off",
     "Open/hide REPLAYX",
+    "Show/hide crosshair",
 ];
-fn hotkey_keys(s: &Settings) -> [String; HOTKEYS] {
-    [
+/// The shortcuts to register: REPLAYX's five, plus the crosshair's while the
+/// crosshair is on (off: it is not registered, so the key stays free).
+fn hotkey_keys(s: &Settings) -> Vec<String> {
+    let mut keys = vec![
         s.replay_hotkey.clone(),
         s.recording_hotkey.clone(),
         s.mute_hotkey.clone(),
         s.pause_hotkey.clone(),
         s.window_hotkey.clone(),
-    ]
+    ];
+    if s.crosshair.enabled && !s.crosshair.hotkey.is_empty() {
+        keys.push(s.crosshair.hotkey.clone());
+    }
+    keys
 }
-fn set_hotkey_keys(s: &mut Settings, k: [String; HOTKEYS]) {
-    [
-        s.replay_hotkey,
-        s.recording_hotkey,
-        s.mute_hotkey,
-        s.pause_hotkey,
-        s.window_hotkey,
-    ] = k;
+fn set_hotkey_keys(s: &mut Settings, k: Vec<String>) {
+    let mut k = k.into_iter();
+    for slot in [
+        &mut s.replay_hotkey,
+        &mut s.recording_hotkey,
+        &mut s.mute_hotkey,
+        &mut s.pause_hotkey,
+        &mut s.window_hotkey,
+        &mut s.crosshair.hotkey,
+    ] {
+        if let Some(v) = k.next() {
+            *slot = v;
+        }
+    }
 }
 /// "Control+Alt+F10" as people write it.
 pub fn hotkey_label(k: &str) -> String {
@@ -239,18 +256,18 @@ pub fn hotkey_taken(k: &str) -> String {
 /// Decide each action's shortcut: the wanted one if it registers, otherwise
 /// the previous one (if it still registers). Pure; `register` tries one.
 pub fn plan_hotkeys(
-    wanted: &[String; HOTKEYS],
-    previous: Option<&[String; HOTKEYS]>,
+    wanted: &[String],
+    previous: Option<&[String]>,
     mut register: impl FnMut(&str) -> bool,
-) -> ([String; HOTKEYS], Vec<String>) {
-    let mut effective = wanted.clone();
+) -> (Vec<String>, Vec<String>) {
+    let mut effective = wanted.to_vec();
     let mut problems = Vec::new();
-    for i in 0..HOTKEYS {
+    for i in 0..wanted.len() {
         if register(&wanted[i]) {
             continue;
         }
         let mut message = format!("{}: {}", HOTKEY_LABELS[i], hotkey_taken(&wanted[i]));
-        if let Some(prev) = previous.map(|p| &p[i]).filter(|p| **p != wanted[i]) {
+        if let Some(prev) = previous.and_then(|p| p.get(i)).filter(|p| **p != wanted[i]) {
             if register(prev) {
                 effective[i] = prev.clone();
                 message += &format!(" {} stays on {}.", HOTKEY_LABELS[i], hotkey_label(prev));
@@ -280,9 +297,18 @@ fn bind_hotkeys_keeping(
             );
         }
     }
+    // Every registration is replaced: never a duplicate, and the crosshair's
+    // is released when the crosshair is turned off.
     app.global_shortcut().unregister_all().map_err(err)?;
-    let prev = previous.map(hotkey_keys);
-    let (effective, problems) = plan_hotkeys(&keys, prev.as_ref(), |k| {
+    let prev = previous.map(|p| {
+        let mut k = hotkey_keys(p);
+        k.truncate(HOTKEYS);
+        if keys.len() > HOTKEYS {
+            k.push(p.crosshair.hotkey.clone());
+        }
+        k
+    });
+    let (effective, problems) = plan_hotkeys(&keys, prev.as_deref(), |k| {
         Shortcut::from_str(k).is_ok_and(|s| app.global_shortcut().register(s).is_ok())
     });
     let mut out = wanted.clone();
@@ -342,8 +368,9 @@ fn save_settings_blocking(
     settings.tour_done |= previous.tour_done;
     // Playtime has its own live command (also during capture).
     settings.playtime = previous.playtime.clone();
-    // So do update preferences.
+    // So do update preferences and the crosshair.
     settings.updates = previous.updates.clone();
+    settings.crosshair = previous.crosshair.clone();
     if state.engine.status().replay
         || state.engine.status().recording
         || state.engine.status().saving > 0
@@ -351,7 +378,9 @@ fn save_settings_blocking(
         return Err("Stop capture before changing settings".into());
     }
     // Only the installed app registers itself; development builds never do.
-    winutil::sync_autostart(settings.launch_at_startup).map_err(err)?;
+    if !crate::native_alpha_enabled() {
+        winutil::sync_autostart(settings.launch_at_startup).map_err(err)?;
+    }
     // A shortcut another program owns is refused; that action keeps its
     // previous working shortcut, and the saved settings say so.
     let (settings, warning) = bind_hotkeys_keeping(app, &settings, Some(&previous))?;
@@ -376,7 +405,7 @@ async fn capabilities() -> Reply<serde_json::Value> {
     let devices=crate::audio::devices().map_err(err)?;
     let available=Media::discover().and_then(|m|{m.preflight()?;Ok(m)});
     let (encoders,codecs,media_error)=match available {Ok(m)=>(m.encoders(),m.codecs(),None),Err(e)=>(Vec::new(),Vec::new(),Some(format!("{e:#}")))};
-    Ok(serde_json::json!({"encoders":encoders,"codecs":codecs,"media_error":media_error,"displays":crate::geometry::displays(),"devices":devices,"wgc":false,"pause_recording":false,"monitoring":false,"updates_configured":update_configured()}))
+    Ok(serde_json::json!({"encoders":encoders,"codecs":codecs,"media_error":media_error,"displays":crate::geometry::displays(),"devices":devices,"wgc":false,"pause_recording":false,"monitoring":false,"updates_configured":update_configured(),"native_engine_available":crate::native_engine_available()}))
 }).await.map_err(err)?
 }
 #[tauri::command]
@@ -682,6 +711,85 @@ fn playtime_clear(state: State<AppState>) -> Reply<()> {
     Ok(())
 }
 /// The first-run tour was finished or skipped.
+/// Crosshair Studio: save the crosshair (made safe), register or release its
+/// shortcut, and update the on-screen crosshair at once. Works during
+/// capture. A shortcut Windows refuses keeps the previous one, with a warning.
+#[tauri::command]
+async fn set_crosshair(
+    crosshair: crate::crosshair::CrosshairSettings,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Reply<serde_json::Value> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = state.engine.settings();
+        let mut wanted = previous.clone();
+        wanted.crosshair = crosshair.sanitized();
+        wanted.validate().map_err(err)?;
+        let shortcut_changed = (wanted.crosshair.enabled, &wanted.crosshair.hotkey)
+            != (previous.crosshair.enabled, &previous.crosshair.hotkey);
+        let (effective, warning) = if shortcut_changed {
+            bind_hotkeys_keeping(&app, &wanted, Some(&previous))?
+        } else {
+            (wanted, None)
+        };
+        let saved = match state.engine.set_crosshair(effective.crosshair.clone()) {
+            Ok(saved) => saved,
+            Err(e) => {
+                if shortcut_changed {
+                    let _ = bind_hotkeys_keeping(&app, &previous, None);
+                }
+                return Err(err(e));
+            }
+        };
+        if saved.enabled && !previous.crosshair.enabled {
+            state.crosshair.reset_hidden();
+        }
+        if shortcut_changed {
+            state
+                .engine
+                .update(|i| i.status.hotkey_error = warning.clone());
+        }
+        let game = state.engine.status().foreground_game.is_some();
+        state.crosshair.sync(&saved, game);
+        Ok(serde_json::json!({ "crosshair": saved, "warning": warning }))
+    })
+    .await
+    .map_err(err)?
+}
+/// What the on-screen crosshair is doing, the displays it can use, and the
+/// games it can see: the one in front, and recognized games running behind
+/// other windows (started before REPLAYX, say), so the page can tell the
+/// player to switch to the game rather than wait.
+#[tauri::command]
+async fn crosshair_status(state: State<'_, AppState>) -> Reply<serde_json::Value> {
+    let engine = state.engine.clone();
+    let overlay = state.crosshair.overlay.state();
+    let (in_front, running) = tauri::async_runtime::spawn_blocking(move || {
+        let mappings = engine.settings().game_mappings;
+        (
+            engine.status().foreground_game,
+            crate::games::running_games(&mappings),
+        )
+    })
+    .await
+    .map_err(err)?;
+    let exclusive = state.crosshair.exclusive_game();
+    let displays: Vec<_> = crate::crosshair_overlay::displays()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "index": d.index,
+                "label": crate::crosshair_overlay::display_label(d),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "overlay": overlay,
+        "displays": displays,
+        "game": { "in_front": in_front, "running": running, "exclusive": exclusive },
+    }))
+}
 /// The user closed the message on Home (only that occurrence).
 #[tauri::command]
 async fn dismiss_notice(id: u64, state: State<'_, AppState>) -> Reply<()> {
@@ -690,6 +798,63 @@ async fn dismiss_notice(id: u64, state: State<'_, AppState>) -> Reply<()> {
         .await
         .map_err(err)
 }
+#[tauri::command]
+fn tour_install_origin(state: State<AppState>) -> &'static str {
+    state.tour_origin
+}
+
+fn tour_origin(data: &std::path::Path) -> &'static str {
+    match std::fs::read(data.join("settings.json")) {
+        Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(serde_json::Value::Object(settings)) if !settings.contains_key("crosshair") => {
+                "pre-0.4"
+            }
+            _ => "existing",
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::read_dir(data) {
+                Ok(mut entries) => {
+                    if entries.next().is_none() {
+                        "fresh"
+                    } else {
+                        "existing"
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => "fresh",
+                Err(_) => "existing",
+            }
+        }
+        Err(_) => "existing",
+    }
+}
+
+#[tauri::command]
+fn installed_release_notes(all: bool, app: tauri::AppHandle) -> Reply<()> {
+    let base = crate::updates::RELEASES_PAGE;
+    let url = if all {
+        base.to_owned()
+    } else {
+        format!("{base}/tag/v{}", app.package_info().version)
+    };
+    winutil::open_url(&url).map_err(err)
+}
+
+#[cfg(test)]
+#[test]
+fn tour_origin_distinguishes_fresh_legacy_and_damaged_settings() {
+    let data = tempfile::tempdir().unwrap();
+    assert_eq!(tour_origin(data.path()), "fresh");
+    let settings = data.path().join("settings.json");
+    std::fs::write(&settings, "{}").unwrap();
+    assert_eq!(tour_origin(data.path()), "pre-0.4");
+    std::fs::write(&settings, r#"{"crosshair":{}}"#).unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+    std::fs::write(&settings, "{oops").unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+    std::fs::rename(&settings, data.path().join("settings.unreadable.json")).unwrap();
+    assert_eq!(tour_origin(data.path()), "existing");
+}
+
 #[tauri::command]
 fn mark_tour_done(state: State<AppState>) {
     state.engine.mark_tour_done();
@@ -1004,6 +1169,9 @@ fn open_local(path: &std::path::Path) -> Reply<()> {
 }
 /// A public key is built in (tauri.conf.json), so signed updates can be verified.
 fn update_configured() -> bool {
+    if crate::native_alpha_enabled() {
+        return false;
+    }
     // The updater's public key from tauri.conf.json (compiled in). Only the
     // public half is ever in the repository or the app.
     static KEY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -1264,6 +1432,7 @@ fn request_quit(app: tauri::AppHandle) {
 /// stopped, the recording finalized and the encoder ended.
 fn shutdown(state: &AppState) -> anyhow::Result<()> {
     state.playtime.lock().unwrap().stop();
+    state.crosshair.stop();
     state.engine.shutdown()
 }
 #[tauri::command]
@@ -1335,6 +1504,10 @@ pub fn run() {
                         );
                     } else if matches(&settings.window_hotkey) {
                         toggle_main(app);
+                    } else if settings.crosshair.enabled && matches(&settings.crosshair.hotkey) {
+                        state.crosshair.toggle_hidden();
+                        let game = state.engine.status().foreground_game.is_some();
+                        state.crosshair.sync(&settings.crosshair, game);
                     } else if matches(&settings.mute_hotkey) {
                         // This handler runs on the UI thread: change the mix on a worker.
                         let app = app.clone();
@@ -1355,6 +1528,7 @@ pub fn run() {
             } else {
                 app.path().app_local_data_dir()?
             };
+            let tour_origin = tour_origin(&data);
             let (settings, settings_problem) =
                 Settings::load_or_recover(&data.join("settings.json"));
             discard_audio_tests(&data);
@@ -1394,7 +1568,9 @@ pub fn run() {
                 ))),
                 games_seen: Arc::new(Mutex::new(crate::game_art::Registry::open(&data))),
                 notices: crate::overlay::Overlay::spawn(),
+                crosshair: Arc::new(crate::crosshair_overlay::CrosshairRuntime::default()),
                 data_dir: data.clone(),
+                tour_origin,
             });
             {
                 // Before the installer replaces the app: stop playtime, finalize
@@ -1403,22 +1579,34 @@ pub fn run() {
                 updates.set_before_exit(move || {
                     let _ = shutdown(&state);
                 });
-                crate::update_flow::spawn_loop(
-                    app.handle().clone(),
-                    updates,
-                    state_notices(app.handle()),
-                );
+                if !crate::native_alpha_enabled() {
+                    crate::update_flow::spawn_loop(
+                        app.handle().clone(),
+                        updates,
+                        state_notices(app.handle()),
+                    );
+                }
             }
             // Make the sign-in entry match the setting: the installed app points
             // it at itself (or removes it when off); development builds never
             // register and clean up an entry an older dev run left behind.
-            if let Ok(action) = winutil::sync_autostart(settings.launch_at_startup) {
+            if let Ok(action) = if crate::native_alpha_enabled() {
+                Ok(winutil::AutostartAction::Leave)
+            } else {
+                winutil::sync_autostart(settings.launch_at_startup)
+            } {
                 if action != winutil::AutostartAction::Leave {
                     eprintln!("Start with Windows: {action:?}");
                 }
             }
             // Sign-in launches start in the tray; everything else shows the window.
             if let Some(w) = app.get_webview_window("main") {
+                if crate::native_alpha_enabled()
+                    && std::env::var_os("REPLAYX_ALPHA_SYNTHETIC").is_some_and(|v| v == "1")
+                {
+                    let _ =
+                        w.set_title("REPLAYX Native Alpha ? GENERATED TEST (no device capture)");
+                }
                 if std::env::args().any(|a| a == "--background") {
                     set_page_visible(&w, false);
                 } else {
@@ -1432,6 +1620,12 @@ pub fn run() {
             app.state::<AppState>()
                 .engine
                 .update(|i| i.status.hotkey_error = hotkeys);
+            {
+                let state = app.state::<AppState>();
+                state
+                    .crosshair
+                    .sync(&state.engine.settings().crosshair, false);
+            }
             let show = MenuItem::with_id(app, "show", "Open REPLAYX", true, None::<&str>)?;
             let replay =
                 CheckMenuItem::with_id(app, "replay", "Instant Replay", true, false, None::<&str>)?;
@@ -1643,7 +1837,25 @@ pub fn run() {
                         );
                         // Remember the game's executable (its icon is the
                         // tile art) when the game in front changes.
+                        // In-game only: follow the game in front (cheap; the
+                        // window hears only about real changes).
+                        let shown = state.crosshair.sync(&settings.crosshair, game.is_some());
+                        if let (true, Some(g)) = (shown, game) {
+                            // Exclusive full screen hides every window,
+                            // the crosshair too: tell the page why.
+                            state
+                                .crosshair
+                                .note_exclusive(g, crate::games::exclusive_fullscreen());
+                            if game == last_game.as_deref() {
+                                // The same game, still in front: it may have
+                                // put itself on top since (full screen, a new
+                                // window).
+                                state.crosshair.overlay.raise_if_covered();
+                            }
+                        }
                         if game != last_game.as_deref() {
+                            // A new window in front may have come up on top.
+                            state.crosshair.overlay.raise();
                             if let (Some(g), Some((_, path, _))) =
                                 (game, game.and(crate::games::foreground_process()))
                             {
@@ -1807,7 +2019,11 @@ pub fn run() {
             retry_hotkeys,
             voice_presets,
             mark_tour_done,
+            tour_install_origin,
+            installed_release_notes,
             dismiss_notice,
+            set_crosshair,
+            crosshair_status,
             voice_sample_render,
             voice_sample_discard,
             open_sound_settings,
@@ -1866,7 +2082,7 @@ mod tests {
             "Control+Shift+F8",
         );
         // NVIDIA owns Alt+F10.
-        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous), |s| s != "Alt+F10");
+        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous[..]), |s| s != "Alt+F10");
         assert_eq!(
             effective[0], "Control+Shift+F10",
             "previous working shortcut kept"
@@ -1875,7 +2091,7 @@ mod tests {
         assert!(problems[0].contains("Alt+F10 is already used by another application. Change that application's hotkey or choose another shortcut."));
         assert!(problems[0].contains("stays on Ctrl+Shift+F10"));
         // Free: Alt+F10 is used.
-        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous), |_| true);
+        let (effective, problems) = plan_hotkeys(&wanted, Some(&previous[..]), |_| true);
         assert_eq!(effective[0], "Alt+F10");
         assert!(problems.is_empty());
         // Nothing to fall back to (first start): reported, nothing claimed.
@@ -1911,6 +2127,32 @@ mod tests {
         assert!(none.4.contains("not added") && !none.5);
     }
     #[test]
+    fn the_crosshair_shortcut_is_registered_only_while_the_crosshair_is_on() {
+        let mut s = Settings::default();
+        assert_eq!(hotkey_keys(&s).len(), HOTKEYS, "off: not registered");
+        s.crosshair.enabled = true;
+        let keys = hotkey_keys(&s);
+        assert_eq!(keys.len(), HOTKEYS + 1);
+        assert_eq!(keys[HOTKEYS], s.crosshair.hotkey);
+        // No shortcut chosen: nothing extra registered.
+        s.crosshair.hotkey.clear();
+        assert_eq!(hotkey_keys(&s).len(), HOTKEYS);
+        // The planner reports a refused crosshair shortcut by name and keeps
+        // the previous one.
+        s.crosshair.hotkey = "Control+Shift+F5".into();
+        let wanted = hotkey_keys(&s);
+        let mut previous = wanted.clone();
+        previous[HOTKEYS] = crate::crosshair::DEFAULT_HOTKEY.into();
+        let (effective, problems) =
+            plan_hotkeys(&wanted, Some(&previous), |k| k != "Control+Shift+F5");
+        assert_eq!(effective[HOTKEYS], crate::crosshair::DEFAULT_HOTKEY);
+        assert!(problems[0].starts_with("Show/hide crosshair:"));
+        let mut back = s.clone();
+        set_hotkey_keys(&mut back, effective);
+        assert_eq!(back.crosshair.hotkey, crate::crosshair::DEFAULT_HOTKEY);
+        assert_eq!(back.replay_hotkey, s.replay_hotkey);
+    }
+    #[test]
     fn recommended_shortcuts_parse_and_are_distinct() {
         let s = Settings::default();
         let keys = [
@@ -1919,6 +2161,7 @@ mod tests {
             s.mute_hotkey,
             s.pause_hotkey,
             s.window_hotkey,
+            s.crosshair.hotkey,
         ];
         let parsed: Vec<_> = keys
             .iter()

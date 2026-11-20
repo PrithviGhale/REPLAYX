@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::{
     collections::VecDeque,
     io::Write,
-    net::TcpListener,
+    net::{Shutdown, TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc, Arc, Mutex,
@@ -53,6 +53,8 @@ pub const OUTPUT_CHANNEL_CHUNKS: usize = 1000;
 
 #[derive(Default)]
 pub struct Meter {
+    /// Exact QPC origin of PCM frame zero, for experimental native muxing.
+    pub timeline_origin_hns: AtomicU64,
     pub peak: AtomicU32,
     pub packets: AtomicU64,
     pub gaps: AtomicU64,
@@ -399,10 +401,14 @@ pub struct AudioFeed {
     threads: Vec<thread::JoinHandle<()>>,
     pub started: Instant,
     pub microphone: bool,
+    interrupt: Vec<TcpStream>,
 }
 impl Drop for AudioFeed {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        for socket in &self.interrupt {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
@@ -777,6 +783,14 @@ pub fn warm_up() {
     })();
 }
 pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
+    spawn_clocked(source, None)
+}
+/// Native uses the video frame-zero clock directly; the default FFmpeg path is unchanged.
+pub fn spawn_native_clocked(source: AudioSource, origin: Arc<AtomicU64>) -> Result<AudioFeed> {
+    spawn_clocked(source, Some(origin))
+}
+fn spawn_clocked(source: AudioSource, shared_origin: Option<Arc<AtomicU64>>) -> Result<AudioFeed> {
+    let native_clocked = shared_origin.is_some();
     let name = source.name.clone();
     let microphone = source.kind == "microphone";
     let created = Instant::now();
@@ -905,7 +919,26 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
                 };
                 thread::sleep(Duration::from_millis(5));
             }
-            let mut timeline = Timeline::new(qpc_hns());
+            let now = qpc_hns();
+            let origin = shared_origin
+                .as_ref()
+                .map(|clock| clock.load(Ordering::Acquire))
+                .unwrap_or(now);
+            if origin == 0 || origin > now || now - origin > 50_000_000 {
+                bail!("Native audio/video startup clock was not ready within five seconds")
+            }
+            mt.timeline_origin_hns.store(origin, Ordering::Release);
+            let mut timeline = Timeline::new(origin);
+            if shared_origin.is_some() {
+                // Devices start after video initialization. Emit the elapsed prefix as
+                // silence on the SAME clock before accepting timestamped real packets.
+                while let Some(chunk) = timeline.pull(now) {
+                    mt.queued_chunks.fetch_add(1, Ordering::Relaxed);
+                    tx.try_send(chunk).map_err(|_| {
+                        anyhow::anyhow!("Native audio startup queue exceeded its bound")
+                    })?;
+                }
+            }
             // Voice Enhancer for microphones (see crate::voice): runs here, on
             // each paced 10 ms chunk, never on the video path.
             let mut voice = (source.kind == "microphone"
@@ -1080,7 +1113,11 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
             socket.set_nonblocking(false)?;
             // Backstop only: FFmpeg may pause reading while it initialises GPU
             // devices. Real stalls are reported by the engine's 3s write check.
-            socket.set_write_timeout(Some(Duration::from_secs(10)))?;
+            socket.set_write_timeout(Some(Duration::from_secs(if native_clocked {
+                2
+            } else {
+                10
+            })))?;
             socket.set_nodelay(true)?;
             connected.store(true, Ordering::Relaxed);
             let mut last_gain: Option<f32> = None;
@@ -1126,6 +1163,7 @@ pub fn spawn(source: AudioSource) -> Result<AudioFeed> {
         threads: vec![capture, writer],
         started: created,
         microphone,
+        interrupt: Vec::new(),
     })
 }
 
@@ -1519,5 +1557,176 @@ mod tests {
         let packet = vec![0.25f32; CHUNK * 2];
         let failed = (0..40).any(|_| timeline.push(&packet, None).is_err());
         assert!(failed);
+    }
+}
+
+/// Starts the unchanged producer, pins its frame-zero QPC origin, and exposes a
+/// bounded relay so the muxer can align every source before connecting.
+pub fn spawn_native(source: AudioSource) -> Result<AudioFeed> {
+    use std::io::Read;
+    let mut feed = spawn(source)?;
+    let mut input = TcpStream::connect(
+        feed.url
+            .strip_prefix("tcp://")
+            .context("Invalid audio endpoint")?,
+    )?;
+    input.set_read_timeout(Some(Duration::from_millis(200)))?;
+    feed.interrupt.push(input.try_clone()?);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while feed.meter.timeline_origin_hns.load(Ordering::Acquire) == 0 {
+        if Instant::now() >= deadline {
+            bail!("Audio frame-zero clock did not start")
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    feed.url = format!("tcp://{}", listener.local_addr()?);
+    let stop = feed.stop.clone();
+    let meter = feed.meter.clone();
+    feed.threads.push(thread::spawn(move || {
+        let result = (|| -> Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let mut output = loop {
+                if stop.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(e.into()),
+                }
+                if Instant::now() >= deadline {
+                    bail!("Native audio muxer did not connect")
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            output.set_write_timeout(Some(Duration::from_secs(1)))?;
+            output.set_nodelay(true)?;
+            let mut bytes = [0u8; 16384];
+            while !stop.load(Ordering::Relaxed) {
+                match input.read(&mut bytes) {
+                    Ok(0) => bail!("Audio producer closed unexpectedly"),
+                    Ok(n) => output.write_all(&bytes[..n])?,
+                    Err(e)
+                        if [std::io::ErrorKind::TimedOut, std::io::ErrorKind::WouldBlock]
+                            .contains(&e.kind()) => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            if !stop.load(Ordering::Relaxed) {
+                *meter.error.lock().unwrap() = Some(format!("Audio relay stopped: {e:#}"));
+            }
+        }
+    }));
+    Ok(feed)
+}
+
+#[cfg(test)]
+pub(crate) fn native_pcm_fixture(frequency: f32, clock: Arc<AtomicU64>) -> Result<AudioFeed> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("tcp://{}", listener.local_addr()?);
+    let meter = Arc::new(Meter::default());
+    let stop = Arc::new(AtomicBool::new(false));
+    let mt = meter.clone();
+    let st = stop.clone();
+    let started = Instant::now();
+    let producer = thread::spawn(move || {
+        let result = (|| -> Result<()> {
+            let mut socket = loop {
+                if st.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                match listener.accept() {
+                    Ok((s, _)) => break s,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(e.into()),
+                }
+                thread::sleep(Duration::from_millis(5));
+            };
+            socket.set_nonblocking(false)?;
+            socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+            let origin = clock.load(Ordering::Acquire);
+            if origin == 0 {
+                bail!("PCM fixture did not receive the native video clock")
+            }
+            mt.timeline_origin_hns.store(origin, Ordering::Release);
+            let mut frame = 0usize;
+            while !st.load(Ordering::Relaxed) {
+                if qpc_hns().saturating_sub(origin) as f64 * 48000. / 10_000_000.
+                    < (frame + 480) as f64
+                {
+                    thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                let mut bytes = Vec::with_capacity(3840);
+                for n in frame..frame + 480 {
+                    let value = if (24000..28800).contains(&(n % 48000)) {
+                        (n as f32 * frequency * 2. * std::f32::consts::PI / 48000.).sin() * 0.1
+                    } else {
+                        0.
+                    };
+                    bytes.extend_from_slice(&value.to_le_bytes());
+                    bytes.extend_from_slice(&value.to_le_bytes());
+                }
+                socket.write_all(&bytes)?;
+                frame += 480;
+                mt.packets.fetch_add(1, Ordering::Relaxed);
+                mt.written_bytes.fetch_add(3840, Ordering::Relaxed);
+                mt.last_write_ms
+                    .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                mt.last_packet_ms
+                    .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if !st.load(Ordering::Relaxed) {
+                *mt.error.lock().unwrap() = Some(format!("PCM fixture: {error:#}"));
+            }
+        }
+    });
+    Ok(AudioFeed {
+        url,
+        meter,
+        stop,
+        threads: vec![producer],
+        started,
+        microphone: false,
+        interrupt: Vec::new(),
+    })
+}
+
+#[cfg(test)]
+mod native_clock_tests {
+    use super::*;
+    #[test]
+    fn delayed_device_start_keeps_its_place_on_the_video_clock() {
+        let origin = 10_000_000;
+        let mut timeline = Timeline::new(origin);
+        let mut pcm = Vec::new();
+        while let Some(chunk) = timeline.pull(origin + 3_000_000) {
+            pcm.extend(chunk);
+        }
+        timeline
+            .push(&vec![0.5; 480 * 2], Some(origin + 3_000_000))
+            .unwrap();
+        while let Some(chunk) = timeline.pull(origin + 5_000_000) {
+            pcm.extend(chunk);
+        }
+        let first = pcm
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .position(|f| f[0].abs() > 0.01)
+            .unwrap();
+        assert!(
+            (first as i64 - 14_400).abs() <= 16,
+            "device audio moved from its QPC slot: {first}"
+        );
     }
 }

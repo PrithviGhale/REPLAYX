@@ -28,4 +28,4 @@ In `scripts/bench/`, for example `python -I scripts/bench/motion-check.py CLIP`.
 | `measure-capture.ps1`, `bench-scaling.ps1`, `profile-run.py` | CPU/memory of a capture run; scaling-path comparison |
 | `audio-tone.py`, `audio-clicks.py`, `av-sync.py` | Objective audio checks: tone purity, click detection, A/V offset |
 
-The CLI (`replayx-cli`) drives the real engine without the UI, for example `capture-test`, `record-test`, `start-bench`, `save-bench`, `library-bench` and `detect`. Run it without arguments for the list.
+The CLI (`replayx-cli`) drives the real engine without the UI, for example `capture-test`, `record-test`, `start-bench`, `save-bench`, `library-bench`, `crosshair-bench`, `crosshair-capture-test` and `detect`. Run it without arguments for the list.

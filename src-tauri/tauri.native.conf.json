@@ -1,0 +1,30 @@
+{
+  "productName": "REPLAYX Native Alpha",
+  "identifier": "io.replayx.nativealpha",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "REPLAYX ? Native Engine V1 Alpha",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "backgroundColor": "#0b0c10",
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    }
+  },
+  "build": {
+    "beforeDevCommand": "npm run dev -- --port 1421",
+    "devUrl": "http://localhost:1421"
+  }
+}
