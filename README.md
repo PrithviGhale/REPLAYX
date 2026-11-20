@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.3.1-alpha.9/REPLAYX.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.3.1--alpha.9-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/PrithviGhale/REPLAYX/releases/download/v0.4.0/REPLAYX.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-v0.4.0-8b5cf6?style=for-the-badge&logo=windows&logoColor=white"></a>
   <br>
-  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.3.1-alpha.9">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
+  <sub><a href="https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.4.0">Release notes and checksums</a> · <a href="https://github.com/PrithviGhale/REPLAYX/releases">All releases</a></sub>
 </p>
 
 <p align="center">
-  <a href="https://github.com/PrithviGhale/REPLAYX/releases"><img alt="Latest version" src="https://img.shields.io/github/v/release/PrithviGhale/REPLAYX?include_prereleases&label=version&color=8b5cf6"></a>
+  <a href="https://github.com/PrithviGhale/REPLAYX/releases"><img alt="Latest version" src="https://img.shields.io/github/v/release/PrithviGhale/REPLAYX?label=version&color=8b5cf6"></a>
   <img alt="Windows 10 and 11, 64-bit" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4">
   <a href="https://github.com/PrithviGhale/REPLAYX/actions/workflows/check.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/PrithviGhale/REPLAYX/check.yml?branch=main&label=build"></a>
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-3ad29f"></a>
@@ -24,47 +24,29 @@
 <p align="center">
   <img src="docs/images/showcase-home.jpg" alt="REPLAYX home screen with Instant Replay on, in front of the Clips library" width="100%">
   <br>
-  <sub>The Alpha.9 interface, shown with sample data.</sub>
+  <sub>The earlier Alpha.9 interface with sample data.</sub>
 </p>
 
-## What?s coming in 0.4.0
+## New in 0.4.0
 
-- **Recording and Instant Replay** keep AAC on its own clock. Verified generated 1080p60 recordings and replay saves cover the mix and separate tracks.
-- **Recording recovery** clears the saving state after a failed Stop and keeps completed footage available under **Instant Replay → Recover**.
-- **Crosshair Studio** saves the latest edit when you leave the page. The click-through overlay works over compatible windowed and borderless games. Follow the game's overlay rules.
-- **Recording engine** is under Video. FFmpeg remains the default. Automatic uses FFmpeg's existing hardware probes. Native V2 remains experimental for compatible 1080p60 hardware H.264 setups and shows a reason when startup falls back.
-- **Windows setup** still installs per user. Setup clears retired diagnostic tools when upgrading. The signed stable installer is awaiting qualification.
+- **Redesigned workspaces** keep recording and Instant Replay controls available from Capture, Library, Studio and Settings.
+- **Guided setup and What's New** explain the controls and show features added since your previous version.
+- **Crosshair Studio** supports presets, customized overlays, and a visibility shortcut in compatible games.
+- **Recording and replay fixes** improve FFmpeg audio timing across segments and preserve completed footage when a recording fails to stop cleanly.
+- **Windows setup** upgrades per user and removes retired diagnostic tools while keeping settings and recordings.
+- **Native V2** is available as an experimental option on compatible hardware. FFmpeg is the default.
 
-See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) and [known limitations](docs/guide/KNOWN_LIMITATIONS.md). The download button above links to the previously published Alpha.9.
+See the [release notes and checksums](https://github.com/PrithviGhale/REPLAYX/releases/tag/v0.4.0) and [known limitations](docs/guide/KNOWN_LIMITATIONS.md).
+
 
 ## Why REPLAYX
 
-Everything in this list is in the current download (0.3.1-alpha.9):
-
-- **Never miss the moment.** Instant Replay keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> and the moment is a clip, usually within a second.
+- **Never miss the moment.** Instant Replay keeps the last 30 seconds to 30 minutes on disk. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> to save a clip without re-encoding.
 - **Hardware recording.** NVIDIA, Intel and AMD encoders; H.264, HEVC or AV1; 720p to 4K output.
 - **Clips sorted by game.** 140 games are recognised automatically, each with its own icon, in a library you can search, sort and export to MP4.
 - **Clean voice, separate tracks.** The Voice Enhancer removes background noise. Game, chat and microphone each get their own track.
 - **Playtime tracking** per game, by day, week or month.
 - **Private by design.** Everything stays on your PC: no account, no telemetry, no uploads.
-
-## New in 0.3.1-alpha.9
-
-Alpha.9 is an alpha prerelease. Times and sizes below were measured on one development laptop (Intel Core i9-13900H with Intel and NVIDIA graphics, Windows 11). Results vary with the PC, game and settings. Installed-app and additional hardware tests remain unfinished. See the release notes for details.
-
-- **Faster start.** With Windows Graphics Capture, Intel Quick Sync and system sound only, the first Instant Replay or Record after opening REPLAYX reached recording in about 1.2 s instead of about 3.3 s. Later starts took about 1.1 s.
-- **Smaller clips.** *Balanced* at 1080p60 targets an average of 15 Mb/s on every encoder. Re-encoding one 60-second Fortnite clip with REPLAYX's settings averaged 15.8 Mb/s on Intel Quick Sync and 15.2 Mb/s on NVIDIA NVENC. That's about 223–233 MB per 2 minutes as Windows shows sizes, similar to NVIDIA's own recorder, at a VMAF quality score of 92.7. Very detailed scenes can briefly use up to 23 Mb/s.
-- **Replay length slider** from 30 seconds to 30 minutes, showing how much space a saved replay takes.
-- **Errors you can fix in one click**, settings that are never lost, clear status messages you can close, a collapsible sidebar, and a lighter footprint in the tray.
-
-Details: [alpha.9 release notes](docs/release-notes/v0.3.1-alpha.9.md).
-
-<p align="center">
-  <img src="docs/images/showcase-replay.jpg" alt="Alpha.9 Instant Replay page: replay length slider with the size of a saved replay, and the disk budget" width="49%">
-  <img src="docs/images/showcase-library.jpg" alt="Alpha.9 Clips library with thumbnails, filters and sorting, in front of the Games page" width="49%">
-  <br>
-  <sub>The Alpha.9 interface, shown with sample data.</sub>
-</p>
 
 [See every feature →](docs/guide/FEATURES.md)
 
@@ -80,7 +62,7 @@ Requires Windows 10 or 11 (64-bit). A GPU with hardware encoding is recommended.
 
 1. **Turn it on before you play.** REPLAYX keeps a rolling buffer of your screen and sound on disk, in short pieces, dropping the oldest first.
 2. **Press save** right after something happens. REPLAYX joins the last moments into one clip without re-encoding and checks that it plays.
-3. **Find it in Clips**, filed under the game you were playing. Recording keeps going, so you can save again moments later.
+3. **Find it in the Library**, filed under the game you were playing. Recording keeps going, so you can save again moments later.
 
 Normal recordings run alongside and are saved the same way.
 
@@ -89,7 +71,7 @@ Normal recordings run alongside and are saved the same way.
 | | |
 | --- | --- |
 | **Capture** | Desktop Duplication (default) or Windows Graphics Capture (experimental, *Video → Capture method*); full display or a region |
-| **Encoders** | NVIDIA NVENC, Intel Quick Sync, AMD AMF, with a software fallback; *Auto* picks the most efficient one that works on your PC |
+| **Encoders** | NVIDIA NVENC, Intel Quick Sync, AMD AMF, with a software fallback; *Auto* tries hardware encoding based on the selected display and available GPU paths |
 | **Codecs** | H.264, HEVC, AV1 (where the GPU supports them) |
 | **Output** | 720p to 4K, 30 to 144 FPS; Native, Fit, Crop and Stretch (4:3 stretched games) |
 | **Audio** | Up to six sources: system sound, individual apps, microphone (with Voice Enhancer); one track each plus a full mix |
@@ -100,7 +82,7 @@ Normal recordings run alongside and are saved the same way.
 | :---: | :---: | :---: | :---: | :---: |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F8</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F11</kbd> |
 
-All of them work in games and can be changed in **Settings → Hotkeys**.
+These global shortcuts can be changed in **Settings → Hotkeys**.
 
 ## System requirements
 
@@ -146,6 +128,6 @@ More: [Known limitations](docs/guide/KNOWN_LIMITATIONS.md).
 ---
 
 > [!NOTE]
-> **REPLAYX is in alpha.** It works well on the PCs it has been tested on, but it hasn't been used on many yet. See the [known limitations](docs/guide/KNOWN_LIMITATIONS.md), and please report anything that goes wrong.
+> **Hardware compatibility varies.** FFmpeg is the default, and Native V2 is experimental. See the [known limitations](docs/guide/KNOWN_LIMITATIONS.md), and please report anything that goes wrong.
 
 REPLAYX is [MIT-licensed](LICENSE). It ships an LGPL build of FFmpeg, whose source is published with every release, and other open-source components listed in the [third-party notices](THIRD_PARTY_NOTICES.md).
