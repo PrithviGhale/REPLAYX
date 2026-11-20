@@ -22,9 +22,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/showcase-home.jpg" alt="REPLAYX home screen with Instant Replay on, in front of the Clips library" width="100%">
+  <img src="docs/images/showcase-home.jpg" alt="REPLAYX 0.4.0 Capture overview with Instant Replay on, in front of the Clips library" width="100%">
   <br>
-  <sub>The earlier Alpha.9 interface with sample data.</sub>
+  <sub>REPLAYX 0.4.0, shown with sample data.</sub>
 </p>
 
 ## New in 0.4.0
