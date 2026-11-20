@@ -191,18 +191,22 @@ impl Media {
                 dirs.push(p.to_path_buf());
             }
         }
-        // Use the reviewed lockfile, never an arbitrary old cache or PATH copy.
-        let lock: serde_json::Value = serde_json::from_str(
-            include_str!("../../tools/ffmpeg-lock.json").trim_start_matches('\u{feff}'),
-        )?;
-        let runtime = lock["runtime_dir"]
-            .as_str()
-            .context("Media lock is missing runtime_dir")?;
-        dirs.push(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../tools")
-                .join(runtime),
-        );
+        // An unpackaged developer or CLI build can fall back to the runtime
+        // pinned in the checkout. An installer uses its adjacent media.
+        #[cfg(not(feature = "bundled-native"))]
+        {
+            let lock: serde_json::Value = serde_json::from_str(
+                include_str!("../../tools/ffmpeg-lock.json").trim_start_matches('\u{feff}'),
+            )?;
+            let runtime = lock["runtime_dir"]
+                .as_str()
+                .context("Media lock is missing runtime_dir")?;
+            dirs.push(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../tools")
+                    .join(runtime),
+            );
+        }
         for d in dirs {
             if d.join("ffmpeg.exe").is_file() && d.join("ffprobe.exe").is_file() {
                 return Ok(Self {
